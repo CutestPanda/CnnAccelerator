@@ -51,6 +51,7 @@ module axis_reg_slice_core #(
     // 时钟和复位
     input wire clk,
     input wire rst_n,
+	input wire clken,
 
     // 从机
     input wire[payload_width-1:0] s_payload,
@@ -77,13 +78,13 @@ module axis_reg_slice_core #(
             reg fwd_valid;
             
             assign m_payload = fwd_payload;
-            assign m_valid = fwd_valid;
-            assign s_ready = (~m_valid) | m_ready;
+            assign m_valid = clken & fwd_valid;
+            assign s_ready = clken & ((~m_valid) | m_ready);
             
             // 前向payload
             always @(posedge clk)
             begin
-                if((~fwd_valid) | m_ready) 
+                if(clken & ((~fwd_valid) | m_ready))
                     fwd_payload <= # simulation_delay s_payload;
             end
             // 前向valid
@@ -91,7 +92,7 @@ module axis_reg_slice_core #(
             begin
                 if(~rst_n)
                     fwd_valid <= 1'b0;
-                else
+                else if(clken)
                 begin
                     if(s_valid)
                         fwd_valid <= # simulation_delay 1'b1;
@@ -106,13 +107,13 @@ module axis_reg_slice_core #(
             reg bwd_ready;
             
             assign m_payload = s_ready ? s_payload:bwd_payload;
-            assign m_valid = (~s_ready) | s_valid;
-            assign s_ready = bwd_ready;
+            assign m_valid = clken & ((~s_ready) | s_valid);
+            assign s_ready = clken & bwd_ready;
             
             // 后向payload
             always @(posedge clk)
             begin
-                if(s_ready)
+                if(clken & s_ready)
                     bwd_payload <= # simulation_delay s_payload;
             end
             // 后向ready
@@ -120,9 +121,9 @@ module axis_reg_slice_core #(
             begin
                 if(~rst_n)
                     bwd_ready <= 1'b1;
-                else if(m_ready)
+                else if(clken & m_ready)
                     bwd_ready <= # simulation_delay 1'b1;
-                else if(s_valid) // (~m_ready) & s_valid
+                else if(clken & s_valid) // (~m_ready) & s_valid
                     bwd_ready <= # simulation_delay 1'b0;
             end
         end
@@ -138,8 +139,8 @@ module axis_reg_slice_core #(
             reg bwd_ready;
             
             assign m_payload = fwd_payload;
-            assign m_valid = fwd_valid;
-            assign s_ready = bwd_ready;
+            assign m_valid = clken & fwd_valid;
+            assign s_ready = clken & bwd_ready;
             
             assign fwd_ready_to_s = (~fwd_valid) | m_ready; // 前向反馈给后向的ready
             assign bwd_payload_to_s = bwd_ready ? s_payload:bwd_payload; // 后向反馈给前向的payload
@@ -148,7 +149,7 @@ module axis_reg_slice_core #(
             // 前向payload
             always @(posedge clk)
             begin
-                if((~fwd_valid) | m_ready) 
+                if(clken & ((~fwd_valid) | m_ready)) 
                     fwd_payload <= # simulation_delay bwd_payload_to_s;
             end
             // 前向valid
@@ -156,7 +157,7 @@ module axis_reg_slice_core #(
             begin
                 if(~rst_n)
                     fwd_valid <= 1'b0;
-                else
+                else if(clken)
                 begin
                     if(bwd_valid_to_s)
                         fwd_valid <= # simulation_delay 1'b1;
@@ -168,7 +169,7 @@ module axis_reg_slice_core #(
             // 后向payload
             always @(posedge clk)
             begin
-                if(bwd_ready)
+                if(clken & bwd_ready)
                     bwd_payload <= # simulation_delay s_payload;
             end
             // 后向ready
@@ -176,9 +177,9 @@ module axis_reg_slice_core #(
             begin
                 if(~rst_n)
                     bwd_ready <= 1'b1;
-                else if(fwd_ready_to_s)
+                else if(clken & fwd_ready_to_s)
                     bwd_ready <= # simulation_delay 1'b1;
-                else if(s_valid) // (~fwd_ready_to_s) & s_valid
+                else if(clken & s_valid) // (~fwd_ready_to_s) & s_valid
                     bwd_ready <= # simulation_delay 1'b0;
             end
         end

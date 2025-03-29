@@ -47,11 +47,13 @@ module axis_reg_slice #(
     parameter forward_registered = "false", // 是否使能前向寄存器
     parameter back_registered = "false", // 是否使能后向寄存器
     parameter en_ready = "true", // 是否使用ready信号
+	parameter en_clk_en = "false", // 是否使用全局时钟使能信号
     parameter real simulation_delay = 1 // 仿真延时
 )(
     // 时钟和复位
     input wire clk,
     input wire rst_n,
+	input wire clken,
     
     // AXIS SLAVE(从机输入)
     input wire[data_width-1:0] s_axis_data,
@@ -81,6 +83,7 @@ module axis_reg_slice #(
             )axis_reg_slice_core_u(
                 .clk(clk),
                 .rst_n(rst_n),
+				.clken((en_clk_en == "false") | clken),
                 .s_payload({s_axis_data, s_axis_keep, s_axis_user, s_axis_last}),
                 .s_valid(s_axis_valid),
                 .s_ready(s_axis_ready),
@@ -103,7 +106,7 @@ module axis_reg_slice #(
             
             always @(posedge clk)
             begin
-                if(s_axis_valid)
+                if(s_axis_valid & ((en_clk_en == "false") | clken))
                 begin
                     m_axis_data_regs <= # simulation_delay s_axis_data;
                     m_axis_keep_regs <= # simulation_delay s_axis_keep;
@@ -116,7 +119,7 @@ module axis_reg_slice #(
             begin
                 if(~rst_n)
                     m_axis_valid_reg <= 1'b0;
-                else
+                else if((en_clk_en == "false") | clken)
                     m_axis_valid_reg <= # simulation_delay s_axis_valid;
             end
         end

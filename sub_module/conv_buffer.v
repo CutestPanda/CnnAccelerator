@@ -296,10 +296,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB0_FMBUF_REG_SLICE),
 		.back_registered(EN_ICB0_FMBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u0(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s0_reg_slice_axis_data),
 		.s_axis_keep(s0_reg_slice_axis_keep),
@@ -320,10 +322,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB0_FMBUF_REG_SLICE),
 		.back_registered(EN_ICB0_FMBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u1(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s1_reg_slice_axis_data),
 		.s_axis_user(s1_reg_slice_axis_user),
@@ -386,10 +390,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB1_FMBUF_REG_SLICE),
 		.back_registered(EN_ICB1_FMBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u2(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s2_reg_slice_axis_data),
 		.s_axis_keep(s2_reg_slice_axis_keep),
@@ -410,10 +416,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB1_FMBUF_REG_SLICE),
 		.back_registered(EN_ICB1_FMBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u3(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s3_reg_slice_axis_data),
 		.s_axis_user(s3_reg_slice_axis_user),
@@ -476,10 +484,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB0_KBUF_REG_SLICE),
 		.back_registered(EN_ICB0_KBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u4(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s4_reg_slice_axis_data),
 		.s_axis_keep(s4_reg_slice_axis_keep),
@@ -500,10 +510,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB0_KBUF_REG_SLICE),
 		.back_registered(EN_ICB0_KBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u5(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s5_reg_slice_axis_data),
 		.s_axis_user(s5_reg_slice_axis_user),
@@ -566,10 +578,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB1_KBUF_REG_SLICE),
 		.back_registered(EN_ICB1_KBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u6(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s6_reg_slice_axis_data),
 		.s_axis_keep(s6_reg_slice_axis_keep),
@@ -590,10 +604,12 @@ module conv_buffer #(
 		.forward_registered(EN_ICB1_KBUF_REG_SLICE),
 		.back_registered(EN_ICB1_KBUF_REG_SLICE),
 		.en_ready("true"),
+		.en_clk_en("true"),
 		.simulation_delay(SIM_DELAY)
 	)axis_reg_slice_u7(
 		.clk(aclk),
 		.rst_n(aresetn),
+		.clken(aclken),
 		
 		.s_axis_data(s7_reg_slice_axis_data),
 		.s_axis_user(s7_reg_slice_axis_user),
