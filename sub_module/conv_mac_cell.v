@@ -24,7 +24,7 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: 卷积乘加阵列
+本模块: 卷积乘加单元
 
 描述:
 ATOMIC_C个乘法器实现特征图数据和卷积核权重相乘
@@ -69,12 +69,12 @@ module conv_mac_cell #(
 	output wire mul_ce, // 计算使能
 	input wire[ATOMIC_C*32-1:0] mul_res, // 计算结果
 	
-	// 乘加阵列计算输入
+	// 乘加单元计算输入
 	input wire[ATOMIC_C*16-1:0] mac_in_ftm, // 特征图数据
 	input wire[ATOMIC_C*16-1:0] mac_in_wgt, // 卷积核权重
 	input wire mac_in_valid, // 输入有效指示
 	
-	// 乘加阵列结果输出
+	// 乘加单元结果输出
 	output wire[7:0] mac_out_exp, // 指数部分(仅当运算数据格式为FP16时有效)
 	output wire signed[39:0] mac_out_frac, // 尾数部分或定点数
 	output wire mac_out_valid
@@ -101,7 +101,7 @@ module conv_mac_cell #(
 		end
 	endgenerate
 	
-	/** 乘加阵列计算输入 **/
+	/** 乘加单元计算输入 **/
 	wire[15:0] mac_in_ftm_arr[0:ATOMIC_C-1]; // 特征图数据
 	wire[15:0] mac_in_wgt_arr[0:ATOMIC_C-1]; // 卷积核权重
 	
@@ -181,7 +181,7 @@ module conv_mac_cell #(
 	// 加法树输入
 	wire signed[31:0] add_tree_in_int16_arr[0:ATOMIC_C-1];
 	wire add_tree_in_int16_valid;
-	// 乘加阵列结果输出
+	// 乘加单元结果输出
 	wire signed[39:0] mac_out_frac_int16; // 定点数
 	wire mac_out_int16_valid;
 	
@@ -223,7 +223,7 @@ module conv_mac_cell #(
 	wire[ATOMIC_C*5-1:0] max_cmp_tree_in; // 比较输入
 	wire max_cmp_tree_in_valid; // 输入有效指示
 	wire signed[4:0] max_cmp_tree_out; // 比较输出
-	// 乘加阵列结果输出
+	// 乘加单元结果输出
 	wire[7:0] mac_out_exp_fp16; // 指数部分
 	wire signed[39:0] mac_out_frac_fp16; // 尾数部分
 	wire mac_out_fp16_valid;
@@ -498,9 +498,10 @@ module conv_mac_cell #(
 	
 	/** 乘法器复用 **/
 	assign mul_ce = 
-		(calfmt == CAL_FMT_FP16) ? 
-			mul_ce_fp16:
-			mul_ce_int16;
+		aclken & (
+			((calfmt == CAL_FMT_FP16) & mul_ce_fp16) | 
+			((calfmt == CAL_FMT_INT16) & mul_ce_int16)
+		);
 	
 	genvar mul_reuse_i;
 	generate
@@ -519,9 +520,10 @@ module conv_mac_cell #(
 	
 	/** 加法树复用 **/
 	assign add_tree_in_valid = 
-		(calfmt == CAL_FMT_FP16) ? 
-			add_tree_in_fp16_valid:
-			add_tree_in_int16_valid;
+		aclken & (
+			((calfmt == CAL_FMT_FP16) & add_tree_in_fp16_valid) | 
+			((calfmt == CAL_FMT_INT16) & add_tree_in_int16_valid)
+		);
 	
 	genvar add_tree_reuse_i;
 	generate
@@ -541,8 +543,9 @@ module conv_mac_cell #(
 			mac_out_frac_fp16:
 			mac_out_frac_int16;
 	assign mac_out_valid = 
-		(calfmt == CAL_FMT_FP16) ? 
-			mac_out_fp16_valid:
-			mac_out_int16_valid;
+		aclken & (
+			((calfmt == CAL_FMT_FP16) & mac_out_fp16_valid) | 
+			((calfmt == CAL_FMT_INT16) & mac_out_int16_valid)
+		);
 	
 endmodule
