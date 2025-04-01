@@ -492,11 +492,6 @@ module conv_mac_cell #(
 		end
 	endgenerate
 	
-	/*
-	wire[5:0] fp16_set[0:ATOMIC_C-1]; // MTSO右移位数
-	reg signed[28:0] fp16_signed_mtso[0:ATOMIC_C-1]; // 原始的有符号MTSO
-	*/
-	
 	genvar fp16_chn_acumm_i;
 	generate
 		for(fp16_chn_acumm_i = 0;fp16_chn_acumm_i < ATOMIC_C;fp16_chn_acumm_i = fp16_chn_acumm_i + 1)
