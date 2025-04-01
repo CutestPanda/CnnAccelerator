@@ -699,8 +699,11 @@ module conv_middle_res_accumulate #(
 	begin
 		if(aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d8)
 		begin
+			// 符号位
 			acmlt_out_data_fp16[31] <= # SIM_DELAY acmlt_frac_nml_s4[24];
+			// 阶码
 			acmlt_out_data_fp16[30:23] <= # SIM_DELAY acmlt_exp_nml_s4 + 9'sd127;
+			// 尾数位
 			acmlt_out_data_fp16[22:0] <= # SIM_DELAY 
 				acmlt_frac_nml_s4[24] ? 
 					((~acmlt_frac_nml_s4[22:0]) + 1'b1):
@@ -727,7 +730,9 @@ module conv_middle_res_accumulate #(
 			acmlt_out_data_fp16:
 			acmlt_out_data_int16;
 	assign acmlt_out_valid = 
-		((calfmt == CAL_FMT_FP16) & acmlt_out_valid_fp16) | 
-		((calfmt == CAL_FMT_INT16) & acmlt_out_valid_int16);
+		aclken & (
+			((calfmt == CAL_FMT_FP16) & acmlt_out_valid_fp16) | 
+			((calfmt == CAL_FMT_INT16) & acmlt_out_valid_int16)
+		);
 	
 endmodule
