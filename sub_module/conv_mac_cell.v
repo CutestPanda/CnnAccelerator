@@ -445,11 +445,57 @@ module conv_mac_cell #(
 			always @(posedge aclk)
 			begin
 				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d3)
-					fp16_shifted_mtso[fp16_shifted_mtso_i] <= # SIM_DELAY 
-						fp16_signed_mtso[fp16_shifted_mtso_i] >>> fp16_set[fp16_shifted_mtso_i];
+				begin
+					if(fp16_set[fp16_shifted_mtso_i] >= 6'd32)
+						fp16_shifted_mtso[fp16_shifted_mtso_i] <= # SIM_DELAY 29'd0;
+					else
+						fp16_shifted_mtso[fp16_shifted_mtso_i] <= # SIM_DELAY 
+							// 算术右移0位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd0) ? fp16_signed_mtso[fp16_shifted_mtso_i]:
+							// 算术右移4位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd4)  ? {
+																	       {4{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:4]
+																	   }:
+							// 算术右移8位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd8)  ? {
+																	       {8{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:8]
+																	   }:
+							// 算术右移12位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd12) ? {
+																	       {12{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:12]
+																	   }:
+							// 算术右移16位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd16) ? {
+																	       {16{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:16]
+																	   }:
+							// 算术右移20位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd20) ? {
+																	       {20{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:20]
+																	   }:
+							// 算术右移24位
+							(fp16_set[fp16_shifted_mtso_i] == 6'd24) ? {
+																	       {24{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:24]
+																	   }:
+							// 算术右移28位
+																	   {
+																	       {28{fp16_signed_mtso[fp16_shifted_mtso_i][28]}}, 
+																		   fp16_signed_mtso[fp16_shifted_mtso_i][28:28]
+																	   };
+				end
 			end
 		end
 	endgenerate
+	
+	/*
+	wire[5:0] fp16_set[0:ATOMIC_C-1]; // MTSO右移位数
+	reg signed[28:0] fp16_signed_mtso[0:ATOMIC_C-1]; // 原始的有符号MTSO
+	*/
 	
 	genvar fp16_chn_acumm_i;
 	generate
