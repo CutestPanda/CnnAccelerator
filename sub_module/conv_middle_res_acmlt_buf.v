@@ -237,6 +237,10 @@ module conv_middle_res_acmlt_buf #(
 	end
 	
 	/** 中间结果行缓存控制 **/
+	// 中间结果输入读后写相关性等待
+	reg[15:0] mid_res_upd_pipl_sts; // 中间结果更新流水线状态
+	reg[clogb2(RBUF_BANK_N-1):0] mid_res_upd_pipl_bid; // 正在执行更新流水线的存储器Bank号
+	reg[clogb2(RBUF_DEPTH-1):0] mid_res_upd_pipl_cid; // 正在执行更新流水线的列号
 	// 虚拟行缓存填充向量
 	reg[RBUF_BANK_N-1:0] mid_res_line_buf_filled;
 	// 虚拟行缓存写端口
@@ -256,7 +260,14 @@ module conv_middle_res_acmlt_buf #(
 	reg[clogb2(RBUF_BANK_N-1)+1:0] mid_res_line_buf_wptr_at_rd; // 写指针
 	reg[clogb2(RBUF_BANK_N-1)+1:0] mid_res_line_buf_rptr_at_rd; // 读指针
 	
-	assign s_axis_mid_res_ready = aclken & mid_res_line_buf_full_n;
+	assign s_axis_mid_res_ready = 
+		aclken & mid_res_line_buf_full_n & (~(
+			(~mid_res_upd_pipl_sts[0]) & 
+			// 仅在写第1列时作读后写相关性检查
+			(col_cnt_at_wr == 0) & 
+			(mid_res_upd_pipl_bid == mid_res_line_buf_wptr_at_wr[clogb2(RBUF_BANK_N-1):0]) & 
+			(mid_res_upd_pipl_cid <= 11)
+		));
 	
 	assign mid_res_sel_s0 = mid_res_line_buf_wptr_at_wr[clogb2(RBUF_BANK_N-1):0];
 	assign mid_res_first_item_s0 = s_axis_mid_res_user[1];
@@ -285,6 +296,40 @@ module conv_middle_res_acmlt_buf #(
 	assign mid_res_line_buf_ren_at_rd = 
 		aclken & fnl_res_valid_s0 & fnl_res_ready_s0 & fnl_res_last_s0;
 	assign mid_res_line_buf_empty_n = ~(mid_res_line_buf_wptr_at_rd == mid_res_line_buf_rptr_at_rd);
+	
+	// 中间结果更新流水线状态
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mid_res_upd_pipl_sts <= 16'h0001;
+		else if(aclken & (
+			(mid_res_upd_pipl_sts[0] & s_axis_mid_res_valid & s_axis_mid_res_ready) | 
+			(~mid_res_upd_pipl_sts[0])
+		))
+			mid_res_upd_pipl_sts <= # SIM_DELAY 
+				(s_axis_mid_res_valid & s_axis_mid_res_ready) ? 
+					16'h0002:
+					(
+						(
+							((calfmt == CAL_FMT_INT16) & mid_res_upd_pipl_sts[7]) | 
+							((calfmt == CAL_FMT_FP16) & mid_res_upd_pipl_sts[15])
+						) ? 
+							16'h0001:
+							{mid_res_upd_pipl_sts[14:0], mid_res_upd_pipl_sts[15]}
+					);
+	end
+	// 正在执行更新流水线的存储器Bank号
+	always @(posedge aclk)
+	begin
+		if(s_axis_mid_res_valid & s_axis_mid_res_ready)
+			mid_res_upd_pipl_bid <= # SIM_DELAY mid_res_line_buf_wptr_at_wr[clogb2(RBUF_BANK_N-1):0];
+	end
+	// 正在执行更新流水线的列号
+	always @(posedge aclk)
+	begin
+		if(s_axis_mid_res_valid & s_axis_mid_res_ready)
+			mid_res_upd_pipl_cid <= # SIM_DELAY col_cnt_at_wr;
+	end
 	
 	// 虚拟行缓存填充向量
 	genvar mid_res_line_buf_filled_i;
