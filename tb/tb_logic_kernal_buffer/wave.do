@@ -63,6 +63,8 @@ add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sw_rgn0_grpid_r
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sw_rgn1_grpid_r
 add wave -noupdate /tb_logic_kernal_buffer/dut/sw_rgn0_wen
 add wave -noupdate /tb_logic_kernal_buffer/dut/sw_rgn1_wen
+add wave -noupdate /tb_logic_kernal_buffer/dut/on_auto_rplc_sw_rgn0
+add wave -noupdate /tb_logic_kernal_buffer/dut/on_auto_rplc_sw_rgn1
 add wave -noupdate /tb_logic_kernal_buffer/dut/s_in_cgrp_axis_user_last_blk
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/s_in_cgrp_axis_user_actual_gid
 add wave -noupdate -radix binary /tb_logic_kernal_buffer/dut/in_cgrp_sfc_data_mask
@@ -82,6 +84,7 @@ add wave -noupdate /tb_logic_kernal_buffer/dut/wt_rsv_rgn_actual_gid_mismatch_r
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/s_rd_req_axis_data_sfc_to_rd
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/s_rd_req_axis_data_bid
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/s_rd_req_axis_data_actual_gid
+add wave -noupdate /tb_logic_kernal_buffer/dut/s_rd_req_axis_data_auto_rplc_sw_rgn
 add wave -noupdate /tb_logic_kernal_buffer/dut/find_wtblk_in_rsv_rgn
 add wave -noupdate /tb_logic_kernal_buffer/dut/find_wtblk_in_sw_rgn0
 add wave -noupdate /tb_logic_kernal_buffer/dut/find_wtblk_in_sw_rgn1
@@ -90,6 +93,8 @@ add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/wtblk_to_rd_n
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sfc_rd_cmd_dsptc_n
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sfc_rd_resp_acpt_n
 add wave -noupdate -radix binary /tb_logic_kernal_buffer/dut/rd_wtblk_sts
+add wave -noupdate /tb_logic_kernal_buffer/dut/auto_rplc_sw_rgn0
+add wave -noupdate /tb_logic_kernal_buffer/dut/auto_rplc_sw_rgn1
 TreeUpdate [SetDefaultTree]
 WaveRestoreCursors {{Cursor 1} {7050122 ps} 0}
 quietly wave cursor active 1

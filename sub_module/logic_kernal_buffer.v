@@ -27,7 +27,11 @@ SOFTWARE.
 本模块: (逻辑)卷积核缓存
 
 描述:
-请填写
+将物理卷积核缓存分为驻留区和交换区
+若卷积核缓存的通道组数 >= 实际通道组数, 则逻辑卷积核缓存全为驻留区, 否则设置2个交换区而其余为驻留区
+为驻留区设置一个起始的通道组号, 以支持通道组号偏移
+先将通道组存储在驻留区, 仅当驻留区满时才开始存储在交换区
+要释放一个交换区通道组, 需要给出置换指示信号
 
 注意：
 暂不支持INT8运算数据格式
@@ -89,7 +93,8 @@ module logic_kernal_buffer #(
 	// 权重块读请求(AXIS从机)
 	/*
 	{
-		保留(2bit), 
+		保留(1bit), 
+		是否需要自动置换交换区通道组(1bit), 
 		实际通道组号(10bit), 
 		权重块编号(7bit), 
 		待读取的表面个数 - 1(5bit)
@@ -189,6 +194,8 @@ module logic_kernal_buffer #(
 	reg[9:0] sw_rgn1_grpid_r; // 交换区通道组#1实际通道组号
 	wire sw_rgn0_wen; // 交换区通道组#0写使能
 	wire sw_rgn1_wen; // 交换区通道组#1写使能
+	wire on_auto_rplc_sw_rgn0; // 自动置换交换区通道组#0(指示)
+	wire on_auto_rplc_sw_rgn1; // 自动置换交换区通道组#1(指示)
 	
 	assign rsv_rgn_vld_grpn = rsv_rgn_vld_grpn_r;
 	assign sw_rgn0_vld = sw_rgn0_vld_r;
@@ -213,18 +220,18 @@ module logic_kernal_buffer #(
 	begin
 		if(~aresetn)
 			sw_rgn0_vld_r <= 1'b0;
-		else if(aclken & (rst_logic_kbuf | sw_rgn0_wen | sw_rgn0_rplc))
+		else if(aclken & (sw_rgn0_wen | rst_logic_kbuf | sw_rgn0_rplc | on_auto_rplc_sw_rgn0))
 			sw_rgn0_vld_r <= # SIM_DELAY 
-				sw_rgn0_wen | (~(rst_logic_kbuf | sw_rgn0_rplc));
+				sw_rgn0_wen | (~(rst_logic_kbuf | sw_rgn0_rplc | on_auto_rplc_sw_rgn0));
 	end
 	// 交换区通道组#1有效
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
 			sw_rgn1_vld_r <= 1'b0;
-		else if(aclken & (rst_logic_kbuf | sw_rgn1_wen | sw_rgn1_rplc))
+		else if(aclken & (sw_rgn1_wen | rst_logic_kbuf | sw_rgn1_rplc | on_auto_rplc_sw_rgn1))
 			sw_rgn1_vld_r <= # SIM_DELAY 
-				sw_rgn1_wen | (~(rst_logic_kbuf | sw_rgn1_rplc));
+				sw_rgn1_wen | (~(rst_logic_kbuf | sw_rgn1_rplc | on_auto_rplc_sw_rgn1));
 	end
 	
 	/** 写通道组 **/
@@ -414,6 +421,7 @@ module logic_kernal_buffer #(
 	wire[4:0] s_rd_req_axis_data_sfc_to_rd; // 待读取的表面个数 - 1
 	wire[6:0] s_rd_req_axis_data_bid; // 权重块编号
 	wire[9:0] s_rd_req_axis_data_actual_gid; // 实际通道组号
+	wire s_rd_req_axis_data_auto_rplc_sw_rgn; // 是否需要自动置换交换区通道组
 	wire find_wtblk_in_rsv_rgn; // 在驻留区找到权重块(标志)
 	wire find_wtblk_in_sw_rgn0; // 在交换区通道组#0找到权重块(标志)
 	wire find_wtblk_in_sw_rgn1; // 在交换区通道组#1找到权重块(标志)
@@ -422,6 +430,8 @@ module logic_kernal_buffer #(
 	reg[5:0] sfc_rd_cmd_dsptc_n; // 已派发的表面读命令个数
 	reg[5:0] sfc_rd_resp_acpt_n; // 已接受的表面读响应个数
 	reg[2:0] rd_wtblk_sts; // 读取权重块状态
+	reg auto_rplc_sw_rgn0; // 自动置换交换区通道组#0(标志)
+	reg auto_rplc_sw_rgn1; // 自动置换交换区通道组#1(标志)
 	
 	assign s_rd_req_axis_ready = (~rst_logic_kbuf) & aclken & (rd_wtblk_sts == RD_WGTBLK_STS_IDLE);
 	
@@ -456,7 +466,16 @@ module logic_kernal_buffer #(
 	assign m1_kbuf_rsp_ready = 
 		aclken & (rd_wtblk_sts == RD_WGTBLK_STS_TRANS) & (sfc_rd_resp_acpt_n <= {1'b0, wtblk_to_rd_n}) & m_out_wgtblk_axis_ready;
 	
-	assign {s_rd_req_axis_data_actual_gid, s_rd_req_axis_data_bid, s_rd_req_axis_data_sfc_to_rd} = s_rd_req_axis_data[21:0];
+	assign {on_auto_rplc_sw_rgn0, on_auto_rplc_sw_rgn1} = 
+		{auto_rplc_sw_rgn0, auto_rplc_sw_rgn1} & 
+		{2{m1_kbuf_rsp_valid & m1_kbuf_rsp_ready & (sfc_rd_resp_acpt_n == {1'b0, wtblk_to_rd_n})}};
+	
+	assign {
+		s_rd_req_axis_data_auto_rplc_sw_rgn, 
+		s_rd_req_axis_data_actual_gid, 
+		s_rd_req_axis_data_bid, 
+		s_rd_req_axis_data_sfc_to_rd
+	} = s_rd_req_axis_data[22:0];
 	
 	assign find_wtblk_in_rsv_rgn = 
 		(s_rd_req_axis_data_actual_gid >= rsv_rgn_grpsid) & 
@@ -536,6 +555,16 @@ module logic_kernal_buffer #(
 				default:
 					rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
 			endcase
+		end
+	end
+	
+	// 自动置换交换区通道组#0(标志), 自动置换交换区通道组#1(标志)
+	always @(posedge aclk)
+	begin
+		if(s_rd_req_axis_valid & s_rd_req_axis_ready)
+		begin
+			auto_rplc_sw_rgn0 <= # SIM_DELAY s_rd_req_axis_data_auto_rplc_sw_rgn & find_wtblk_in_sw_rgn0;
+			auto_rplc_sw_rgn1 <= # SIM_DELAY s_rd_req_axis_data_auto_rplc_sw_rgn & (~find_wtblk_in_sw_rgn0) & find_wtblk_in_sw_rgn1;
 		end
 	end
 	

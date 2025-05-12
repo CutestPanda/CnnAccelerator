@@ -74,6 +74,7 @@ class LogicKernalBufferCase0VSqc #(
 			data[0][4:0] == (4 - 1);
 			data[0][11:5] <= 1;
 			data[0][21:12] == 6;
+			data[0][22] == 1'b1;
 			last[0] == 1'b1;
 			wait_period_n[0] <= 3;
 		})
@@ -87,7 +88,8 @@ class LogicKernalBufferCase0VSqc #(
 			
 			data[0][4:0] == (8 - 1);
 			data[0][11:5] == 0;
-			data[0][21:12] == 5;
+			data[0][21:12] == 10;
+			data[0][22] == 1'b1;
 			last[0] == 1'b1;
 			wait_period_n[0] <= 3;
 		})
@@ -102,6 +104,7 @@ class LogicKernalBufferCase0VSqc #(
 			data[0][4:0] == (4 - 1);
 			(data[0][11:5] == 0) || (data[0][11:5] == 1);
 			data[0][21:12] == 0;
+			data[0][22] == 1'b1;
 			last[0] == 1'b1;
 			wait_period_n[0] <= 3;
 		})
