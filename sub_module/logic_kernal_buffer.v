@@ -35,6 +35,7 @@ SOFTWARE.
 
 注意：
 暂不支持INT8运算数据格式
+
 在输入通道组数据流中, 应当连续输入1个通道组的权重数据
 在发起权重块读请求前, 应当检查这个权重块是否已缓存, 否则会在输出权重块数据流中给出错误标志
 
@@ -106,7 +107,7 @@ module logic_kernal_buffer #(
 	// 输出权重块数据流(AXIS主机)
 	output wire[ATOMIC_C*2*8-1:0] m_out_wgtblk_axis_data,
 	output wire m_out_wgtblk_axis_user, // 标志权重块未找到
-	output wire m_out_wgtblk_axis_last, // 标志权重块的最后1个表面
+	output wire m_out_wgtblk_axis_last, // 标志本次读请求的最后1个表面
 	output wire m_out_wgtblk_axis_valid,
 	input wire m_out_wgtblk_axis_ready,
 	
@@ -486,7 +487,7 @@ module logic_kernal_buffer #(
 	// 待读取权重块的基地址, 待读取权重块的表面个数 - 1
 	always @(posedge aclk)
 	begin
-		if((~rst_logic_kbuf) & aclken & s_rd_req_axis_valid & s_rd_req_axis_ready)
+		if(aclken & (~rst_logic_kbuf) & s_rd_req_axis_valid & s_rd_req_axis_ready)
 		begin
 			rd_wtblk_baseaddr <= # SIM_DELAY 
 				(
@@ -504,11 +505,9 @@ module logic_kernal_buffer #(
 	// 已派发的表面读命令个数
 	always @(posedge aclk)
 	begin
-		if(rst_logic_kbuf)
-			sfc_rd_cmd_dsptc_n <= # SIM_DELAY 6'd0;
-		else if(aclken)
+		if(aclken)
 		begin
-			if((rd_wtblk_sts == RD_WGTBLK_STS_IDLE) & s_rd_req_axis_valid & s_rd_req_axis_ready)
+			if(rst_logic_kbuf | ((rd_wtblk_sts == RD_WGTBLK_STS_IDLE) & s_rd_req_axis_valid & s_rd_req_axis_ready))
 				sfc_rd_cmd_dsptc_n <= # SIM_DELAY 6'd0;
 			else if((rd_wtblk_sts == RD_WGTBLK_STS_TRANS) & m1_kbuf_cmd_valid & m1_kbuf_cmd_ready)
 				sfc_rd_cmd_dsptc_n <= # SIM_DELAY sfc_rd_cmd_dsptc_n + 6'd1;
@@ -517,11 +516,9 @@ module logic_kernal_buffer #(
 	// 已接受的表面读响应个数
 	always @(posedge aclk)
 	begin
-		if(rst_logic_kbuf)
-			sfc_rd_resp_acpt_n <= # SIM_DELAY 6'd0;
-		else if(aclken)
+		if(aclken)
 		begin
-			if((rd_wtblk_sts == RD_WGTBLK_STS_IDLE) & s_rd_req_axis_valid & s_rd_req_axis_ready)
+			if(rst_logic_kbuf | ((rd_wtblk_sts == RD_WGTBLK_STS_IDLE) & s_rd_req_axis_valid & s_rd_req_axis_ready))
 				sfc_rd_resp_acpt_n <= # SIM_DELAY 6'd0;
 			else if((rd_wtblk_sts == RD_WGTBLK_STS_TRANS) & m1_kbuf_rsp_valid & m1_kbuf_rsp_ready)
 				sfc_rd_resp_acpt_n <= # SIM_DELAY sfc_rd_resp_acpt_n + 6'd1;
@@ -529,32 +526,37 @@ module logic_kernal_buffer #(
 	end
 	
 	// 读取权重块状态
-	always @(posedge aclk)
+	always @(posedge aclk or negedge aresetn)
 	begin
-		if(rst_logic_kbuf)
-			rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
+		if(~aresetn)
+			rd_wtblk_sts <= RD_WGTBLK_STS_IDLE;
 		else if(aclken)
 		begin
-			case(rd_wtblk_sts)
-				RD_WGTBLK_STS_IDLE:
-				begin
-					if(s_rd_req_axis_valid & s_rd_req_axis_ready)
-						rd_wtblk_sts <= # SIM_DELAY 
-							(find_wtblk_in_rsv_rgn | find_wtblk_in_sw_rgn0 | find_wtblk_in_sw_rgn1) ? 
-								RD_WGTBLK_STS_TRANS:
-								RD_WGTBLK_STS_NOT_FOUND;
-				end
-				RD_WGTBLK_STS_NOT_FOUND:
-				begin
-					if(m_out_wgtblk_axis_valid & m_out_wgtblk_axis_ready)
+			if(rst_logic_kbuf)
+				rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
+			else
+			begin
+				case(rd_wtblk_sts)
+					RD_WGTBLK_STS_IDLE:
+					begin
+						if(s_rd_req_axis_valid & s_rd_req_axis_ready)
+							rd_wtblk_sts <= # SIM_DELAY 
+								(find_wtblk_in_rsv_rgn | find_wtblk_in_sw_rgn0 | find_wtblk_in_sw_rgn1) ? 
+									RD_WGTBLK_STS_TRANS:
+									RD_WGTBLK_STS_NOT_FOUND;
+					end
+					RD_WGTBLK_STS_NOT_FOUND:
+					begin
+						if(m_out_wgtblk_axis_valid & m_out_wgtblk_axis_ready)
+							rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
+					end
+					RD_WGTBLK_STS_TRANS:
+						if(m1_kbuf_rsp_valid & m1_kbuf_rsp_ready & (sfc_rd_resp_acpt_n == {1'b0, wtblk_to_rd_n}))
+							rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
+					default:
 						rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
-				end
-				RD_WGTBLK_STS_TRANS:
-					if(m1_kbuf_rsp_valid & m1_kbuf_rsp_ready & (sfc_rd_resp_acpt_n == {1'b0, wtblk_to_rd_n}))
-						rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
-				default:
-					rd_wtblk_sts <= # SIM_DELAY RD_WGTBLK_STS_IDLE;
-			endcase
+				endcase
+			end
 		end
 	end
 	
