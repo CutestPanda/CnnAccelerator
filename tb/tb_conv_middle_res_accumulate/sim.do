@@ -9,4 +9,3 @@ vlog -sv -dpiheader utils.h utils.c "tb_conv_middle_res_accumulate.sv" "../../co
 # 仿真
 vsim -voptargs=+acc -c tb_conv_middle_res_accumulate
 do wave.do
-run 1us

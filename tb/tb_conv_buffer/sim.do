@@ -9,4 +9,3 @@ vlog -sv "*.sv" "../../common/*.v" "../../generic/*.v" "../../sub_module/conv_bu
 # 仿真
 vsim -voptargs=+acc -c tb_conv_buffer
 do wave.do
-run 1us

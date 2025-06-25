@@ -9,4 +9,3 @@ vlog -sv -dpiheader utils.h utils.c "tb_conv_mac_cell.sv" "../../common/*.v" "..
 # 仿真
 vsim -voptargs=+acc -c tb_conv_mac_cell
 do wave.do
-run 1us
