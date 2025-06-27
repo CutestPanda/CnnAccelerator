@@ -71,6 +71,19 @@ module tb_div_u16_u3();
 			@(posedge clk iff rst_n);
 		end
 		
+		s_axis_data <= # simulation_delay {5'dx, 3'd2, 16'd63};
+		s_axis_valid <= # simulation_delay 1'b1;
+		
+		@(posedge clk iff rst_n);
+		
+		s_axis_data <= # simulation_delay {5'dx, 3'dx, 16'dx};
+		s_axis_valid <= # simulation_delay 1'b0;
+		
+		repeat(20)
+		begin
+			@(posedge clk iff rst_n);
+		end
+		
 		s_axis_data <= # simulation_delay {5'dx, 3'd1, 16'd79};
 		s_axis_valid <= # simulation_delay 1'b1;
 		

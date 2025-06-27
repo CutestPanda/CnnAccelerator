@@ -4,6 +4,7 @@
 
 描述:
 被除数 -> 16位无符号数, 除数 -> 3位无符号数
+对除数为1或2的情况作了特殊加速
 
 注意：
 除数只能是[1, 7]
@@ -56,7 +57,10 @@ module div_u16_u3 #(
 		if(aclken)
 		begin
 			if(s_axis_valid & s_axis_ready)
-				dividend <= # SIM_DELAY s_axis_data[15:0];
+				dividend <= # SIM_DELAY 
+					(s_axis_data[18:16] == 3'b001) ? 16'd0:
+					(s_axis_data[18:16] == 3'b010) ? {15'd0, s_axis_data[0]}:
+					                                 s_axis_data[15:0];
 			else if(cal_sts[1] & ({2'b00, dividend} >= cmp))
 				dividend <= # SIM_DELAY dividend - cmp[15:0];
 		end
@@ -88,7 +92,13 @@ module div_u16_u3 #(
 					)
 				)
 					quotient[qut_i] <= # SIM_DELAY 
-						(~(s_axis_valid & s_axis_ready)) & ({2'b00, dividend} >= cmp);
+						(s_axis_valid & s_axis_ready) ? 
+							(
+								(s_axis_data[18:16] == 3'b001) ? s_axis_data[qut_i]:
+								(s_axis_data[18:16] == 3'b010) ? ((qut_i != 15) & s_axis_data[qut_i+1]):
+								                                 1'b0
+							):
+							({2'b00, dividend} >= cmp);
 			end
 		end
 	endgenerate
@@ -117,7 +127,13 @@ module div_u16_u3 #(
 				(cal_sts[2] & m_axis_ready)
 			)
 		)
-			cal_sts <= # SIM_DELAY (cal_sts << 1) | (cal_sts >> 2);
+			cal_sts <= # SIM_DELAY 
+				(
+					cal_sts[0] & 
+					((s_axis_data[18:16] == 3'b001) | (s_axis_data[18:16] == 3'b010))
+				) ? 
+					3'b100:
+					((cal_sts << 1) | (cal_sts >> 2));
 	end
 	
 endmodule
