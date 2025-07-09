@@ -257,18 +257,18 @@ module tb_conv_mac_cell();
 		
 		.calfmt(CALFMT),
 		
-		.mul_op_a(mul_op_a),
-		.mul_op_b(mul_op_b),
-		.mul_ce(mul_ce),
-		.mul_res(mul_res),
-		
 		.mac_in_ftm(mac_in_ftm),
 		.mac_in_wgt(mac_in_wgt),
 		.mac_in_valid(mac_in_valid),
 		
 		.mac_out_exp(mac_out_exp),
 		.mac_out_frac(mac_out_frac),
-		.mac_out_valid(mac_out_valid)
+		.mac_out_valid(mac_out_valid),
+		
+		.mul_op_a(mul_op_a),
+		.mul_op_b(mul_op_b),
+		.mul_ce(mul_ce),
+		.mul_res(mul_res)
 	);
 	
 endmodule

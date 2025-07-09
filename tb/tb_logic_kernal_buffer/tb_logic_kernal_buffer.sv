@@ -16,11 +16,21 @@ module tb_logic_kernal_buffer();
 	
 	/** 常量 **/
 	// 每个通道组的权重块个数的类型编码
-	localparam KBUFGRPSZ_4 = 3'b000;
-	localparam KBUFGRPSZ_16 = 3'b001;
-	localparam KBUFGRPSZ_32 = 3'b010;
-	localparam KBUFGRPSZ_64 = 3'b011;
-	localparam KBUFGRPSZ_128 = 3'b100;
+	localparam KBUFGRPSZ_1 = 3'b000; // 1x1
+	localparam KBUFGRPSZ_9 = 3'b001; // 3x3
+	localparam KBUFGRPSZ_25 = 3'b010; // 5x5
+	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
+	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
+	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	// 每个权重块的表面个数的类型编码
+	localparam WGTBLK_SFC_N_1 = 3'b000; // 1个表面
+	localparam WGTBLK_SFC_N_2 = 3'b001; // 2个表面
+	localparam WGTBLK_SFC_N_4 = 3'b010; // 4个表面
+	localparam WGTBLK_SFC_N_8 = 3'b011; // 8个表面
+	localparam WGTBLK_SFC_N_16 = 3'b100; // 16个表面
+	localparam WGTBLK_SFC_N_32 = 3'b101; // 32个表面
+	localparam WGTBLK_SFC_N_64 = 3'b110; // 64个表面
+	localparam WGTBLK_SFC_N_128 = 3'b111; // 128个表面
 	
 	/** 配置参数 **/
 	// 待测模块配置
@@ -29,9 +39,10 @@ module tb_logic_kernal_buffer();
 	localparam integer CBUF_BANK_N = 4; // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	localparam integer CBUF_DEPTH_FOREACH_BANK = 512; // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	// 运行时参数
+	localparam bit grp_conv_buf_mode = 1'b0; // 是否处于组卷积缓存模式
+	localparam bit[2:0] kbufgrpsz = KBUFGRPSZ_25; // 每个通道组的权重块个数的类型
+	localparam bit[2:0] sfc_n_each_wgtblk = WGTBLK_SFC_N_16; // 每个权重块的表面个数的类型
 	localparam bit[7:0] kbufgrpn = 4 - 1; // 卷积核缓存的通道组数 - 1
-	localparam bit[2:0] kbufgrpsz = KBUFGRPSZ_16; // 每个通道组的权重块个数的类型
-	localparam bit[9:0] rsv_rgn_grpsid = 5; // 驻留区起始通道组号
 	localparam bit[9:0] cgrpn = 10 - 1; // 实际通道组数 - 1
 	// 时钟和复位配置
 	localparam real clk_p = 10.0; // 时钟周期
@@ -61,7 +72,7 @@ module tb_logic_kernal_buffer();
 	
 	/** 接口 **/
 	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(11)) m_in_cgrp_axis_if(.clk(clk), .rst_n(rst_n));
-	AXIS #(.out_drive_t(simulation_delay), .data_width(24), .user_width(0)) m_rd_req_axis_if(.clk(clk), .rst_n(rst_n));
+	AXIS #(.out_drive_t(simulation_delay), .data_width(32), .user_width(0)) m_rd_req_axis_if(.clk(clk), .rst_n(rst_n));
 	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(1)) s_out_wgtblk_axis_if(.clk(clk), .rst_n(rst_n));
 	
 	/** 主任务 **/
@@ -75,10 +86,10 @@ module tb_logic_kernal_buffer();
 			"uvm_test_top.env.agt1.mon", "axis_if", m_in_cgrp_axis_if.monitor);
 		
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(24), .user_width(0)).master)::set(null, 
+			.data_width(32), .user_width(0)).master)::set(null, 
 			"uvm_test_top.env.agt2.drv", "axis_if", m_rd_req_axis_if.master);
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(24), .user_width(0)).monitor)::set(null, 
+			.data_width(32), .user_width(0)).monitor)::set(null, 
 			"uvm_test_top.env.agt2.mon", "axis_if", m_rd_req_axis_if.monitor);
 		
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
@@ -105,7 +116,7 @@ module tb_logic_kernal_buffer();
 	wire s_in_cgrp_axis_valid;
 	wire s_in_cgrp_axis_ready;
 	// 权重块读请求(AXIS从机)
-	wire[23:0] s_rd_req_axis_data;
+	wire[31:0] s_rd_req_axis_data;
 	wire s_rd_req_axis_valid;
 	wire s_rd_req_axis_ready;
 	// 输出权重块数据流(AXIS主机)
@@ -204,19 +215,18 @@ module tb_logic_kernal_buffer();
 		.aresetn(rst_n),
 		.aclken(1'b1),
 		
-		.kbufgrpn(kbufgrpn),
+		.grp_conv_buf_mode(grp_conv_buf_mode),
 		.kbufgrpsz(kbufgrpsz),
+		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
+		.kbufgrpn(kbufgrpn),
 		
-		.rsv_rgn_grpsid(rsv_rgn_grpsid),
 		.cgrpn(cgrpn),
 		
 		.rst_logic_kbuf(rst_logic_kbuf),
-		.sw_rgn0_rplc(sw_rgn0_rplc),
-		.sw_rgn1_rplc(sw_rgn1_rplc),
+		.sw_rgn_rplc({sw_rgn1_rplc, sw_rgn0_rplc}),
 		
 		.rsv_rgn_vld_grpn(),
-		.sw_rgn0_vld(),
-		.sw_rgn1_vld(),
+		.sw_rgn_vld(),
 		.sw_rgn0_grpid(),
 		.sw_rgn1_grpid(),
 		.has_sw_rgn(),

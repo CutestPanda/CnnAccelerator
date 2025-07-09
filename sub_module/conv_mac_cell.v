@@ -53,6 +53,7 @@ ATOMIC_C输入加法器实现通道累加
 module conv_mac_cell #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
+	parameter integer INFO_ALONG_WIDTH = 2, // 随路数据的位宽
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -63,21 +64,23 @@ module conv_mac_cell #(
 	// 运行时参数
 	input wire[1:0] calfmt, // 运算数据格式
 	
-	// 外部有符号乘法器
-	output wire[ATOMIC_C*16-1:0] mul_op_a, // 操作数A
-	output wire[ATOMIC_C*16-1:0] mul_op_b, // 操作数B
-	output wire mul_ce, // 计算使能
-	input wire[ATOMIC_C*32-1:0] mul_res, // 计算结果
-	
 	// 乘加单元计算输入
 	input wire[ATOMIC_C*16-1:0] mac_in_ftm, // 特征图数据
 	input wire[ATOMIC_C*16-1:0] mac_in_wgt, // 卷积核权重
+	input wire[INFO_ALONG_WIDTH-1:0] mac_in_info_along, // 随路数据
 	input wire mac_in_valid, // 输入有效指示
 	
 	// 乘加单元结果输出
 	output wire[7:0] mac_out_exp, // 指数部分(仅当运算数据格式为FP16时有效)
 	output wire signed[39:0] mac_out_frac, // 尾数部分或定点数
-	output wire mac_out_valid
+	output wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along, // 随路数据
+	output wire mac_out_valid,
+	
+	// 外部有符号乘法器
+	output wire[ATOMIC_C*16-1:0] mul_op_a, // 操作数A
+	output wire[ATOMIC_C*16-1:0] mul_op_b, // 操作数B
+	output wire mul_ce, // 计算使能
+	input wire[ATOMIC_C*32-1:0] mul_res // 计算结果
 );
 	
 	/** 常量 **/
@@ -578,15 +581,59 @@ module conv_mac_cell #(
 	endgenerate
 	
 	/** 结果输出 **/
+	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along_fp16; // 计算FP16时的随路数据输出
+	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along_int16; // 计算INT16时的随路数据输出
+	
 	assign mac_out_exp = mac_out_exp_fp16;
 	assign mac_out_frac = 
 		(calfmt == CAL_FMT_FP16) ? 
 			mac_out_frac_fp16:
 			mac_out_frac_int16;
+	assign mac_out_info_along = 
+		(calfmt == CAL_FMT_FP16) ? 
+			mac_out_info_along_fp16:
+			mac_out_info_along_int16;
 	assign mac_out_valid = 
 		aclken & (
 			((calfmt == CAL_FMT_FP16) & mac_out_fp16_valid) | 
 			((calfmt == CAL_FMT_INT16) & mac_out_int16_valid)
 		);
+	
+	ram_based_shift_regs #(
+		.data_width(INFO_ALONG_WIDTH),
+		.delay_n(
+			(ATOMIC_C == 1)  ? 1:
+			(ATOMIC_C == 2)  ? 2:
+			(ATOMIC_C == 4)  ? 3:
+			(ATOMIC_C == 8)  ? 4:
+			(ATOMIC_C == 16) ? 5:
+							   6
+		),
+		.shift_type("ff"),
+		.en_output_register_init("false"),
+		.simulation_delay(SIM_DELAY)
+	)delay_for_info_along_int16_u(
+		.clk(aclk),
+		.resetn(aresetn),
+		
+		.shift_in(mac_in_info_along),
+		.ce(aclken),
+		.shift_out(mac_out_info_along_int16)
+	);
+	
+	ram_based_shift_regs #(
+		.data_width(INFO_ALONG_WIDTH),
+		.delay_n(3),
+		.shift_type("ff"),
+		.en_output_register_init("false"),
+		.simulation_delay(SIM_DELAY)
+	)delay_for_info_along_fp16_u(
+		.clk(aclk),
+		.resetn(aresetn),
+		
+		.shift_in(mac_out_info_along_int16),
+		.ce(aclken & (calfmt == CAL_FMT_FP16)),
+		.shift_out(mac_out_info_along_fp16)
+	);
 	
 endmodule

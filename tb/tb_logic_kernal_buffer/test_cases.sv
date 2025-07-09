@@ -8,12 +8,48 @@
 `include "envs.sv"
 `include "vsqr.sv"
 
+class RdReqSqc extends uvm_sequence;
+	
+	local AXISTrans #(.data_width(32), .user_width(0)) m_rd_req_axis_trans; // 权重块读请求AXIS事务
+	
+	// 请求参数
+	rand bit[5:0] sfc_to_rd; // 待读取的表面个数
+	rand bit[6:0] start_sid; // 起始表面编号
+	rand bit[6:0] bid; // 权重块编号
+	rand bit[9:0] actual_gid; // 实际通道组号
+	rand bit is_auto_rplc_sw_rgn; // 是否需要自动置换交换区通道组
+	
+	// 注册object
+	`uvm_object_utils(RdReqSqc)
+	
+	virtual task body();
+		`uvm_do_with(this.m_rd_req_axis_trans, {
+			data_n == 1;
+			
+			data.size() == 1;
+			last.size() == 1;
+			wait_period_n.size() == 1;
+			
+			data[0][4:0] == (sfc_to_rd - 1);
+			data[0][11:5] == start_sid;
+			data[0][18:12] == bid;
+			data[0][28:19] == actual_gid;
+			data[0][29] == is_auto_rplc_sw_rgn;
+			
+			last[0] == 1'b1;
+			wait_period_n[0] <= 3;
+		})
+	endtask
+	
+endclass
+
 class LogicKernalBufferCase0VSqc #(
 	integer ATOMIC_C = 4 // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 )extends uvm_sequence;
 	
+	local RdReqSqc rd_req_sqc;
+	
 	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(11)) m_in_cgrp_axis_trans; // 输入通道组数据流AXIS事务
-	local AXISTrans #(.data_width(24), .user_width(0)) m_rd_req_axis_trans; // 权重块读请求AXIS事务
 	
 	// 注册object
 	`uvm_object_param_utils(LogicKernalBufferCase0VSqc #(.ATOMIC_C(ATOMIC_C)))
@@ -49,8 +85,8 @@ class LogicKernalBufferCase0VSqc #(
 					}
 					
 					foreach(user[k]){
-						user[k][10:1] == (5 + i);
-						user[k][0] == is_last_wtblk;
+						user[k][10:1] == i; // 实际通道组号
+						user[k][0] == is_last_wtblk; // 标志通道组的最后1个权重块
 					}
 					
 					foreach(last[k]){
@@ -64,53 +100,29 @@ class LogicKernalBufferCase0VSqc #(
 			end
 		end
 		
-		`uvm_do_on_with(this.m_rd_req_axis_trans, p_sequencer.m_rd_req_axis_sqr, {
-			data_n == 1;
-			
-			data.size() == 1;
-			last.size() == 1;
-			wait_period_n.size() == 1;
-			
-			data[0][4:0] == (4 - 1);
-			data[0][11:5] <= 1;
-			data[0][21:12] == 6;
-			data[0][22] == 1'b1;
-			last[0] == 1'b1;
-			wait_period_n[0] <= 3;
+		`uvm_do_on_with(this.rd_req_sqc, p_sequencer.m_rd_req_axis_sqr, {
+			sfc_to_rd == 4;
+			start_sid == 0;
+			bid == 1;
+			actual_gid == 1;
+			is_auto_rplc_sw_rgn == 1'b1;
 		})
 		
-		`uvm_do_on_with(this.m_rd_req_axis_trans, p_sequencer.m_rd_req_axis_sqr, {
-			data_n == 1;
-			
-			data.size() == 1;
-			last.size() == 1;
-			wait_period_n.size() == 1;
-			
-			data[0][4:0] == (8 - 1);
-			data[0][11:5] == 0;
-			data[0][21:12] == 10;
-			data[0][22] == 1'b1;
-			last[0] == 1'b1;
-			wait_period_n[0] <= 3;
+		`uvm_do_on_with(this.rd_req_sqc, p_sequencer.m_rd_req_axis_sqr, {
+			sfc_to_rd == 8;
+			start_sid == 0;
+			bid == 3;
+			actual_gid == 4;
+			is_auto_rplc_sw_rgn == 1'b1;
 		})
 		
-		`uvm_do_on_with(this.m_rd_req_axis_trans, p_sequencer.m_rd_req_axis_sqr, {
-			data_n == 1;
-			
-			data.size() == 1;
-			last.size() == 1;
-			wait_period_n.size() == 1;
-			
-			data[0][4:0] == (4 - 1);
-			(data[0][11:5] == 0) || (data[0][11:5] == 1);
-			data[0][21:12] == 0;
-			data[0][22] == 1'b1;
-			last[0] == 1'b1;
-			wait_period_n[0] <= 3;
+		`uvm_do_on_with(this.rd_req_sqc, p_sequencer.m_rd_req_axis_sqr, {
+			sfc_to_rd == 4;
+			start_sid == 0;
+			bid == 1;
+			actual_gid == 2;
+			is_auto_rplc_sw_rgn == 1'b1;
 		})
-		
-		// 继续运行10us
-		# (10 ** 4);
 		
 		if(this.starting_phase != null) 
 			this.starting_phase.drop_objection(this);
@@ -138,6 +150,12 @@ class LogicKernalBufferBaseTest #(
 		
 		this.env = LogicKernalBufferEnv #(.ATOMIC_C(ATOMIC_C), .simulation_delay(simulation_delay))::type_id::create("env", this); // 创建env
 	endfunction
+	
+	virtual task main_phase(uvm_phase phase);
+		super.main_phase(phase);
+		
+		phase.phase_done.set_drain_time(this, 10 * (10 ** 6));
+	endtask
 	
 endclass
 
