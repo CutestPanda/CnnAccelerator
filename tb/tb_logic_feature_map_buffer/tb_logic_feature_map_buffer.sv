@@ -14,25 +14,42 @@ import uvm_pkg::*;
 
 module tb_logic_feature_map_buffer();
 	
+	// 计算bit_depth的最高有效位编号(即位数-1)
+    function integer clogb2(input integer bit_depth);
+    begin
+		if(bit_depth == 0)
+			clogb2 = 0;
+		else
+		begin
+			for(clogb2 = -1;bit_depth > 0;clogb2 = clogb2 + 1)
+				bit_depth = bit_depth >> 1;
+		end
+    end
+    endfunction
+	
 	/** 常量 **/
 	// 每个表面行的表面个数类型编码
-	localparam FMBUFCOLN_32 = 3'b000;
-	localparam FMBUFCOLN_64 = 3'b001;
-	localparam FMBUFCOLN_128 = 3'b010;
-	localparam FMBUFCOLN_256 = 3'b011;
-	localparam FMBUFCOLN_512 = 3'b100;
-	localparam FMBUFCOLN_1024 = 3'b101;
-	localparam FMBUFCOLN_2048 = 3'b110;
-	localparam FMBUFCOLN_4096 = 3'b111;
+	localparam FMBUFCOLN_4 = 4'b0000;
+	localparam FMBUFCOLN_8 = 4'b0001;
+	localparam FMBUFCOLN_16 = 4'b0010;
+	localparam FMBUFCOLN_32 = 4'b0011;
+	localparam FMBUFCOLN_64 = 4'b0100;
+	localparam FMBUFCOLN_128 = 4'b0101;
+	localparam FMBUFCOLN_256 = 4'b0110;
+	localparam FMBUFCOLN_512 = 4'b0111;
+	localparam FMBUFCOLN_1024 = 4'b1000;
+	localparam FMBUFCOLN_2048 = 4'b1001;
+	localparam FMBUFCOLN_4096 = 4'b1010;
 	
 	/** 配置参数 **/
 	// 待测模块配置
 	localparam integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	localparam integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	localparam integer BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN); // 实际表面行号映射表的位宽(3~10)
 	localparam integer CBUF_BANK_N = 4; // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	localparam integer CBUF_DEPTH_FOREACH_BANK = 512; // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	// 运行时参数
-	localparam bit[2:0] fmbufcoln = FMBUFCOLN_128; // 每个表面行的表面个数类型
+	localparam bit[3:0] fmbufcoln = FMBUFCOLN_128; // 每个表面行的表面个数类型
 	localparam bit[9:0] fmbufrown = 10'd8 - 1; // 表面行数 - 1
 	// 时钟和复位配置
 	localparam real clk_p = 10.0; // 时钟周期
@@ -61,20 +78,21 @@ module tb_logic_feature_map_buffer();
 	end
 	
 	/** 接口 **/
-	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(10)) m_fin_axis_if(.clk(clk), .rst_n(rst_n));
+	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(22)) m_fin_axis_if(.clk(clk), .rst_n(rst_n));
 	AXIS #(.out_drive_t(simulation_delay), .data_width(40), .user_width(0)) m_rd_req_axis_if(.clk(clk), .rst_n(rst_n));
 	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(1)) s_fout_axis_if(.clk(clk), .rst_n(rst_n));
 	ReqAck #(.out_drive_t(simulation_delay), .req_payload_width(0), .resp_payload_width(0)) rst_buf_if(.clk(clk), .rst_n(rst_n));
 	ReqAck #(.out_drive_t(simulation_delay), .req_payload_width(10), .resp_payload_width(0)) sfc_row_rplc_if(.clk(clk), .rst_n(rst_n));
+	ReqAck #(.out_drive_t(simulation_delay), .req_payload_width(12), .resp_payload_width(0)) sfc_row_search_if(.clk(clk), .rst_n(rst_n));
 	
 	/** 主任务 **/
 	initial
 	begin
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(ATOMIC_C*2*8), .user_width(10)).master)::set(null, 
+			.data_width(ATOMIC_C*2*8), .user_width(22)).master)::set(null, 
 			"uvm_test_top.env.agt1.drv", "axis_if", m_fin_axis_if.master);
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(ATOMIC_C*2*8), .user_width(10)).monitor)::set(null, 
+			.data_width(ATOMIC_C*2*8), .user_width(22)).monitor)::set(null, 
 			"uvm_test_top.env.agt1.mon", "axis_if", m_fin_axis_if.monitor);
 		
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
@@ -105,6 +123,13 @@ module tb_logic_feature_map_buffer();
 			.req_payload_width(10), .resp_payload_width(0)).monitor)::set(null, 
 			"uvm_test_top.env.agt5.mon", "req_ack_if", sfc_row_rplc_if.monitor);
 		
+		uvm_config_db #(virtual ReqAck #(.out_drive_t(simulation_delay), 
+			.req_payload_width(12), .resp_payload_width(0)).master)::set(null, 
+			"uvm_test_top.env.agt6.drv", "req_ack_if", sfc_row_search_if.master);
+		uvm_config_db #(virtual ReqAck #(.out_drive_t(simulation_delay), 
+			.req_payload_width(12), .resp_payload_width(0)).monitor)::set(null, 
+			"uvm_test_top.env.agt6.mon", "req_ack_if", sfc_row_search_if.monitor);
+		
 		// 启动testcase
 		run_test("LogicFmapBufferCase0Test");
 	end
@@ -114,11 +139,13 @@ module tb_logic_feature_map_buffer();
 	wire rst_logic_fmbuf; // 重置逻辑特征图缓存
 	wire sfc_row_rplc_req; // 表面行置换请求
 	wire[9:0] sfc_rid_to_rplc; // 待置换的表面行编号
-	wire sfc_row_rplc_pending; // 表面行置换等待标志
-	wire init_fns; // 初始化完成(标志)
+	// 表面行检索
+	wire sfc_row_search_i_req; // 检索请求
+	wire[11:0] sfc_row_search_i_rid; // 待检索的表面行号
 	// 特征图表面行数据输入(AXIS从机)
 	wire[ATOMIC_C*2*8-1:0] s_fin_axis_data;
-	wire[9:0] s_fin_axis_user; // 表面行的缓存编号
+	wire[ATOMIC_C*2-1:0] s_fin_axis_keep;
+	wire[25:0] s_fin_axis_user; // {读请求项索引(4bit), 实际表面行号(12bit), 表面行的缓存编号(10bit)}
 	wire s_fin_axis_last; // 标志当前表面行的最后1个表面
 	wire s_fin_axis_valid;
 	wire s_fin_axis_ready;
@@ -167,13 +194,28 @@ module tb_logic_feature_map_buffer();
 	wire m1_fmbuf_rsp_err; // ignored
 	wire m1_fmbuf_rsp_valid;
 	wire m1_fmbuf_rsp_ready;
-	// 表面行有效标志MEM
-	wire sfc_row_vld_flag_mem_clk;
-	wire sfc_row_vld_flag_mem_en;
-	wire sfc_row_vld_flag_mem_wen;
-	wire[9:0] sfc_row_vld_flag_mem_addr;
-	wire sfc_row_vld_flag_mem_din;
-	wire sfc_row_vld_flag_mem_dout;
+	// 实际表面行号映射表MEM
+	// 说明: 实际表面行号 ----映射----> 缓存行号
+	wire actual_rid_mp_tb_mem_clk;
+	// [写端口]
+	wire actual_rid_mp_tb_mem_wen_a;
+	wire[11:0] actual_rid_mp_tb_mem_addr_a;
+	wire[BUFFER_RID_WIDTH-1:0] actual_rid_mp_tb_mem_din_a;
+	// [读端口]
+	wire actual_rid_mp_tb_mem_ren_b;
+	wire[11:0] actual_rid_mp_tb_mem_addr_b;
+	wire[BUFFER_RID_WIDTH-1:0] actual_rid_mp_tb_mem_dout_b;
+	// 缓存行号映射表MEM
+	// 说明: 缓存行号 ----映射----> 实际表面行号
+	wire buffer_rid_mp_tb_mem_clk;
+	// [写端口]
+	wire buffer_rid_mp_tb_mem_wen_a;
+	wire[BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_a;
+	wire[11:0] buffer_rid_mp_tb_mem_din_a;
+	// [读端口]
+	wire buffer_rid_mp_tb_mem_ren_b;
+	wire[BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_b;
+	wire[11:0] buffer_rid_mp_tb_mem_dout_b;
 	// 缓存MEM主接口
 	wire mem_clk_a;
 	wire[CBUF_BANK_N-1:0] mem_en_a;
@@ -189,8 +231,13 @@ module tb_logic_feature_map_buffer();
 	assign sfc_rid_to_rplc = sfc_row_rplc_if.req_payload;
 	assign sfc_row_rplc_if.ack = 1'b1;
 	
+	assign sfc_row_search_i_req = sfc_row_search_if.req;
+	assign sfc_row_search_i_rid = sfc_row_search_if.req_payload;
+	assign sfc_row_search_if.ack = 1'b1;
+	
 	assign s_fin_axis_data = m_fin_axis_if.data;
-	assign s_fin_axis_user = m_fin_axis_if.user;
+	assign s_fin_axis_keep = m_fin_axis_if.keep;
+	assign s_fin_axis_user = {4'b0000, m_fin_axis_if.user};
 	assign s_fin_axis_last = m_fin_axis_if.last;
 	assign s_fin_axis_valid = m_fin_axis_if.valid;
 	assign m_fin_axis_if.ready = s_fin_axis_ready;
@@ -208,6 +255,7 @@ module tb_logic_feature_map_buffer();
 	logic_feature_map_buffer #(
 		.MAX_FMBUF_ROWN(MAX_FMBUF_ROWN),
 		.ATOMIC_C(ATOMIC_C),
+		.BUFFER_RID_WIDTH(BUFFER_RID_WIDTH),
 		.SIM_DELAY(simulation_delay)
 	)dut(
 		.aclk(clk),
@@ -220,10 +268,17 @@ module tb_logic_feature_map_buffer();
 		.rst_logic_fmbuf(rst_logic_fmbuf),
 		.sfc_row_rplc_req(sfc_row_rplc_req),
 		.sfc_rid_to_rplc(sfc_rid_to_rplc),
-		.sfc_row_rplc_pending(sfc_row_rplc_pending),
-		.init_fns(init_fns),
+		.sfc_row_stored_rd_req_eid(),
+		.sfc_row_stored_vld(),
+		
+		.sfc_row_search_i_req(sfc_row_search_i_req),
+		.sfc_row_search_i_rid(sfc_row_search_i_rid),
+		.sfc_row_search_o_vld(),
+		.sfc_row_search_o_buf_id(),
+		.sfc_row_search_o_found(),
 		
 		.s_fin_axis_data(s_fin_axis_data),
+		.s_fin_axis_keep(s_fin_axis_keep),
 		.s_fin_axis_user(s_fin_axis_user),
 		.s_fin_axis_last(s_fin_axis_last),
 		.s_fin_axis_valid(s_fin_axis_valid),
@@ -261,15 +316,24 @@ module tb_logic_feature_map_buffer();
 		.m1_fmbuf_rsp_valid(m1_fmbuf_rsp_valid),
 		.m1_fmbuf_rsp_ready(m1_fmbuf_rsp_ready),
 		
-		.sfc_row_vld_flag_mem_clk(sfc_row_vld_flag_mem_clk),
-		.sfc_row_vld_flag_mem_en(sfc_row_vld_flag_mem_en),
-		.sfc_row_vld_flag_mem_wen(sfc_row_vld_flag_mem_wen),
-		.sfc_row_vld_flag_mem_addr(sfc_row_vld_flag_mem_addr),
-		.sfc_row_vld_flag_mem_din(sfc_row_vld_flag_mem_din),
-		.sfc_row_vld_flag_mem_dout(sfc_row_vld_flag_mem_dout)
+		.actual_rid_mp_tb_mem_clk(actual_rid_mp_tb_mem_clk),
+		.actual_rid_mp_tb_mem_wen_a(actual_rid_mp_tb_mem_wen_a),
+		.actual_rid_mp_tb_mem_addr_a(actual_rid_mp_tb_mem_addr_a),
+		.actual_rid_mp_tb_mem_din_a(actual_rid_mp_tb_mem_din_a),
+		.actual_rid_mp_tb_mem_ren_b(actual_rid_mp_tb_mem_ren_b),
+		.actual_rid_mp_tb_mem_addr_b(actual_rid_mp_tb_mem_addr_b),
+		.actual_rid_mp_tb_mem_dout_b(actual_rid_mp_tb_mem_dout_b),
+		
+		.buffer_rid_mp_tb_mem_clk(buffer_rid_mp_tb_mem_clk),
+		.buffer_rid_mp_tb_mem_wen_a(buffer_rid_mp_tb_mem_wen_a),
+		.buffer_rid_mp_tb_mem_addr_a(buffer_rid_mp_tb_mem_addr_a),
+		.buffer_rid_mp_tb_mem_din_a(buffer_rid_mp_tb_mem_din_a),
+		.buffer_rid_mp_tb_mem_ren_b(buffer_rid_mp_tb_mem_ren_b),
+		.buffer_rid_mp_tb_mem_addr_b(buffer_rid_mp_tb_mem_addr_b),
+		.buffer_rid_mp_tb_mem_dout_b(buffer_rid_mp_tb_mem_dout_b)
 	);
 	
-	conv_buffer #(
+	phy_conv_buffer #(
 		.ATOMIC_C(ATOMIC_C),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
@@ -280,7 +344,7 @@ module tb_logic_feature_map_buffer();
 		.EN_ICB0_KBUF_REG_SLICE("false"),
 		.EN_ICB1_KBUF_REG_SLICE("false"),
 		.SIM_DELAY(simulation_delay)
-	)conv_buffer_u(
+	)phy_conv_buffer_u(
 		.aclk(clk),
 		.aresetn(rst_n),
 		.aclken(1'b1),
@@ -339,24 +403,6 @@ module tb_logic_feature_map_buffer();
 		.mem_dout_a(mem_dout_a)
 	);
 	
-	bram_single_port #(
-		.style("LOW_LATENCY"),
-		.rw_mode("read_first"),
-		.mem_width(1),
-		.mem_depth(1024),
-		.INIT_FILE("no_init"),
-		.byte_write_mode("false"),
-		.simulation_delay(simulation_delay)
-	)sfc_row_vld_flag_mem_u(
-		.clk(sfc_row_vld_flag_mem_clk),
-		
-		.en(sfc_row_vld_flag_mem_en),
-		.wen(sfc_row_vld_flag_mem_wen),
-		.addr(sfc_row_vld_flag_mem_addr),
-		.din(sfc_row_vld_flag_mem_din),
-		.dout(sfc_row_vld_flag_mem_dout)
-	);
-	
 	genvar mem_i;
 	generate
 		for(mem_i = 0;mem_i < CBUF_BANK_N;mem_i = mem_i + 1)
@@ -380,5 +426,41 @@ module tb_logic_feature_map_buffer();
 			);
 		end
 	endgenerate
+	
+	bram_simple_dual_port #(
+		.style(""),
+		.mem_width(BUFFER_RID_WIDTH),
+		.mem_depth(4096),
+		.INIT_FILE(""),
+		.simulation_delay(simulation_delay)
+	)actual_rid_mp_tb_mem_u(
+		.clk(actual_rid_mp_tb_mem_clk),
+		
+		.wen_a(actual_rid_mp_tb_mem_wen_a),
+		.addr_a(actual_rid_mp_tb_mem_addr_a),
+		.din_a(actual_rid_mp_tb_mem_din_a),
+		
+		.ren_b(actual_rid_mp_tb_mem_ren_b),
+		.addr_b(actual_rid_mp_tb_mem_addr_b),
+		.dout_b(actual_rid_mp_tb_mem_dout_b)
+	);
+	
+	bram_simple_dual_port #(
+		.style(""),
+		.mem_width(12),
+		.mem_depth(MAX_FMBUF_ROWN),
+		.INIT_FILE(""),
+		.simulation_delay(simulation_delay)
+	)buffer_rid_mp_tb_mem_u(
+		.clk(buffer_rid_mp_tb_mem_clk),
+		
+		.wen_a(buffer_rid_mp_tb_mem_wen_a),
+		.addr_a(buffer_rid_mp_tb_mem_addr_a),
+		.din_a(buffer_rid_mp_tb_mem_din_a),
+		
+		.ren_b(buffer_rid_mp_tb_mem_ren_b),
+		.addr_b(buffer_rid_mp_tb_mem_addr_b),
+		.dout_b(buffer_rid_mp_tb_mem_dout_b)
+	);
 	
 endmodule

@@ -74,21 +74,35 @@ module dram_simple_dual_port #(
     (* ram_style="distributed" *) reg[mem_width-1:0] mem[mem_depth-1:0]; // 存储器
     
     generate
-    if (INIT_FILE != "")
-    begin
-        if(INIT_FILE != "no_init")
-        begin
-            initial
-                $readmemh(INIT_FILE, mem, 0, mem_depth - 1);
-        end
-    end
-    else
-    begin
-        integer ram_index;
-        initial
-        for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
-            mem[ram_index] = {mem_width{1'b0}};
-    end
+		if (INIT_FILE != "")
+		begin
+			if(INIT_FILE == "default")
+			begin
+				integer ram_index;
+				initial
+				for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
+					mem[ram_index] = ram_index;
+			end
+			else if(INIT_FILE == "random")
+			begin
+				integer ram_index;
+				initial
+				for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
+					mem[ram_index] = $random();
+			end
+			else if(INIT_FILE != "no_init")
+			begin
+				initial
+					$readmemh(INIT_FILE, mem, 0, mem_depth - 1);
+			end
+		end
+		else
+		begin
+			integer ram_index;
+			initial
+			for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
+				mem[ram_index] = {mem_width{1'b0}};
+		end
     endgenerate
     
     // 读写控制逻辑

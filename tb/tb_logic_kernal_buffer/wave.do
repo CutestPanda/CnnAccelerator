@@ -13,6 +13,8 @@ add wave -noupdate -radix binary /tb_logic_kernal_buffer/dut/sw_rgn_vld
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sw_rgn0_grpid
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/sw_rgn1_grpid
 add wave -noupdate /tb_logic_kernal_buffer/dut/has_sw_rgn
+add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/cgrp_stored_rd_req_eid
+add wave -noupdate /tb_logic_kernal_buffer/dut/cgrp_stored_vld
 add wave -noupdate -radix unsigned /tb_logic_kernal_buffer/dut/s_in_cgrp_axis_data
 add wave -noupdate -radix binary /tb_logic_kernal_buffer/dut/s_in_cgrp_axis_keep
 add wave -noupdate -radix binary /tb_logic_kernal_buffer/dut/s_in_cgrp_axis_user

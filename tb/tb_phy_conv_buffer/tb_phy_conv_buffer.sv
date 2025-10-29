@@ -12,7 +12,7 @@ import uvm_pkg::*;
 `include "monitors.sv"
 `include "transactions.sv"
 
-module tb_conv_buffer();
+module tb_phy_conv_buffer();
 	
 	/** 配置参数 **/
 	// 待测模块配置

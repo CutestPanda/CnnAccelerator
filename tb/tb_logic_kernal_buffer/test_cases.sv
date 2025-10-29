@@ -49,7 +49,7 @@ class LogicKernalBufferCase0VSqc #(
 	
 	local RdReqSqc rd_req_sqc;
 	
-	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(11)) m_in_cgrp_axis_trans; // 输入通道组数据流AXIS事务
+	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(15)) m_in_cgrp_axis_trans; // 输入通道组数据流AXIS事务
 	
 	// 注册object
 	`uvm_object_param_utils(LogicKernalBufferCase0VSqc #(.ATOMIC_C(ATOMIC_C)))
@@ -85,6 +85,7 @@ class LogicKernalBufferCase0VSqc #(
 					}
 					
 					foreach(user[k]){
+						user[k][14:11] == i; // 读请求项索引
 						user[k][10:1] == i; // 实际通道组号
 						user[k][0] == is_last_wtblk; // 标志通道组的最后1个权重块
 					}

@@ -1,4 +1,3 @@
-`timescale 1ns / 1ps
 /********************************************************************
 本模块: 简单双端口Bram
 
@@ -58,6 +57,13 @@ module bram_simple_dual_port #(
                 initial
                 for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
                     mem[ram_index] = ram_index;
+            end
+			else if(INIT_FILE == "random")
+            begin
+                integer ram_index;
+                initial
+                for (ram_index = 0; ram_index < mem_depth; ram_index = ram_index + 1)
+                    mem[ram_index] = $random();
             end
             else if(INIT_FILE != "no_init")
             begin

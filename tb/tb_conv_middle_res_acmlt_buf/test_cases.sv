@@ -50,6 +50,8 @@ class MAxisMidResCase0Sqc #(
 						user.size() == data_n;
 						last.size() == data_n;
 						data.size() == data_n;
+						// 考虑对keep的约束???
+						keep.size() == data_n;
 						
 						foreach(wait_period_n[i]){
 							wait_period_n[i] <= max_wait_period_n;
@@ -65,10 +67,13 @@ class MAxisMidResCase0Sqc #(
 						}
 						
 						foreach(data[i]){
-							data[i][48*0+47:48*0+40] inside {24, 26, 28};
+							data[i][48*0+47:48*0+40] inside {24, 26, 28, 0};
 							
-							(($signed(data[i][48*0+39:48*0]) >= 4194304) && ($signed(data[i][48*0+39:48*0]) <= 67108864)) || 
-							(($signed(data[i][48*0+39:48*0]) <= -4194304) && ($signed(data[i][48*0+39:48*0]) >= -67108864));
+							if(data[i][48*0+47:48*0+40] == 0)
+								data[i][48*0+39:48*0] == 0;
+							else
+								(($signed(data[i][48*0+39:48*0]) >= 4194304) && ($signed(data[i][48*0+39:48*0]) <= 67108864)) || 
+								(($signed(data[i][48*0+39:48*0]) <= -4194304) && ($signed(data[i][48*0+39:48*0]) >= -67108864));
 							
 							data[i][48*1+47:48*1+40] inside {24, 26, 28};
 							
@@ -103,6 +108,8 @@ class MAxisMidResCase0Sqc #(
 						user.size() == data_n;
 						last.size() == data_n;
 						data.size() == data_n;
+						// 考虑对keep的约束???
+						keep.size() == data_n;
 						
 						foreach(wait_period_n[i]){
 							wait_period_n[i] <= max_wait_period_n;

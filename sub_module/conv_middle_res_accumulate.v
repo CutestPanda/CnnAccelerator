@@ -48,6 +48,7 @@ SOFTWARE.
 
 module conv_middle_res_accumulate #(
 	parameter EN_SMALL_FP32 = "false", // 是否处理极小FP32
+	parameter integer INFO_ALONG_WIDTH = 2, // 随路数据的位宽
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -63,10 +64,12 @@ module conv_middle_res_accumulate #(
 	input wire signed[39:0] acmlt_in_frac, // 尾数部分或定点数
 	input wire[31:0] acmlt_in_org_mid_res, // 原中间结果
 	input wire acmlt_in_first_item, // 是否第1项(标志)
+	input wire[INFO_ALONG_WIDTH-1:0] acmlt_in_info_along, // 随路数据
 	input wire acmlt_in_valid, // 输入有效指示
 	
 	// 中间结果累加输出
 	output wire[31:0] acmlt_out_data, // 单精度浮点数或定点数
+	output wire[INFO_ALONG_WIDTH-1:0] acmlt_out_info_along, // 随路数据
 	output wire acmlt_out_valid // 输出有效指示
 );
 	
@@ -150,6 +153,26 @@ module conv_middle_res_accumulate #(
 						(ars_op2_d1 == 3'b110) ? {{6{ars_coarse_res[79]}}, ars_coarse_res[79:6]}: // 算术右移6位
 												 {{7{ars_coarse_res[79]}}, ars_coarse_res[79:7]} // 算术右移7位
 					);
+	end
+	
+	/** 随路数据延迟链 **/
+	reg[INFO_ALONG_WIDTH-1:0] acmlt_in_info_along_d[1:9]; // 延迟1~9clk的随路数据
+	
+	// 延迟1~9clk的随路数据
+	always @(posedge aclk)
+	begin
+		if(aclken)
+		begin
+			{
+				acmlt_in_info_along_d[9], acmlt_in_info_along_d[8], acmlt_in_info_along_d[7], 
+				acmlt_in_info_along_d[6], acmlt_in_info_along_d[5], acmlt_in_info_along_d[4], 
+				acmlt_in_info_along_d[3], acmlt_in_info_along_d[2], acmlt_in_info_along_d[1]
+			} <= # SIM_DELAY {
+				acmlt_in_info_along_d[8], acmlt_in_info_along_d[7], acmlt_in_info_along_d[6], 
+				acmlt_in_info_along_d[5], acmlt_in_info_along_d[4], acmlt_in_info_along_d[3], 
+				acmlt_in_info_along_d[2], acmlt_in_info_along_d[1], acmlt_in_info_along
+			};
+		end
 	end
 	
 	/** 输入有效指示延迟链 **/
@@ -729,6 +752,10 @@ module conv_middle_res_accumulate #(
 		(calfmt == CAL_FMT_FP16) ? 
 			acmlt_out_data_fp16:
 			acmlt_out_data_int16;
+	assign acmlt_out_info_along = 
+		(calfmt == CAL_FMT_FP16) ? 
+			acmlt_in_info_along_d[9]:
+			acmlt_in_info_along_d[2];
 	assign acmlt_out_valid = 
 		aclken & (
 			((calfmt == CAL_FMT_FP16) & acmlt_out_valid_fp16) | 

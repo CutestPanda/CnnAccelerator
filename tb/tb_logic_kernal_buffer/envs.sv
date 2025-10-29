@@ -19,7 +19,7 @@ class LogicKernalBufferEnv #(
 	
 	// 组件
 	local AXISMasterAgent #(.out_drive_t(simulation_delay), 
-		.data_width(ATOMIC_C*2*8), .user_width(11)) m_in_cgrp_axis_agt; // 输入通道组数据流AXIS主机代理
+		.data_width(ATOMIC_C*2*8), .user_width(15)) m_in_cgrp_axis_agt; // 输入通道组数据流AXIS主机代理
 	local AXISMasterAgent #(.out_drive_t(simulation_delay), 
 		.data_width(32), .user_width(0)) m_rd_req_axis_agt; // 权重块读请求AXIS主机代理
 	local AXISSlaveAgent #(.out_drive_t(simulation_delay), 
@@ -36,7 +36,7 @@ class LogicKernalBufferEnv #(
 		super.build_phase(phase);
 		
 		// 创建agent
-		this.m_in_cgrp_axis_agt = AXISMasterAgent #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(11))::
+		this.m_in_cgrp_axis_agt = AXISMasterAgent #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(15))::
 			type_id::create("agt1", this);
 		this.m_in_cgrp_axis_agt.is_active = UVM_ACTIVE;
 		this.m_rd_req_axis_agt = AXISMasterAgent #(.out_drive_t(simulation_delay), .data_width(32), .user_width(0))::

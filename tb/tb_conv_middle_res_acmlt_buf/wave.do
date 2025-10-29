@@ -6,10 +6,12 @@ add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/aclken
 add wave -noupdate -expand -group dut -radix binary /tb_conv_middle_res_acmlt_buf/dut/calfmt
 add wave -noupdate -expand -group dut -radix unsigned /tb_conv_middle_res_acmlt_buf/dut/ofmw_sub1
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/s_axis_mid_res_data
+add wave -noupdate -expand -group dut -radix binary /tb_conv_middle_res_acmlt_buf/dut/s_axis_mid_res_keep
 add wave -noupdate -expand -group dut -radix binary /tb_conv_middle_res_acmlt_buf/dut/s_axis_mid_res_user
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/s_axis_mid_res_valid
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/s_axis_mid_res_ready
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/m_axis_fnl_res_data
+add wave -noupdate -expand -group dut -radix binary /tb_conv_middle_res_acmlt_buf/dut/m_axis_fnl_res_keep
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/m_axis_fnl_res_last
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/m_axis_fnl_res_valid
 add wave -noupdate -expand -group dut /tb_conv_middle_res_acmlt_buf/dut/m_axis_fnl_res_ready

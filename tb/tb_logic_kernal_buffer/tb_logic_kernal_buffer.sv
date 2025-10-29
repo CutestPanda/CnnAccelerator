@@ -71,7 +71,7 @@ module tb_logic_kernal_buffer();
 	end
 	
 	/** 接口 **/
-	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(11)) m_in_cgrp_axis_if(.clk(clk), .rst_n(rst_n));
+	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(15)) m_in_cgrp_axis_if(.clk(clk), .rst_n(rst_n));
 	AXIS #(.out_drive_t(simulation_delay), .data_width(32), .user_width(0)) m_rd_req_axis_if(.clk(clk), .rst_n(rst_n));
 	AXIS #(.out_drive_t(simulation_delay), .data_width(ATOMIC_C*2*8), .user_width(1)) s_out_wgtblk_axis_if(.clk(clk), .rst_n(rst_n));
 	
@@ -79,10 +79,10 @@ module tb_logic_kernal_buffer();
 	initial
 	begin
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(ATOMIC_C*2*8), .user_width(11)).master)::set(null, 
+			.data_width(ATOMIC_C*2*8), .user_width(15)).master)::set(null, 
 			"uvm_test_top.env.agt1.drv", "axis_if", m_in_cgrp_axis_if.master);
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
-			.data_width(ATOMIC_C*2*8), .user_width(11)).monitor)::set(null, 
+			.data_width(ATOMIC_C*2*8), .user_width(15)).monitor)::set(null, 
 			"uvm_test_top.env.agt1.mon", "axis_if", m_in_cgrp_axis_if.monitor);
 		
 		uvm_config_db #(virtual AXIS #(.out_drive_t(simulation_delay), 
@@ -111,7 +111,7 @@ module tb_logic_kernal_buffer();
 	// 输入通道组数据流(AXIS从机)
 	wire[ATOMIC_C*2*8-1:0] s_in_cgrp_axis_data;
 	wire[ATOMIC_C*2-1:0] s_in_cgrp_axis_keep;
-	wire[10:0] s_in_cgrp_axis_user; // {实际通道组号(10bit), 标志通道组的最后1个权重块(1bit)}
+	wire[14:0] s_in_cgrp_axis_user; // {读请求项索引(4bit), 实际通道组号(10bit), 标志通道组的最后1个权重块(1bit)}
 	wire s_in_cgrp_axis_last; // 标志权重块的最后1个表面
 	wire s_in_cgrp_axis_valid;
 	wire s_in_cgrp_axis_ready;
@@ -230,6 +230,9 @@ module tb_logic_kernal_buffer();
 		.sw_rgn0_grpid(),
 		.sw_rgn1_grpid(),
 		.has_sw_rgn(),
+		.rsv_rgn_full(),
+		.cgrp_stored_rd_req_eid(),
+		.cgrp_stored_vld(),
 		
 		.s_in_cgrp_axis_data(s_in_cgrp_axis_data),
 		.s_in_cgrp_axis_keep(s_in_cgrp_axis_keep),
@@ -273,7 +276,7 @@ module tb_logic_kernal_buffer();
 		.wt_rsv_rgn_actual_gid_mismatch()
 	);
 	
-	conv_buffer #(
+	phy_conv_buffer #(
 		.ATOMIC_C(ATOMIC_C),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
@@ -284,7 +287,7 @@ module tb_logic_kernal_buffer();
 		.EN_ICB0_KBUF_REG_SLICE("false"),
 		.EN_ICB1_KBUF_REG_SLICE("false"),
 		.SIM_DELAY(simulation_delay)
-	)conv_buffer_u(
+	)phy_conv_buffer_u(
 		.aclk(clk),
 		.aresetn(rst_n),
 		.aclken(1'b1),

@@ -89,6 +89,7 @@ module tb_conv_middle_res_acmlt_buf();
 		{指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)}
 	*/
 	wire[ATOMIC_K*48-1:0] s_axis_mid_res_data;
+	wire[ATOMIC_K*6-1:0] s_axis_mid_res_keep;
 	wire[1:0] s_axis_mid_res_user; // {初始化中间结果(标志), 最后1组中间结果(标志)}
 	wire s_axis_mid_res_valid;
 	wire s_axis_mid_res_ready;
@@ -98,6 +99,7 @@ module tb_conv_middle_res_acmlt_buf();
 		{单精度浮点数或定点数(32位)}
 	*/
 	wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data;
+	wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep;
 	wire m_axis_fnl_res_last; // 本行最后1个最终结果(标志)
 	wire m_axis_fnl_res_valid;
 	wire m_axis_fnl_res_ready;
@@ -105,18 +107,20 @@ module tb_conv_middle_res_acmlt_buf();
 	wire mem_clk_a;
 	wire[RBUF_BANK_N-1:0] mem_wen_a;
 	wire[RBUF_BANK_N*16-1:0] mem_addr_a;
-	wire[RBUF_BANK_N*ATOMIC_K*4*8-1:0] mem_din_a;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_din_a;
 	wire mem_clk_b;
 	wire[RBUF_BANK_N-1:0] mem_ren_b;
 	wire[RBUF_BANK_N*16-1:0] mem_addr_b;
-	wire[RBUF_BANK_N*ATOMIC_K*4*8-1:0] mem_dout_b;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b;
 	
 	assign s_axis_mid_res_data = m_axis_mid_res_if.data;
+	assign s_axis_mid_res_keep = m_axis_mid_res_if.keep;
 	assign s_axis_mid_res_user = m_axis_mid_res_if.user;
 	assign s_axis_mid_res_valid = m_axis_mid_res_if.valid;
 	assign m_axis_mid_res_if.ready = s_axis_mid_res_ready;
 	
 	assign s_axis_fnl_res_if.data = m_axis_fnl_res_data;
+	assign s_axis_fnl_res_if.keep = m_axis_fnl_res_keep;
 	assign s_axis_fnl_res_if.last = m_axis_fnl_res_last;
 	assign s_axis_fnl_res_if.valid = m_axis_fnl_res_valid;
 	assign m_axis_fnl_res_ready = s_axis_fnl_res_if.ready;
@@ -127,7 +131,7 @@ module tb_conv_middle_res_acmlt_buf();
 		begin:mem_blk
 			bram_simple_dual_port #(
 				.style("LOW_LATENCY"),
-				.mem_width(ATOMIC_K*4*8),
+				.mem_width(ATOMIC_K*4*8+ATOMIC_K),
 				.mem_depth(RBUF_DEPTH),
 				.INIT_FILE("default"),
 				.simulation_delay(simulation_delay)
@@ -136,11 +140,11 @@ module tb_conv_middle_res_acmlt_buf();
 				
 				.wen_a(mem_wen_a[mem_i]),
 				.addr_a(mem_addr_a[mem_i*16+15:mem_i*16]),
-				.din_a(mem_din_a[(mem_i+1)*(ATOMIC_K*4*8)-1:mem_i*(ATOMIC_K*4*8)]),
+				.din_a(mem_din_a[(mem_i+1)*(ATOMIC_K*4*8+ATOMIC_K)-1:mem_i*(ATOMIC_K*4*8+ATOMIC_K)]),
 				
 				.ren_b(mem_ren_b[mem_i]),
 				.addr_b(mem_addr_b[mem_i*16+15:mem_i*16]),
-				.dout_b(mem_dout_b[(mem_i+1)*(ATOMIC_K*4*8)-1:mem_i*(ATOMIC_K*4*8)])
+				.dout_b(mem_dout_b[(mem_i+1)*(ATOMIC_K*4*8+ATOMIC_K)-1:mem_i*(ATOMIC_K*4*8+ATOMIC_K)])
 			);
 		end
 	endgenerate
@@ -160,11 +164,13 @@ module tb_conv_middle_res_acmlt_buf();
 		.ofmw_sub1(ofmw_sub1),
 		
 		.s_axis_mid_res_data(s_axis_mid_res_data),
+		.s_axis_mid_res_keep(s_axis_mid_res_keep),
 		.s_axis_mid_res_user(s_axis_mid_res_user),
 		.s_axis_mid_res_valid(s_axis_mid_res_valid),
 		.s_axis_mid_res_ready(s_axis_mid_res_ready),
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
+		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
 		.m_axis_fnl_res_last(m_axis_fnl_res_last),
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),

@@ -12,10 +12,11 @@ class LogicFmapBufferFinMAxisSqc #(
 	integer ATOMIC_C = 4 // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 )extends uvm_sequence;
 	
-	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(10)) trans; // 特征图表面行数据输入AXIS主机事务
+	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(22)) trans; // 特征图表面行数据输入AXIS主机事务
 	
 	rand int unsigned trans_data_n; // 写表面个数
 	rand bit[9:0] row_id; // 待写表面行编号
+	rand bit[11:0] actual_rid; // 实际表面行号
 	
 	// 注册object
 	`uvm_object_param_utils(LogicFmapBufferFinMAxisSqc #(.ATOMIC_C(ATOMIC_C)))
@@ -36,8 +37,12 @@ class LogicFmapBufferFinMAxisSqc #(
 				trans.data[i] == {(ATOMIC_C*2){i[7:0]}};
 			}
 			
+			foreach(trans.keep[i]){
+				trans.keep[i] == {(ATOMIC_C*2){1'b1}};
+			}
+			
 			foreach(trans.user[i]){
-				trans.user[i] == row_id;
+				trans.user[i] == {actual_rid, row_id};
 			}
 			
 			foreach(trans.last[i]){
@@ -89,10 +94,9 @@ class LogicFmapBufferCase0VSqc #(
 	integer ATOMIC_C = 4 // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 )extends uvm_sequence;
 	
-	local AXISTrans #(.data_width(ATOMIC_C*2*8), .user_width(10)) m_fin_axis_trans; // 特征图表面行数据输入AXIS主机事务
-	local AXISTrans #(.data_width(40), .user_width(0)) m_rd_req_axis_trans; // 特征图表面行读请求AXIS主机事务
 	local ReqAckTrans #(.req_payload_width(0), .resp_payload_width(0)) rst_buf_trans; // 重置缓存REQ-ACK主机事务
 	local ReqAckTrans #(.req_payload_width(10), .resp_payload_width(0)) sfc_row_rplc_trans; // 表面行置换REQ-ACK主机事务
+	local ReqAckTrans #(.req_payload_width(12), .resp_payload_width(0)) sfc_row_search_trans; // 表面行检索REQ-ACK主机事务
 	
 	local LogicFmapBufferFinMAxisSqc #(.ATOMIC_C(ATOMIC_C)) m_fin_axis_sqc;
 	local LogicFmapBufferRdReqMAxisSqc #(.ATOMIC_C(ATOMIC_C)) m_rd_req_axis_sqc;
@@ -116,6 +120,7 @@ class LogicFmapBufferCase0VSqc #(
 		`uvm_do_on_with(this.m_fin_axis_sqc, p_sequencer.m_fin_axis_sqr, {
 			m_fin_axis_sqc.trans_data_n inside {[5:20]};
 			m_fin_axis_sqc.row_id == 1;
+			m_fin_axis_sqc.actual_rid == 18;
 		})
 		
 		# (10 * 10);
@@ -130,9 +135,15 @@ class LogicFmapBufferCase0VSqc #(
 		# (10 * 40);
 		
 		fork
+			`uvm_do_on_with(this.sfc_row_search_trans, p_sequencer.sfc_row_search_sqr, {
+				sfc_row_search_trans.req_wait_period_n == 1;
+				sfc_row_search_trans.req_payload[11:0] == 18;
+			})
+			
 			`uvm_do_on_with(this.m_fin_axis_sqc, p_sequencer.m_fin_axis_sqr, {
 				m_fin_axis_sqc.trans_data_n inside {[5:20]};
 				m_fin_axis_sqc.row_id == 1;
+				m_fin_axis_sqc.actual_rid == 25;
 			})
 			
 			`uvm_do_on_with(this.sfc_row_rplc_trans, p_sequencer.sfc_row_rplc_sqr, {
@@ -141,17 +152,35 @@ class LogicFmapBufferCase0VSqc #(
 			})
 		join
 		
-		`uvm_do_on_with(this.m_rd_req_axis_sqc, p_sequencer.m_rd_req_axis_sqr, {
-			m_rd_req_axis_sqc.auto_rplc == 1'b0;
-			m_rd_req_axis_sqc.rid == 2;
-			m_rd_req_axis_sqc.start_sfc_id <= 8;
-			m_rd_req_axis_sqc.sfc_n == (20 - 1);
+		`uvm_do_on_with(this.sfc_row_search_trans, p_sequencer.sfc_row_search_sqr, {
+			sfc_row_search_trans.req_wait_period_n == 1;
+			sfc_row_search_trans.req_payload[11:0] == 18;
 		})
+		
+		`uvm_do_on_with(this.sfc_row_search_trans, p_sequencer.sfc_row_search_sqr, {
+			sfc_row_search_trans.req_wait_period_n == 1;
+			sfc_row_search_trans.req_payload[11:0] == 25;
+		})
+		
+		fork
+			`uvm_do_on_with(this.sfc_row_search_trans, p_sequencer.sfc_row_search_sqr, {
+				sfc_row_search_trans.req_wait_period_n == 2;
+				sfc_row_search_trans.req_payload[11:0] == 20;
+			})
+			
+			`uvm_do_on_with(this.m_rd_req_axis_sqc, p_sequencer.m_rd_req_axis_sqr, {
+				m_rd_req_axis_sqc.auto_rplc == 1'b0;
+				m_rd_req_axis_sqc.rid == 2;
+				m_rd_req_axis_sqc.start_sfc_id <= 8;
+				m_rd_req_axis_sqc.sfc_n == (20 - 1);
+			})
+		join
 		
 		fork
 			`uvm_do_on_with(this.m_fin_axis_sqc, p_sequencer.m_fin_axis_sqr, {
 				m_fin_axis_sqc.trans_data_n inside {[5:20]};
 				m_fin_axis_sqc.row_id == 5;
+				m_fin_axis_sqc.actual_rid == 6;
 			})
 			
 			`uvm_do_on_with(this.m_rd_req_axis_sqc, p_sequencer.m_rd_req_axis_sqr, {
@@ -167,11 +196,13 @@ class LogicFmapBufferCase0VSqc #(
 				`uvm_do_on_with(this.m_fin_axis_sqc, p_sequencer.m_fin_axis_sqr, {
 					m_fin_axis_sqc.trans_data_n inside {[5:20]};
 					m_fin_axis_sqc.row_id == 6;
+					m_fin_axis_sqc.actual_rid == 1;
 				})
 				
 				`uvm_do_on_with(this.m_fin_axis_sqc, p_sequencer.m_fin_axis_sqr, {
 					m_fin_axis_sqc.trans_data_n inside {[5:20]};
 					m_fin_axis_sqc.row_id == 5;
+					m_fin_axis_sqc.actual_rid == 97;
 				})
 			end
 			

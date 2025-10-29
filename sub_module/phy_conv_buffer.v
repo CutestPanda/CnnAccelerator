@@ -24,7 +24,7 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: 卷积私有缓存
+本模块: (物理)卷积私有缓存
 
 描述:
 对ICB从机添加了AXIS寄存器片后的卷积私有缓存
@@ -41,10 +41,10 @@ MEM MASTER
 ********************************************************************/
 
 
-module conv_buffer #(
+module phy_conv_buffer #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer CBUF_BANK_N = 32, // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
-	parameter integer CBUF_DEPTH_FOREACH_BANK = 512, // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer CBUF_BANK_N = 16, // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 4096, // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter EN_EXCEED_BD_PROTECT = "true", // 是否启用逻辑地址越界保护
 	parameter EN_HP_ICB = "true", // 是否启用高性能ICB从机
 	parameter EN_ICB0_FMBUF_REG_SLICE = "true", // 是否在特征图缓存0号ICB插入AXIS寄存器片
@@ -180,14 +180,14 @@ module conv_buffer #(
 	wire m1_kbuf_rsp_valid;
 	wire m1_kbuf_rsp_ready;
 	
-	conv_buffer_core #(
+	phy_conv_buffer_core #(
 		.ATOMIC_C(ATOMIC_C),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
 		.EN_EXCEED_BD_PROTECT(EN_EXCEED_BD_PROTECT),
 		.EN_HP_ICB(EN_HP_ICB),
 		.SIM_DELAY(SIM_DELAY)
-	)conv_buffer_core_u(
+	)phy_conv_buffer_core_u(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(aclken),

@@ -24,7 +24,7 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: 卷积私有缓存(核心)
+本模块: (物理)卷积私有缓存(核心)
 
 描述:
 使用CBUF_BANK_N个单口SRAM作为特征图和卷积核缓存
@@ -50,7 +50,7 @@ MEM MASTER
 ********************************************************************/
 
 
-module conv_buffer_core #(
+module phy_conv_buffer_core #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer CBUF_BANK_N = 32, // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 512, // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)

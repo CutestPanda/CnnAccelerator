@@ -22,7 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-`timescale 1ns / 1ps
+
 /********************************************************************
 本模块: (逻辑)卷积核缓存
 
@@ -94,11 +94,14 @@ module logic_kernal_buffer #(
 	output wire[9:0] sw_rgn1_grpid, // 交换区通道组#1实际通道组号
 	output wire has_sw_rgn, // 是否存在交换区
 	/*********** 说明: 以上仅当"不处于组卷积缓存模式"时有效 ***********/
+	output wire rsv_rgn_full, // 驻留区满标志
+	output wire[3:0] cgrp_stored_rd_req_eid, // 新存入通道组对应的读请求项索引
+	output wire cgrp_stored_vld, // 通道组存储完成
 	
 	// 输入通道组数据流(AXIS从机)
 	input wire[ATOMIC_C*2*8-1:0] s_in_cgrp_axis_data,
 	input wire[ATOMIC_C*2-1:0] s_in_cgrp_axis_keep,
-	input wire[10:0] s_in_cgrp_axis_user, // {实际通道组号(10bit), 标志通道组的最后1个权重块(1bit)}
+	input wire[14:0] s_in_cgrp_axis_user, // {读请求项索引(4bit), 实际通道组号(10bit), 标志通道组的最后1个权重块(1bit)}
 	input wire s_in_cgrp_axis_last, // 标志权重块的最后1个表面
 	input wire s_in_cgrp_axis_valid,
 	output wire s_in_cgrp_axis_ready,
@@ -296,8 +299,8 @@ module logic_kernal_buffer #(
 	/** 写通道组 **/
 	wire s_in_cgrp_axis_user_last_blk; // 标志通道组的最后1个权重块
 	wire[9:0] s_in_cgrp_axis_user_actual_gid; // 实际通道组号
+	wire[3:0] s_in_cgrp_axis_user_rd_req_eid; // 读请求项索引
 	wire[ATOMIC_C*2*8-1:0] in_cgrp_sfc_data_mask; // 输入通道组表面数据掩码
-	wire rsv_rgn_full; // 驻留区满标志
 	wire kbuf_full; // 卷积核缓存满标志
 	reg in_cgrp_passing; // 放行输入通道组(标志)
 	reg in_cgrp_store_to_rsv_rgn; // 将输入通道组存入驻留区(标志)
@@ -310,11 +313,22 @@ module logic_kernal_buffer #(
 	wire[15:0] onroad_kbuf_wt_sfc_n_nxt; // 下一滞外的待写表面个数(计数器)
 	reg submit_wt_cgrp_pending; // 提交待写通道组(等待标志)
 	reg[9:0] submit_wt_cgrp_actual_gid; // 待提交写通道组的实际组号
+	reg[3:0] submit_wt_cgrp_rd_req_eid; // 待提交写通道组的读请求项索引
 	reg wt_rsv_rgn_actual_gid_mismatch_r; // 写驻留区时实际通道组号不符合要求
 	
-	assign {rsv_rgn_wen, sw_rgn0_wen, sw_rgn1_wen} = 
-		{3{aclken & (~rst_logic_kbuf) & submit_wt_cgrp_pending & (~in_cgrp_passing) & (onroad_kbuf_wt_sfc_n_nxt == 16'd0)}} & 
-		{in_cgrp_store_to_rsv_rgn, in_cgrp_store_to_sw_rgn0, in_cgrp_store_to_sw_rgn1};
+	assign rsv_rgn_full = 
+		grp_conv_buf_mode ? 
+			// 断言: 处于组卷积缓存模式时, 卷积核缓存可存下整个核组
+			((rsv_rgn_vld_grpn_r - 9'd1) >= cgrpn[8:0]): // 驻留区有效通道组数 >= 实际通道组数
+			(
+				has_sw_rgn ? 
+					((rsv_rgn_vld_grpn_r + 9'd1) >= {1'b0, kbufgrpn}): // 驻留区有效通道组数 >= 可缓存的通道组数 - 2
+					(rsv_rgn_vld_grpn_r > {1'b0, kbufgrpn})            // 驻留区有效通道组数 >= 可缓存的通道组数
+			);
+	assign cgrp_stored_rd_req_eid = submit_wt_cgrp_rd_req_eid;
+	assign cgrp_stored_vld = 
+		aclken & (~rst_logic_kbuf) & 
+		submit_wt_cgrp_pending & (~in_cgrp_passing) & (onroad_kbuf_wt_sfc_n_nxt == 16'd0);
 	
 	// 握手条件: aclken & in_cgrp_passing & s_in_cgrp_axis_valid & m0_kbuf_cmd_ready
 	assign s_in_cgrp_axis_ready = aclken & in_cgrp_passing & m0_kbuf_cmd_ready;
@@ -332,7 +346,15 @@ module logic_kernal_buffer #(
 	
 	assign wt_rsv_rgn_actual_gid_mismatch = wt_rsv_rgn_actual_gid_mismatch_r;
 	
-	assign {s_in_cgrp_axis_user_actual_gid, s_in_cgrp_axis_user_last_blk} = s_in_cgrp_axis_user;
+	assign {rsv_rgn_wen, sw_rgn0_wen, sw_rgn1_wen} = 
+		{3{cgrp_stored_vld}} & 
+		{in_cgrp_store_to_rsv_rgn, in_cgrp_store_to_sw_rgn0, in_cgrp_store_to_sw_rgn1};
+	
+	assign {
+		s_in_cgrp_axis_user_rd_req_eid, 
+		s_in_cgrp_axis_user_actual_gid, 
+		s_in_cgrp_axis_user_last_blk
+	} = s_in_cgrp_axis_user;
 	
 	genvar in_cgrp_sfc_data_mask_i;
 	generate
@@ -344,15 +366,6 @@ module logic_kernal_buffer #(
 		end
 	endgenerate
 	
-	assign rsv_rgn_full = 
-		grp_conv_buf_mode ? 
-			// 断言: 处于组卷积缓存模式时, 卷积核缓存可存下整个核组
-			((rsv_rgn_vld_grpn_r - 9'd1) >= cgrpn[8:0]): // 驻留区有效通道组数 >= 实际通道组数
-			(
-				has_sw_rgn ? 
-					((rsv_rgn_vld_grpn_r + 9'd1) >= {1'b0, kbufgrpn}): // 驻留区有效通道组数 >= 可缓存的通道组数 - 2
-					((rsv_rgn_vld_grpn_r - 9'd1) >= {1'b0, kbufgrpn})  // 驻留区有效通道组数 >= 可缓存的通道组数
-			);
 	assign kbuf_full = 
 		rsv_rgn_full & 
 		(
@@ -470,21 +483,8 @@ module logic_kernal_buffer #(
 	begin
 		if(~aresetn)
 			onroad_kbuf_wt_sfc_n <= 16'd0;
-		else if(
-			aclken & 
-			(
-				rst_logic_kbuf | 
-				((m0_kbuf_cmd_valid & m0_kbuf_cmd_ready) ^ (m0_kbuf_rsp_valid & m0_kbuf_rsp_ready))
-			)
-		)
-			onroad_kbuf_wt_sfc_n <= # SIM_DELAY 
-				rst_logic_kbuf ? 
-					16'd0:
-					(
-						(m0_kbuf_rsp_valid & m0_kbuf_rsp_ready) ? 
-							(onroad_kbuf_wt_sfc_n - 16'd1):
-							(onroad_kbuf_wt_sfc_n + 16'd1)
-					);
+		else
+			onroad_kbuf_wt_sfc_n <= # SIM_DELAY onroad_kbuf_wt_sfc_n_nxt;
 	end
 	
 	// 提交待写通道组(等待标志)
@@ -501,11 +501,14 @@ module logic_kernal_buffer #(
 				);
 	end
 	
-	// 待提交写通道组的实际组号
+	// 待提交写通道组的实际组号, 待提交写通道组的读请求项索引
 	always @(posedge aclk)
 	begin
 		if(aclken & s_in_cgrp_axis_valid & s_in_cgrp_axis_ready & s_in_cgrp_axis_last & s_in_cgrp_axis_user_last_blk)
+		begin
 			submit_wt_cgrp_actual_gid <= # SIM_DELAY s_in_cgrp_axis_user_actual_gid;
+			submit_wt_cgrp_rd_req_eid <= # SIM_DELAY s_in_cgrp_axis_user_rd_req_eid;
+		end
 	end
 	
 	// 写驻留区时实际通道组号不符合要求
@@ -513,8 +516,12 @@ module logic_kernal_buffer #(
 	begin
 		if(~aresetn)
 			wt_rsv_rgn_actual_gid_mismatch_r <= 1'b0;
-		else if(aclken)
+		else if(
+			aclken & 
+			(rst_logic_kbuf | (~wt_rsv_rgn_actual_gid_mismatch_r))
+		)
 			wt_rsv_rgn_actual_gid_mismatch_r <= # SIM_DELAY 
+				(~rst_logic_kbuf) & 
 				(~grp_conv_buf_mode) & rsv_rgn_wen & (submit_wt_cgrp_actual_gid != {1'b0, rsv_rgn_vld_grpn_r});
 	end
 	
