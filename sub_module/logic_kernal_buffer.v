@@ -56,13 +56,12 @@ AXIS MASTER/SLAVE
 ICB MASTER
 
 作者: 陈家耀
-日期: 2025/07/09
+日期: 2025/11/03
 ********************************************************************/
 
 
 module logic_kernal_buffer #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -73,7 +72,6 @@ module logic_kernal_buffer #(
 	// 运行时参数
 	input wire grp_conv_buf_mode, // 是否处于组卷积缓存模式
 	input wire[2:0] kbufgrpsz, // 每个通道组的权重块个数的类型
-	// 说明: 仅当"处于组卷积缓存模式"时可用
 	input wire[2:0] sfc_n_each_wgtblk, // 每个权重块的表面个数的类型
 	// 说明: 仅当"不处于组卷积缓存模式"时可用
 	input wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
@@ -207,24 +205,9 @@ module logic_kernal_buffer #(
 	wire[31:0] sw_rgn1_baseaddr; // 交换区通道组#1基址
 	
 	assign kernal_blk_addr_stride = 
-		(
-			grp_conv_buf_mode ? 
-				(1 << sfc_n_each_wgtblk):
-				ATOMIC_K
-		) * ATOMIC_C * 2;
+		(1 << sfc_n_each_wgtblk) * ATOMIC_C * 2;
 	assign kernal_blk_addr_stride_lshn = 
-		(
-			grp_conv_buf_mode ? 
-				{2'b00, sfc_n_each_wgtblk}:
-				(
-					(ATOMIC_K == 1)  ? 5'd0:
-					(ATOMIC_K == 2)  ? 5'd1:
-					(ATOMIC_K == 4)  ? 5'd2:
-					(ATOMIC_K == 8)  ? 5'd3:
-					(ATOMIC_K == 16) ? 5'd4:
-					                   5'd5
-				)
-		) + (
+		{2'b00, sfc_n_each_wgtblk} + (
 			(ATOMIC_C == 1)  ? 5'd1:
 			(ATOMIC_C == 2)  ? 5'd2:
 			(ATOMIC_C == 4)  ? 5'd3:
@@ -232,7 +215,8 @@ module logic_kernal_buffer #(
 			(ATOMIC_C == 16) ? 5'd5:
 							   5'd6
 		);
-	assign kbufgrpn_sub1 = kbufgrpn - 8'd1;
+	assign kbufgrpn_sub1 = 
+		kbufgrpn - 8'd1;
 	assign wtblkn_in_cgrp = 
 		(kbufgrpsz == KBUFGRPSZ_1)  ?   7'd1:
 		(kbufgrpsz == KBUFGRPSZ_9)  ?   7'd9:
@@ -334,7 +318,7 @@ module logic_kernal_buffer #(
 	assign s_in_cgrp_axis_ready = aclken & in_cgrp_passing & m0_kbuf_cmd_ready;
 	
 	assign m0_kbuf_cmd_addr = 
-		(kbuf_to_wt_cgrp_baseaddr & (~(ATOMIC_K*ATOMIC_C*2-1))) + 
+		(kbuf_to_wt_cgrp_baseaddr & (~(ATOMIC_C*2-1))) + 
 		(kbuf_to_wt_cgrp_ofsaddr & (~(ATOMIC_C*2-1)));
 	assign m0_kbuf_cmd_read = 1'b0;
 	assign m0_kbuf_cmd_wdata = s_in_cgrp_axis_data & in_cgrp_sfc_data_mask;

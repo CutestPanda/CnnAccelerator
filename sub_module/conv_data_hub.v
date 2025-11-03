@@ -57,7 +57,6 @@ MEM MASTER
 module conv_data_hub #(
 	parameter integer STREAM_DATA_WIDTH = 32, // DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer CBUF_BANK_N = 16, // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 4096, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer FM_RD_REQ_PRE_ACPT_N = 4, // 可提前接受的特征图读请求个数(1 | 2 | 4 | 8 | 16)
@@ -1729,7 +1728,6 @@ module conv_data_hub #(
 	
 	logic_kernal_buffer #(
 		.ATOMIC_C(ATOMIC_C),
-		.ATOMIC_K(ATOMIC_K),
 		.SIM_DELAY(SIM_DELAY)
 	)logic_kernal_buffer_u(
 		.aclk(aclk),

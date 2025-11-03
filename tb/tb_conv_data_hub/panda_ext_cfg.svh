@@ -64,7 +64,6 @@ class ConvDataHubCfg extends tue_configuration;
 	
 	rand int unsigned stream_data_width; // DMA数据流的位宽
 	rand int unsigned atomic_c; // 通道并行数
-	rand int unsigned atomic_k; // 核并行数
 	
 	rand fmbuf_coln_t fmbufcoln; // 每个表面行区域可存储的表面个数
 	rand int unsigned fmbufrown; // 可缓存的表面行数
@@ -166,9 +165,8 @@ class ConvDataHubCfg extends tue_configuration;
 		stream_data_width inside {32, 64, 128, 256};
 	}
 	
-	constraint c_valid_atomic_x{
+	constraint c_valid_atomic_c{
 		atomic_c inside {1, 2, 4, 8, 16, 32};
-		atomic_k inside {1, 2, 4, 8, 16, 32};
 	}
 	
 	constraint c_valid_fmbufrown{
@@ -263,12 +261,7 @@ class ConvDataHubCfg extends tue_configuration;
 		
 		foreach(wgtblk_w_foreach_kernal_set[i]){
 			wgtblk_w_foreach_kernal_set[i] >= 1;
-			
-			if(grp_conv_buf_mode){
-				wgtblk_w_foreach_kernal_set[i] <= ConvDataHubCfg::kernal_wgtblk_sfc_n_t_to_int(sfc_n_each_wgtblk);
-			}else{
-				wgtblk_w_foreach_kernal_set[i] <= atomic_k;
-			}
+			wgtblk_w_foreach_kernal_set[i] <= ConvDataHubCfg::kernal_wgtblk_sfc_n_t_to_int(sfc_n_each_wgtblk);
 		}
 	}
 	
@@ -285,7 +278,6 @@ class ConvDataHubCfg extends tue_configuration;
 	`uvm_object_utils_begin(ConvDataHubCfg)
 		`uvm_field_int(stream_data_width, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_int(atomic_c, UVM_DEFAULT | UVM_DEC)
-		`uvm_field_int(atomic_k, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_enum(fmbuf_coln_t, fmbufcoln, UVM_DEFAULT)
 		`uvm_field_int(fmbufrown, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_int(grp_conv_buf_mode, UVM_DEFAULT | UVM_BIN)

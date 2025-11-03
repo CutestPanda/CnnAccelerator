@@ -64,7 +64,6 @@ module tb_conv_data_hub();
 	/** 配置参数 **/
 	parameter integer STREAM_DATA_WIDTH = 32; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 4096; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer FM_RD_REQ_PRE_ACPT_N = 4; // 可提前接受的特征图读请求个数(1 | 2 | 4 | 8 | 16)
@@ -105,7 +104,6 @@ module tb_conv_data_hub();
 		test_cfg.randomize() with{
 			stream_data_width == STREAM_DATA_WIDTH;
 			atomic_c == ATOMIC_C;
-			atomic_k == ATOMIC_K;
 			
 			fmbufcoln == FMBUFCOLN;
 			fmbufrown == (FMBUFROWN + 1);
@@ -276,7 +274,6 @@ module tb_conv_data_hub();
 	conv_data_hub #(
 		.STREAM_DATA_WIDTH(STREAM_DATA_WIDTH),
 		.ATOMIC_C(ATOMIC_C),
-		.ATOMIC_K(ATOMIC_K),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
 		.FM_RD_REQ_PRE_ACPT_N(FM_RD_REQ_PRE_ACPT_N),

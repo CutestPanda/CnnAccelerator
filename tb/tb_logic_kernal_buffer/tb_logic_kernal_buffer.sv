@@ -35,7 +35,6 @@ module tb_logic_kernal_buffer();
 	/** 配置参数 **/
 	// 待测模块配置
 	localparam integer ATOMIC_C = 1; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	localparam integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	localparam integer CBUF_BANK_N = 4; // 缓存MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	localparam integer CBUF_DEPTH_FOREACH_BANK = 512; // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	// 运行时参数
@@ -208,7 +207,6 @@ module tb_logic_kernal_buffer();
 	
 	logic_kernal_buffer #(
 		.ATOMIC_C(ATOMIC_C),
-		.ATOMIC_K(ATOMIC_K),
 		.SIM_DELAY(simulation_delay)
 	)dut(
 		.aclk(clk),
