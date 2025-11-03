@@ -36,8 +36,13 @@ virtual class tue_param_monitor #(
     time    begin_time    = 0,
     int     parent_handle = 0
   );
-    ITEM  item;
-    item  = ITEM::type_id::create(item_name);
+    uvm_sequence_item item_base;
+	ITEM item;
+    item_base  = ITEM::type_id::create(item_name);
+	
+	if(!$cast(item, item_base))
+		`uvm_fatal(this.get_name(), "cannot cast item_base!")
+	
     item.set_context(configuration, status);
     void'(begin_tr(item, stream_name, label, desc, begin_time, parent_handle));
     return item;

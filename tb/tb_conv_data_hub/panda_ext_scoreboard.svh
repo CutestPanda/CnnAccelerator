@@ -30,7 +30,7 @@ class ConvDataHubScoreboardBase #(
 	protected int unsigned failure_cnt;
 	
 	protected int rd_req_tr_mcd = UVM_STDOUT;
-	protected int unsigned rd_req_tr_id = 0;
+	protected int unsigned rd_req_tr_id;
 	
 	function void set_rd_req_tr_mcd(int mcd);
 		this.rd_req_tr_mcd = mcd;
@@ -45,6 +45,8 @@ class ConvDataHubScoreboardBase #(
 		this.chk_id = 0;
 		this.success_cnt = 0;
 		this.failure_cnt = 0;
+		
+		this.rd_req_tr_id = 0;
 		
 		if(!uvm_config_db #(PandaMemoryAdapter)::get(null, "", MEM_NAME, this.mem))
 			`uvm_fatal(this.get_name(), $sformatf("cannot get %0s!!!", MEM_NAME))

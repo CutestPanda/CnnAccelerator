@@ -49,4 +49,15 @@ typedef tue_reactive_fifo_sequencer #(
 )panda_axis_slave_sequencer;
 `endif
 
+`ifdef EN_BLK_CTRL_MASTER_AGT
+typedef tue_sequencer #(
+	.CONFIGURATION(panda_blk_ctrl_configuration),
+	.STATUS(tue_status_dummy),
+	.REQ(panda_blk_ctrl_abstract_trans),
+	.RSP(panda_blk_ctrl_abstract_trans),
+	.PROXY_CONFIGURATION(panda_blk_ctrl_configuration),
+	.PROXY_STATUS(tue_status_dummy)
+)panda_blk_ctrl_master_sequencer;
+`endif
+
 `endif

@@ -108,4 +108,38 @@ interface panda_axis_if(
 	
 endinterface
 
+interface panda_blk_ctrl_if(
+	input bit clk,
+	input bit rst_n
+);
+	
+	logic[`PANDA_BLK_CTRL_MAX_PARAMS_WIDTH-1:0] params;
+	logic start;
+	logic idle;
+	logic done;
+	
+	clocking master_cb @(posedge clk);
+		output params;
+		output start;
+		input idle;
+		input done;
+	endclocking
+	
+	clocking slave_cb @(posedge clk);
+		input params;
+		input start;
+		output idle;
+		output done;
+	endclocking
+	
+	clocking monitor_cb @(posedge clk);
+		input rst_n;
+		input params;
+		input start;
+		input idle;
+		input done;
+	endclocking
+	
+endinterface
+
 `endif

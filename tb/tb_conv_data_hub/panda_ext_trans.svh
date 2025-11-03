@@ -25,16 +25,19 @@ class FmRdReqTransAdapter extends tue_sequence_item #(
 	function new(panda_axis_trans axis_tr = null, string name = "FmRdReqTransAdapter");
 		super.new(name);
 		
-		this.axis_tr = axis_tr;
-		
-		this.to_rst_buf = axis_tr.data[0][97];
-		this.actual_sfc_rid = {1'b0, axis_tr.data[0][96:85]};
-		this.start_sfc_id = {1'b0, axis_tr.data[0][84:73]};
-		this.sfc_n_to_rd = {1'b0, axis_tr.data[0][72:61]} + 1;
-		this.sfc_row_baseaddr = axis_tr.data[0][60:29];
-		this.sfc_row_btt = {1'b0, axis_tr.data[0][28:5]};
-		this.vld_data_n_foreach_sfc = {1'b0, axis_tr.data[0][4:0]} + 1;
-		this.sfc_row_col_n_to_fetch = this.sfc_row_btt / this.vld_data_n_foreach_sfc / 2;
+		if(axis_tr != null)
+		begin
+			this.axis_tr = axis_tr;
+			
+			this.to_rst_buf = axis_tr.data[0][97];
+			this.actual_sfc_rid = {1'b0, axis_tr.data[0][96:85]};
+			this.start_sfc_id = {1'b0, axis_tr.data[0][84:73]};
+			this.sfc_n_to_rd = {1'b0, axis_tr.data[0][72:61]} + 1;
+			this.sfc_row_baseaddr = axis_tr.data[0][60:29];
+			this.sfc_row_btt = {1'b0, axis_tr.data[0][28:5]};
+			this.vld_data_n_foreach_sfc = {1'b0, axis_tr.data[0][4:0]} + 1;
+			this.sfc_row_col_n_to_fetch = this.sfc_row_btt / this.vld_data_n_foreach_sfc / 2;
+		end
 	endfunction
 	
 	virtual function void do_print(uvm_printer printer);
@@ -92,18 +95,24 @@ class KernalRdReqTransAdapter extends tue_sequence_item #(
 	function new(panda_axis_trans axis_tr = null, string name = "KernalRdReqTransAdapter");
 		super.new(name);
 		
-		this.axis_tr = axis_tr;
-		
-		this.to_rst_buf = axis_tr.data[0][97];
-		this.actual_cgrp_id_or_cgrpn = axis_tr.data[0][96:87];
-		this.cgrp_id_ofs = axis_tr.data[0][86:77];
-		this.wgtblk_id = axis_tr.data[0][86:80];
-		this.start_sfc_id = axis_tr.data[0][79:73];
-		this.sfc_n_to_rd = {1'b0, axis_tr.data[0][72:68]} + 1;
-		this.kernal_cgrp_baseaddr = axis_tr.data[0][67:36];
-		this.kernal_cgrp_btt = axis_tr.data[0][35:12];
-		this.sfc_n_foreach_wgtblk = {1'b0, axis_tr.data[0][11:5]} + 1;
-		this.vld_data_n_foreach_sfc = {1'b0, axis_tr.data[0][4:0]} + 1;
+		if(axis_tr != null)
+		begin
+			this.axis_tr = axis_tr;
+			
+			this.to_rst_buf = axis_tr.data[0][97];
+			if(this.to_rst_buf)
+				this.actual_cgrp_id_or_cgrpn = {1'b0, axis_tr.data[0][96:87]} + 1;
+			else
+				this.actual_cgrp_id_or_cgrpn = axis_tr.data[0][96:87];
+			this.cgrp_id_ofs = axis_tr.data[0][86:77];
+			this.wgtblk_id = axis_tr.data[0][86:80];
+			this.start_sfc_id = axis_tr.data[0][79:73];
+			this.sfc_n_to_rd = {1'b0, axis_tr.data[0][72:68]} + 1;
+			this.kernal_cgrp_baseaddr = axis_tr.data[0][67:36];
+			this.kernal_cgrp_btt = axis_tr.data[0][35:12];
+			this.sfc_n_foreach_wgtblk = {1'b0, axis_tr.data[0][11:5]} + 1;
+			this.vld_data_n_foreach_sfc = {1'b0, axis_tr.data[0][4:0]} + 1;
+		end
 	endfunction
 	
 	virtual function void do_print(uvm_printer printer);

@@ -61,6 +61,14 @@ class panda_delay_configuration extends tue_configuration;
 	
 endclass
 
+virtual class panda_trans_factory extends uvm_object;
+	
+	pure virtual function uvm_sequence_item create_item();
+	
+	`tue_object_default_constructor(panda_trans_factory)
+	
+endclass
+
 class panda_icb_configuration extends tue_configuration;
 	
 	panda_icb_vif vif;
@@ -186,6 +194,32 @@ class panda_axis_configuration extends tue_configuration;
 		`uvm_field_int(has_keep, UVM_DEFAULT | UVM_BIN)
 		`uvm_field_int(has_strb, UVM_DEFAULT | UVM_BIN)
 		`uvm_field_int(has_last, UVM_DEFAULT | UVM_BIN)
+	`uvm_object_utils_end
+	
+endclass
+
+class panda_blk_ctrl_configuration extends tue_configuration;
+	
+	panda_blk_ctrl_vif vif;
+	panda_trans_factory tr_factory;
+	
+	rand int params_width;
+	
+	rand panda_delay_configuration start_delay;
+	
+	constraint c_valid_params_width{
+		params_width inside {[0:`PANDA_BLK_CTRL_MAX_PARAMS_WIDTH]};
+	}
+	
+	function new(string name = "panda_blk_ctrl_configuration");
+		super.new(name);
+		
+		this.start_delay = panda_delay_configuration::type_id::create("start_delay");
+	endfunction
+	
+	`uvm_object_utils_begin(panda_blk_ctrl_configuration)
+		`uvm_field_int(params_width, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_object(start_delay, UVM_DEFAULT)
 	`uvm_object_utils_end
 	
 endclass

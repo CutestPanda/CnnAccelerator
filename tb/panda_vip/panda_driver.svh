@@ -53,13 +53,13 @@ class panda_icb_master_driver extends tue_driver #(
 				this.vif.master_cb.cmd_wmask <= tr.is_read() ? {(`PANDA_ICB_MAX_DATA_WIDTH/8){1'bx}}:tr.strobe;
 				this.vif.master_cb.cmd_valid <= 1'b1;
 				
-				@(this.vif.master_cb);
+				this.consume_delay(1);
 				
 				this.trans_on_road_n++;
 				
 				while(!(this.vif.cmd_valid & this.vif.master_cb.cmd_ready))
 				begin
-					@(this.vif.master_cb);
+					this.consume_delay(1);
 				end
 				
 				this.seq_item_port.item_done();
@@ -73,7 +73,7 @@ class panda_icb_master_driver extends tue_driver #(
 				
 				do
 				begin
-					@(this.vif.master_cb);
+					this.consume_delay(1);
 				end
 				while(!(this.vif.master_cb.rsp_valid & this.vif.rsp_ready));
 				
@@ -155,7 +155,7 @@ class panda_icb_slave_driver extends tue_driver #(
 				
 				do
 				begin
-					@(this.vif.slave_cb);
+					this.consume_delay(1);
 				end
 				while(!(this.vif.slave_cb.cmd_valid & this.vif.cmd_ready));
 				
@@ -188,7 +188,7 @@ class panda_icb_slave_driver extends tue_driver #(
 				
 				do
 				begin
-					@(this.vif.slave_cb);
+					this.consume_delay(1);
 				end
 				while(!(this.vif.rsp_valid & this.vif.slave_cb.rsp_ready));
 			end
@@ -209,7 +209,7 @@ class panda_icb_slave_driver extends tue_driver #(
 			
 			forever
 			begin
-				@(this.vif.slave_cb);
+				this.consume_delay(1);
 				
 				this.sema.get(1);
 				foreach(this.trans_rsp_pending_queue[i])
@@ -284,7 +284,7 @@ class panda_axis_master_driver extends tue_driver #(
 				
 				do
 				begin
-					@(this.vif.master_cb);
+					this.consume_delay(1);
 				end
 				while(!(this.vif.valid & this.vif.master_cb.ready));
 				
@@ -343,7 +343,7 @@ class panda_axis_slave_driver extends tue_driver #(
 			this.vif.slave_cb.ready <= 1'b1;
 			
 			while(!(this.vif.slave_cb.valid & this.vif.ready))
-				@(this.vif.slave_cb);
+				this.consume_delay(1);
 			
 			this.vif.slave_cb.ready <= 1'b0;
 			
@@ -354,6 +354,9 @@ class panda_axis_slave_driver extends tue_driver #(
 			this.consume_delay(tr.get_ready_delay());
 			
 			this.vif.slave_cb.ready <= 1'b1;
+			
+			if(tr.get_ready_delay() == 0)
+				this.consume_delay(1);
 			
 			this.seq_item_port.item_done();
 		end
@@ -370,6 +373,69 @@ class panda_axis_slave_driver extends tue_driver #(
 	
 	`tue_component_default_constructor(panda_axis_slave_driver)
 	`uvm_component_utils(panda_axis_slave_driver)
+	
+endclass
+`endif
+
+`ifdef EN_BLK_CTRL_MASTER_AGT
+class panda_blk_ctrl_master_driver extends tue_driver #(
+	.CONFIGURATION(panda_blk_ctrl_configuration),
+	.STATUS(tue_status_dummy),
+	.REQ(panda_blk_ctrl_abstract_trans),
+	.RSP(panda_blk_ctrl_abstract_trans)
+);
+	
+	local panda_blk_ctrl_vif vif;
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.vif = this.configuration.vif;
+    endfunction
+	
+	task reset_phase(uvm_phase phase);
+		this.do_reset();
+	endtask
+	
+	task main_phase(uvm_phase phase);
+		this.consume_delay(1);
+		
+		forever
+		begin
+			panda_blk_ctrl_abstract_trans tr;
+			
+			this.seq_item_port.get_next_item(tr);
+			
+			this.consume_delay(tr.process_start_delay);
+			
+			this.vif.master_cb.params <= tr.pack_params();
+			this.vif.master_cb.start <= 1'b1;
+			
+			this.consume_delay(1);
+			
+			this.vif.master_cb.start <= 1'b0;
+			
+			while(!this.vif.master_cb.done)
+				this.consume_delay(1);
+			
+			this.do_reset();
+			
+			this.seq_item_port.item_done();
+		end
+	endtask
+	
+	local task do_reset();
+		this.vif.master_cb.params <= {(`PANDA_BLK_CTRL_MAX_PARAMS_WIDTH){1'bx}};
+		this.vif.master_cb.start <= 1'b0;
+    endtask
+	
+	local task consume_delay(int delay);
+		repeat(delay)
+			@(this.vif.master_cb);
+	endtask
+	
+	`tue_component_default_constructor(panda_blk_ctrl_master_driver)
+	`uvm_component_utils(panda_blk_ctrl_master_driver)
 	
 endclass
 `endif

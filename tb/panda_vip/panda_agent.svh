@@ -69,4 +69,21 @@ class panda_axis_slave_agent extends tue_reactive_agent #(
 endclass
 `endif
 
+`ifdef EN_BLK_CTRL_MASTER_AGT
+class panda_blk_ctrl_master_agent extends tue_param_agent #(
+	.CONFIGURATION(panda_blk_ctrl_configuration),
+	.STATUS(tue_status_dummy),
+	.ITEM(panda_blk_ctrl_abstract_trans),
+	.MONITOR(panda_blk_ctrl_master_monitor),
+	.SEQUENCER(panda_blk_ctrl_master_sequencer),
+	.DRIVER(panda_blk_ctrl_master_driver),
+	.ENABLE_PASSIVE_SEQUENCER(0)
+);
+	
+	`tue_component_default_constructor(panda_blk_ctrl_master_agent)
+	`uvm_component_utils(panda_blk_ctrl_master_agent)
+	
+endclass
+`endif
+
 `endif

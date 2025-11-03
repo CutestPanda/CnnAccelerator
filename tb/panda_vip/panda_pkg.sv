@@ -8,11 +8,6 @@ package panda_pkg;
 	import uvm_pkg::*;
 	import tue_pkg::*;
 	
-	typedef virtual panda_clock_if panda_clock_vif;
-	typedef virtual panda_reset_if panda_reset_vif;
-	typedef virtual panda_icb_if panda_icb_vif;
-	typedef virtual panda_axis_if panda_axis_vif;
-	
 	`include "panda_defines.svh"
 	`include "panda_macros.svh"
 	

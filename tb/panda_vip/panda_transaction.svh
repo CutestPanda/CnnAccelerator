@@ -391,4 +391,36 @@ class panda_axis_slave_trans extends panda_axis_trans;
 	
 endclass
 
+virtual class panda_blk_ctrl_abstract_trans extends tue_sequence_item #(
+	.CONFIGURATION(panda_blk_ctrl_configuration),
+	.STATUS(tue_status_dummy),
+	.PROXY_CONFIGURATION(panda_blk_ctrl_configuration),
+	.PROXY_STATUS(tue_status_dummy)
+);
+	
+	rand int process_start_delay;
+	
+	uvm_event process_begin_event;
+    time process_begin_time;
+	uvm_event process_end_event;
+    time process_end_time;
+	
+	function new(string name = "panda_blk_ctrl_abstract_trans");
+		super.new(name);
+		
+		this.process_begin_event = this.get_event("process_begin");
+		this.process_end_event = this.get_event("process_end");
+	endfunction
+	
+	pure virtual function void unpack_params(panda_blk_ctrl_params params);
+	pure virtual function panda_blk_ctrl_params pack_params();
+	
+	`panda_declare_begin_end_event_api(process)
+	
+	constraint c_valid_process_start_delay{
+		`panda_delay_constraint(process_start_delay, this.configuration.start_delay)
+	}
+	
+endclass
+
 `endif

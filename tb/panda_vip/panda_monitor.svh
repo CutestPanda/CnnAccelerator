@@ -116,7 +116,8 @@ class panda_icb_master_monitor extends panda_icb_monitor_base #(
 	.BASE(tue_param_monitor #(
 		.CONFIGURATION(panda_icb_configuration),
 		.STATUS(panda_icb_status),
-		.ITEM(panda_icb_trans)
+		.ITEM(panda_icb_trans),
+		.ITEM_HANDLE(panda_icb_trans)
 	))
 );
 	
@@ -135,7 +136,8 @@ class panda_icb_slave_monitor extends panda_icb_monitor_base #(
 	.BASE(tue_reactive_monitor #(
 		.CONFIGURATION(panda_icb_configuration),
 		.STATUS(panda_icb_status),
-		.ITEM(panda_icb_trans)
+		.ITEM(panda_icb_trans),
+		.ITEM_HANDLE(panda_icb_trans)
 	))
 );
 	
@@ -254,7 +256,8 @@ class panda_axis_master_monitor extends panda_axis_monitor_base #(
 	.BASE(tue_param_monitor #(
 		.CONFIGURATION(panda_axis_configuration),
 		.STATUS(tue_status_dummy),
-		.ITEM(panda_axis_trans)
+		.ITEM(panda_axis_trans),
+		.ITEM_HANDLE(panda_axis_trans)
 	))
 );
 	
@@ -273,7 +276,8 @@ class panda_axis_slave_monitor extends panda_axis_monitor_base #(
 	.BASE(tue_reactive_monitor #(
 		.CONFIGURATION(panda_axis_configuration),
 		.STATUS(tue_status_dummy),
-		.ITEM(panda_axis_trans)
+		.ITEM(panda_axis_trans),
+		.ITEM_HANDLE(panda_axis_trans)
 	))
 );
 	
@@ -283,6 +287,96 @@ class panda_axis_slave_monitor extends panda_axis_monitor_base #(
 	
 	`tue_component_default_constructor(panda_axis_slave_monitor)
 	`uvm_component_utils(panda_axis_slave_monitor)
+	
+endclass
+`endif
+
+class panda_blk_ctrl_monitor_base #(
+	type BASE = tue_param_monitor
+)extends BASE;
+	
+	local panda_blk_ctrl_vif vif;
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.vif = this.configuration.vif;
+    endfunction
+	
+	task main_phase(uvm_phase phase);
+		forever
+		begin
+			panda_blk_ctrl_abstract_trans tr;
+			
+			tr = this.create_item("blk_ctrl_tr");
+			
+			while(!(this.vif.monitor_cb.idle & this.vif.monitor_cb.start))
+				@(this.vif.monitor_cb);
+			
+			tr.begin_process(0);
+			
+			tr.unpack_params(this.vif.monitor_cb.params);
+			
+			this.do_write_request(tr);
+			
+			do
+			begin
+				@(this.vif.monitor_cb);
+			end
+			while(!this.vif.monitor_cb.done);
+			
+			tr.end_process(0);
+			
+			this.write_item(tr);
+		end
+	endtask
+	
+	virtual function panda_blk_ctrl_abstract_trans create_item(
+		string item_name = "item",
+		string stream_name = "main",
+		string label = "",
+		string desc = "",
+		time begin_time = 0,
+		int parent_handle = 0
+	);
+		uvm_sequence_item item_base;
+		panda_blk_ctrl_abstract_trans item;
+		
+		item_base = this.configuration.tr_factory.create_item();
+		
+		if(!$cast(item, item_base))
+			`uvm_fatal(this.get_name(), "cannot cast to panda_blk_ctrl_abstract_trans!")
+		
+		item.set_context(this.configuration, this.status);
+		void'(this.begin_tr(item, stream_name, label, desc, begin_time, parent_handle));
+		
+		return item;
+	endfunction
+	
+	virtual function void do_write_request(panda_blk_ctrl_abstract_trans request);
+		`uvm_fatal(get_name(), "do_write_request not implemented!")
+	endfunction
+	
+	`tue_component_default_constructor(panda_blk_ctrl_monitor_base)
+	
+endclass
+
+`ifdef EN_BLK_CTRL_MASTER_AGT
+class panda_blk_ctrl_master_monitor extends panda_blk_ctrl_monitor_base #(
+	.BASE(tue_param_monitor #(
+		.CONFIGURATION(panda_blk_ctrl_configuration),
+		.STATUS(tue_status_dummy),
+		.ITEM(panda_blk_ctrl_abstract_trans),
+		.ITEM_HANDLE(panda_blk_ctrl_abstract_trans)
+	))
+);
+	
+	function void do_write_request(panda_blk_ctrl_abstract_trans request);
+		// pass
+	endfunction
+	
+	`tue_component_default_constructor(panda_blk_ctrl_master_monitor)
+	`uvm_component_utils(panda_blk_ctrl_master_monitor)
 	
 endclass
 `endif
