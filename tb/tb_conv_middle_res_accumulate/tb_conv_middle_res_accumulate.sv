@@ -15,7 +15,7 @@ module tb_conv_middle_res_accumulate();
 	
 	/** 配置参数 **/
 	// 待测模块配置
-	localparam EN_SMALL_FP32 = "false"; // 是否处理极小FP32
+	localparam EN_SMALL_FP32 = "true"; // 是否处理极小FP32
 	// 运行时参数
 	localparam bit[1:0] CALFMT = CAL_FMT_FP16; // 运算数据格式
 	// 时钟和复位配置
@@ -46,9 +46,9 @@ module tb_conv_middle_res_accumulate();
 	
 	/** 测试激励 **/
 	// {定点数(37位), 原中间结果(32位), 是否第1项标志(1位)}
-	bit[69:0] int16_stim_arr[];
+	logic[69:0] int16_stim_arr[];
 	// {指数部分(8位), 尾数部分(37位), 原中间结果(32位), 是否第1项标志(1位)}
-	bit[77:0] fp16_stim_arr[];
+	logic[77:0] fp16_stim_arr[];
 	
 	initial
 	begin
@@ -97,16 +97,16 @@ module tb_conv_middle_res_accumulate();
 	
 	initial
 	begin
-		fp16_stim_arr = new[9];
+		fp16_stim_arr = new[14];
 		
 		fp16_stim_arr[0][77:70] = 8'd28;
 		fp16_stim_arr[0][69:33] = $signed(-47593944); // -11.3472805
-		fp16_stim_arr[0][32:1] = 0;
+		fp16_stim_arr[0][32:1] = 32'hxxxx_xxxx;
 		fp16_stim_arr[0][0] = 1'b1;
 		
 		fp16_stim_arr[1][77:70] = 8'd28;
 		fp16_stim_arr[1][69:33] = $signed(9652630); // 2.301366329
-		fp16_stim_arr[1][32:1] = 0;
+		fp16_stim_arr[1][32:1] = 32'hxxxx_xxxx;
 		fp16_stim_arr[1][0] = 1'b1;
 		
 		fp16_stim_arr[2][77:70] = 8'd28;
@@ -143,6 +143,31 @@ module tb_conv_middle_res_accumulate();
 		fp16_stim_arr[8][69:33] = $signed(-85784448); // -1.278287888
 		fp16_stim_arr[8][32:1] = 32'h3FA39581; // 1.278
 		fp16_stim_arr[8][0] = 1'b0;
+		
+		fp16_stim_arr[9][77:70] = 8'd28;
+		fp16_stim_arr[9][69:33] = $signed(0); // 0.0
+		fp16_stim_arr[9][32:1] = 32'hxxxx_xxxx;
+		fp16_stim_arr[9][0] = 1'b1;
+		
+		fp16_stim_arr[10][77:70] = 8'd28;
+		fp16_stim_arr[10][69:33] = $signed(0); // 0.0
+		fp16_stim_arr[10][32:1] = 32'h0000_0000; // 0.0
+		fp16_stim_arr[10][0] = 1'b0;
+		
+		fp16_stim_arr[11][77:70] = 8'd28;
+		fp16_stim_arr[11][69:33] = $signed(0); // 0.0
+		fp16_stim_arr[11][32:1] = 32'h460A439A; // 8848.9
+		fp16_stim_arr[11][0] = 1'b0;
+		
+		fp16_stim_arr[12][77:70] = 8'd24;
+		fp16_stim_arr[12][69:33] = $signed(-80530637); // -1.2
+		fp16_stim_arr[12][32:1] = 32'h3F99999A; // 1.2
+		fp16_stim_arr[12][0] = 1'b0;
+		
+		fp16_stim_arr[13][77:70] = 8'd24;
+		fp16_stim_arr[13][69:33] = $signed(80530637); // 1.2
+		fp16_stim_arr[13][32:1] = 32'hBF99999A; // -1.2
+		fp16_stim_arr[13][0] = 1'b0;
 	end
 	
 	/** 主任务 **/

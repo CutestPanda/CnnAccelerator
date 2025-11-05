@@ -41,7 +41,7 @@ typedef logic[`PANDA_ICB_MAX_DATA_WIDTH-1:0] panda_icb_data;
 typedef logic[`PANDA_ICB_MAX_DATA_WIDTH/8-1:0] panda_icb_strobe;
 
 `ifndef PANDA_AXIS_MAX_DATA_WIDTH
-	`define PANDA_AXIS_MAX_DATA_WIDTH 128
+	`define PANDA_AXIS_MAX_DATA_WIDTH 512
 `endif
 
 `ifndef PANDA_AXIS_MAX_USER_WIDTH
