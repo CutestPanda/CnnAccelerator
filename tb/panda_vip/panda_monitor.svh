@@ -319,15 +319,21 @@ class panda_blk_ctrl_monitor_base #(
 			
 			this.do_write_request(tr);
 			
+			if(!this.configuration.complete_monitor_mode)
+				this.write_item(tr);
+			
 			do
 			begin
 				@(this.vif.monitor_cb);
 			end
 			while(!this.vif.monitor_cb.done);
 			
-			tr.end_process(0);
-			
-			this.write_item(tr);
+			if(this.configuration.complete_monitor_mode)
+			begin
+				tr.end_process(0);
+				
+				this.write_item(tr);
+			end
 		end
 	endtask
 	

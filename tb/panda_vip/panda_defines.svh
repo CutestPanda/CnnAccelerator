@@ -8,8 +8,8 @@
 // `define EN_ICB_MASTER_AGT
 // `define EN_ICB_SLAVE_AGT
 // `define EN_AXIS_MASTER_AGT
-// `define EN_AXIS_SLAVE_AGT
-// `define EN_BLK_CTRL_MASTER_AGT
+`define EN_AXIS_SLAVE_AGT
+`define EN_BLK_CTRL_MASTER_AGT
 
 typedef virtual panda_clock_if panda_clock_vif;
 typedef virtual panda_reset_if panda_reset_vif;
@@ -41,7 +41,7 @@ typedef logic[`PANDA_ICB_MAX_DATA_WIDTH-1:0] panda_icb_data;
 typedef logic[`PANDA_ICB_MAX_DATA_WIDTH/8-1:0] panda_icb_strobe;
 
 `ifndef PANDA_AXIS_MAX_DATA_WIDTH
-	`define PANDA_AXIS_MAX_DATA_WIDTH 512
+	`define PANDA_AXIS_MAX_DATA_WIDTH 256
 `endif
 
 `ifndef PANDA_AXIS_MAX_USER_WIDTH

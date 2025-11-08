@@ -202,6 +202,7 @@ class panda_blk_ctrl_configuration extends tue_configuration;
 	
 	panda_blk_ctrl_vif vif;
 	panda_trans_factory tr_factory;
+	bit complete_monitor_mode = 1'b1;
 	
 	rand int params_width;
 	
