@@ -23,12 +23,14 @@ module tb_conv_middle_res_acmlt_buf();
 	/** 配置参数 **/
 	// 待测模块配置
 	localparam integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
-	localparam integer RBUF_BANK_N = 4; // 缓存MEM个数(2~32)
-	localparam integer RBUF_DEPTH = 1024; // 缓存MEM深度(512 | 1024 | 2048 | 4096 | 8192)
-	localparam EN_SMALL_FP32 = "false"; // 是否处理极小FP32
+	localparam integer RBUF_BANK_N = 9; // 缓存MEM个数(>=2)
+	localparam integer RBUF_DEPTH = 16; // 缓存MEM深度(16 | 32 | 64 | ... | 4096)
+	localparam EN_SMALL_FP32 = "true"; // 是否处理极小FP32
 	// 运行时参数
 	localparam bit[1:0] calfmt = CAL_FMT_FP16; // 运算数据格式
-	localparam bit[12:0] ofmw_sub1 = 13'd16 - 1; // 输出特征图宽度 - 1
+	localparam bit[11:0] ofmap_w = 40; // 输出特征图宽度
+	localparam bit[3:0] bank_n_foreach_ofmap_row = 3; // 每个输出特征图行所占用的缓存MEM个数
+	localparam bit[3:0] row_n_bufferable = 3; // 可缓存行数
 	// 时钟和复位配置
 	localparam real clk_p = 10.0; // 时钟周期
 	localparam real simulation_delay = 1.0; // 仿真延时
@@ -161,7 +163,9 @@ module tb_conv_middle_res_acmlt_buf();
 		.aclken(1'b1),
 		
 		.calfmt(calfmt),
-		.ofmw_sub1(ofmw_sub1),
+		.ofmap_w(ofmap_w - 1),
+		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
+		.row_n_bufferable(row_n_bufferable - 1),
 		
 		.s_axis_mid_res_data(s_axis_mid_res_data),
 		.s_axis_mid_res_keep(s_axis_mid_res_keep),

@@ -26,7 +26,7 @@ class ConvMidResAcmltEnv #(
 	localparam bit[1:0] CAL_FMT_FP16 = 2'b10;
 	
 	/** 配置参数 **/
-	localparam bit[12:0] ofmw = 13'd16; // 输出特征图宽度
+	localparam bit[11:0] ofmw = 40; // 输出特征图宽度
 	localparam int unsigned test_pkt_n = 8; // 测试最终结果数据包个数
 	
 	// 组件
