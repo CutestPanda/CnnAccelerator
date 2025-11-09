@@ -20,7 +20,7 @@ class MAxisMidResCase0Sqc #(
 	/** 配置参数 **/
 	localparam int unsigned test_pkt_n = 8; // 测试最终结果数据包个数
 	localparam bit[1:0] calfmt = CAL_FMT_FP16; // 运算数据格式
-	localparam bit[11:0] ofmw = 40; // 输出特征图宽度
+	localparam bit[15:0] ofmw = 40; // 输出特征图宽度
 	localparam int unsigned max_wait_period_n = 1; // 最大的AXIS有效等待周期数
 	
 	/*

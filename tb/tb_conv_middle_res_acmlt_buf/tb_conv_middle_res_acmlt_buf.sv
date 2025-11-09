@@ -28,7 +28,7 @@ module tb_conv_middle_res_acmlt_buf();
 	localparam EN_SMALL_FP32 = "true"; // 是否处理极小FP32
 	// 运行时参数
 	localparam bit[1:0] calfmt = CAL_FMT_FP16; // 运算数据格式
-	localparam bit[11:0] ofmap_w = 40; // 输出特征图宽度
+	localparam bit[15:0] ofmap_w = 40; // 输出特征图宽度
 	localparam bit[3:0] row_n_bufferable = 3; // 可缓存行数
 	// 时钟和复位配置
 	localparam real clk_p = 10.0; // 时钟周期

@@ -43,6 +43,8 @@ SOFTWARE.
 判满使用"写端口看到的写指针"和"写端口看到的读指针"
 判空使用"读端口看到的读指针"和"读端口看到的写指针"
 
+为了适应计算轮次拓展, 可将输出特征图宽度 *= 计算轮次
+
 注意：
 暂不支持INT8运算数据格式
 
@@ -58,7 +60,7 @@ MEM MASTER
 module conv_middle_res_acmlt_buf #(
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer RBUF_BANK_N = 8, // 缓存MEM个数(>=2)
-	parameter integer RBUF_DEPTH = 512, // 缓存MEM深度(16 | 32 | 64 | ... | 4096)
+	parameter integer RBUF_DEPTH = 512, // 缓存MEM深度(16 | ...)
 	parameter EN_SMALL_FP32 = "false", // 是否处理极小FP32
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
@@ -69,7 +71,7 @@ module conv_middle_res_acmlt_buf #(
 	
 	// 运行时参数
 	input wire[1:0] calfmt, // 运算数据格式
-	input wire[11:0] ofmap_w, // 输出特征图宽度 - 1
+	input wire[15:0] ofmap_w, // 输出特征图宽度 - 1
 	input wire[3:0] row_n_bufferable, // 可缓存行数 - 1
 	
 	// 中间结果输入(AXIS从机)
@@ -127,10 +129,7 @@ module conv_middle_res_acmlt_buf #(
 	/** 补充运行时参数 **/
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
 	
-	assign bank_n_foreach_ofmap_row = 
-		(RBUF_DEPTH == 4096) ? 
-			4'd1:
-			((ofmap_w[11:((RBUF_DEPTH == 4096) ? 11:clogb2(RBUF_DEPTH))] | 4'd0) + 1'b1);
+	assign bank_n_foreach_ofmap_row = (ofmap_w[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	
 	/** 中间结果累加读数据流水线 **/
 	// 第0级流水线
@@ -279,11 +278,11 @@ module conv_middle_res_acmlt_buf #(
 	// 中间结果输入读后写相关性等待
 	reg[15:0] mid_res_upd_pipl_sts; // 中间结果更新流水线状态
 	reg[3:0] mid_res_upd_pipl_rid; // 正在执行更新流水线的存储行号
-	reg[11:0] mid_res_upd_pipl_cid; // 正在执行更新流水线的列号
+	reg[15:0] mid_res_upd_pipl_cid; // 正在执行更新流水线的列号
 	// 虚拟行缓存填充向量
 	reg[RBUF_BANK_N-1:0] mid_res_line_buf_filled;
 	// 虚拟行缓存写端口
-	reg[11:0] col_cnt_at_wr; // 列计数器
+	reg[15:0] col_cnt_at_wr; // 列计数器
 	wire mid_res_line_buf_wen_at_wr; // 写使能
 	wire mid_res_line_buf_wen_at_wr_d4; // 延迟4clk的写使能
 	wire mid_res_line_buf_wen_at_wr_d11; // 延迟11clk的写使能
@@ -292,7 +291,7 @@ module conv_middle_res_acmlt_buf #(
 	reg[4:0] mid_res_line_buf_wptr_at_wr; // 写指针
 	reg[4:0] mid_res_line_buf_rptr_at_wr; // 读指针
 	// 虚拟行缓存读端口
-	reg[11:0] col_cnt_at_rd; // 列计数器
+	reg[15:0] col_cnt_at_rd; // 列计数器
 	wire mid_res_line_buf_wen_at_rd; // 写使能
 	wire mid_res_line_buf_ren_at_rd; // 读使能
 	wire mid_res_line_buf_empty_n; // 空标志
@@ -304,7 +303,7 @@ module conv_middle_res_acmlt_buf #(
 			(~mid_res_upd_pipl_sts[0]) & 
 			(col_cnt_at_wr == 0) & // 仅在写第1列时作读后写相关性检查
 			(mid_res_upd_pipl_rid == mid_res_line_buf_wptr_at_wr[3:0]) & 
-			(mid_res_upd_pipl_cid <= 12'd11)
+			(mid_res_upd_pipl_cid <= 16'd11)
 		));
 	
 	assign mid_res_first_item_s0 = s_axis_mid_res_user[1];
@@ -379,11 +378,11 @@ module conv_middle_res_acmlt_buf #(
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
-			col_cnt_at_wr <= 12'd0;
+			col_cnt_at_wr <= 16'd0;
 		else if(s_axis_mid_res_valid & s_axis_mid_res_ready)
 			col_cnt_at_wr <= # SIM_DELAY 
 				(col_cnt_at_wr == ofmap_w) ? 
-					12'd0:
+					16'd0:
 					(col_cnt_at_wr + 1'b1);
 	end
 	
@@ -429,11 +428,11 @@ module conv_middle_res_acmlt_buf #(
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
-			col_cnt_at_rd <= 12'd0;
+			col_cnt_at_rd <= 16'd0;
 		else if(fnl_res_valid_s0 & fnl_res_ready_s0)
 			col_cnt_at_rd <= # SIM_DELAY 
 				(col_cnt_at_rd == ofmap_w) ? 
-					12'd0:
+					16'd0:
 					(col_cnt_at_rd + 1'b1);
 	end
 	
@@ -556,8 +555,8 @@ module conv_middle_res_acmlt_buf #(
 		end
 	endgenerate
 	
-	/** 存储器接口 **/
-	reg[11:0] mem_waddr; // 缓存MEM写地址
+	/** 缓存MEM接口 **/
+	reg[15:0] mem_waddr; // 缓存MEM写地址
 	reg[7:0] upd_row_buffer_wsel_bid_base; // 更新行缓存时写选择(BANK编号基准)
 	wire[3:0] row_buffer_wsel_bid_ofs; // 更新行缓存时写选择(BANK编号偏移)
 	reg[7:0] upd_row_buffer_rsel_bid_base; // 更新行缓存时读选择(BANK编号基准)
@@ -606,18 +605,9 @@ module conv_middle_res_acmlt_buf #(
 	assign mid_res_sel_s0 = upd_row_buffer_rsel_bid_base + upd_row_buffer_rsel_bid_ofs;
 	assign fnl_res_sel_s0 = extract_row_buffer_rsel_bid_base + extract_row_buffer_rsel_bid_ofs;
 	
-	assign row_buffer_wsel_bid_ofs = 
-		(RBUF_DEPTH == 4096) ? 
-			4'd0:
-			(mem_waddr[11:((RBUF_DEPTH == 4096) ? 11:clogb2(RBUF_DEPTH))] | 4'd0);
-	assign upd_row_buffer_rsel_bid_ofs = 
-		(RBUF_DEPTH == 4096) ? 
-			4'd0:
-			(col_cnt_at_wr[11:((RBUF_DEPTH == 4096) ? 11:clogb2(RBUF_DEPTH))] | 4'd0);
-	assign extract_row_buffer_rsel_bid_ofs = 
-		(RBUF_DEPTH == 4096) ? 
-			4'd0:
-			(col_cnt_at_rd[11:((RBUF_DEPTH == 4096) ? 11:clogb2(RBUF_DEPTH))] | 4'd0);
+	assign row_buffer_wsel_bid_ofs = mem_waddr[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	assign upd_row_buffer_rsel_bid_ofs = col_cnt_at_wr[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	assign extract_row_buffer_rsel_bid_ofs = col_cnt_at_rd[15:clogb2(RBUF_DEPTH)] | 4'd0;
 	
 	// 虚拟行缓存填充向量
 	genvar mid_res_line_buf_filled_i;
@@ -653,11 +643,11 @@ module conv_middle_res_acmlt_buf #(
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
-			mem_waddr <= 12'd0;
+			mem_waddr <= 16'd0;
 		else if(acmlt_out_valid[0])
 			mem_waddr <= # SIM_DELAY 
 				(mem_waddr == ofmap_w) ? 
-					12'd0:
+					16'd0:
 					(mem_waddr + 1'b1);
 	end
 	
