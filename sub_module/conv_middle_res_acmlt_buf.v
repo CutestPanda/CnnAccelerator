@@ -70,7 +70,6 @@ module conv_middle_res_acmlt_buf #(
 	// 运行时参数
 	input wire[1:0] calfmt, // 运算数据格式
 	input wire[11:0] ofmap_w, // 输出特征图宽度 - 1
-	input wire[3:0] bank_n_foreach_ofmap_row, // 每个输出特征图行所占用的缓存MEM个数
 	input wire[3:0] row_n_bufferable, // 可缓存行数 - 1
 	
 	// 中间结果输入(AXIS从机)
@@ -124,6 +123,14 @@ module conv_middle_res_acmlt_buf #(
 	localparam CAL_FMT_INT8 = 2'b00;
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
+	
+	/** 补充运行时参数 **/
+	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
+	
+	assign bank_n_foreach_ofmap_row = 
+		(RBUF_DEPTH == 4096) ? 
+			4'd1:
+			((ofmap_w[11:((RBUF_DEPTH == 4096) ? 11:clogb2(RBUF_DEPTH))] | 4'd0) + 1'b1);
 	
 	/** 中间结果累加读数据流水线 **/
 	// 第0级流水线

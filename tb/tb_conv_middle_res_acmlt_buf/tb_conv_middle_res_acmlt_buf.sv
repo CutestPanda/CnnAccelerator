@@ -29,7 +29,6 @@ module tb_conv_middle_res_acmlt_buf();
 	// 运行时参数
 	localparam bit[1:0] calfmt = CAL_FMT_FP16; // 运算数据格式
 	localparam bit[11:0] ofmap_w = 40; // 输出特征图宽度
-	localparam bit[3:0] bank_n_foreach_ofmap_row = 3; // 每个输出特征图行所占用的缓存MEM个数
 	localparam bit[3:0] row_n_bufferable = 3; // 可缓存行数
 	// 时钟和复位配置
 	localparam real clk_p = 10.0; // 时钟周期
@@ -164,7 +163,6 @@ module tb_conv_middle_res_acmlt_buf();
 		
 		.calfmt(calfmt),
 		.ofmap_w(ofmap_w - 1),
-		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
 		.row_n_bufferable(row_n_bufferable - 1),
 		
 		.s_axis_mid_res_data(s_axis_mid_res_data),
