@@ -77,16 +77,19 @@ class ConvDataHubScoreboardBase #(
 		this.fout_tr_fifo.push_back(tr);
 	endfunction
 	
-	protected function void check_fout(panda_axis_trans res_tr, panda_axis_trans ref_tr);
+	protected function void check_fout(int unsigned req_id = 0, panda_axis_trans res_tr = null, panda_axis_trans ref_tr = null);
+		if(res_tr == null || ref_tr == null)
+			return;
+		
 		if(res_tr.compare(ref_tr))
 		begin
-			`uvm_info(this.get_name(), $sformatf("[%0d]match", this.chk_id), UVM_LOW)
+			`uvm_info(this.get_name(), $sformatf("[%0d]match", req_id), UVM_LOW)
 			
 			this.success_cnt++;
 		end
 		else
 		begin
-			`uvm_error(this.get_name(), $sformatf("[%0d]mismatch", this.chk_id))
+			`uvm_error(this.get_name(), $sformatf("[%0d]mismatch", req_id))
 			
 			this.failure_cnt++;
 			
@@ -165,7 +168,7 @@ class FmBufScoreboard extends ConvDataHubScoreboardBase #(
 			if(sfc_err)
 				continue;
 			
-			this.check_fout(fmap_fout_tr, exp_fmap_fout);
+			this.check_fout(fm_rd_req_tr.id, fmap_fout_tr, exp_fmap_fout);
 			
 			this.chk_id++;
 		end
@@ -279,7 +282,7 @@ class KernalBufScoreboard extends ConvDataHubScoreboardBase #(
 				continue;
 			end
 			
-			this.check_fout(kernal_fout_tr, exp_kernal_fout);
+			this.check_fout(kernal_rd_req_tr.id, kernal_fout_tr, exp_kernal_fout);
 			
 			this.chk_id++;
 		end

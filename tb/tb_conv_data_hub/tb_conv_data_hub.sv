@@ -91,6 +91,8 @@ module tb_conv_data_hub();
 	panda_axis_if dma1_cmd_axis_s(clk_if.clk_p, rst_if.reset_n);
 	
 	/** 主任务 **/
+	int cfg_log_fid;
+	
 	initial begin
 		ConvDataHubCfg test_cfg;
 		FmapBuilder fmap_builder;
@@ -99,6 +101,8 @@ module tb_conv_data_hub();
 		PandaMemoryAdapter kernal_mem_adpt;
 		Fmap fmap;
 		KernalSet kernal_set;
+		
+		cfg_log_fid = $fopen("cfg_log.txt");
 		
 		test_cfg = new();
 		test_cfg.randomize() with{
@@ -130,8 +134,6 @@ module tb_conv_data_hub();
 			cgrpn_foreach_kernal_set[3] == 9;
 		};
 		
-		test_cfg.print();
-		
 		fmap_builder = new();
 		fmap_builder.build_default_feature_map(test_cfg);
 		fmap = fmap_builder.get_feature_map();
@@ -140,8 +142,15 @@ module tb_conv_data_hub();
 		kernal_builder.build_default_kernal_set(test_cfg);
 		kernal_set = kernal_builder.get_kernal_set();
 		
-		fmap_mem_adpt = new(fmap, "FmapPandaMemoryAdapter", test_cfg.stream_data_width);
-		kernal_mem_adpt = new(kernal_set, "KernalPandaMemoryAdapter", test_cfg.stream_data_width);
+		`panda_set_print_all_elements
+		`panda_print(test_cfg, cfg_log_fid)
+		`panda_print(fmap, cfg_log_fid)
+		`panda_print(kernal_set, cfg_log_fid)
+		`panda_set_print_begin_elements_5
+		$fclose(cfg_log_fid);
+		
+		fmap_mem_adpt = new(fmap, "FmapPandaMemoryAdapter", 16);
+		kernal_mem_adpt = new(kernal_set, "KernalPandaMemoryAdapter", 16);
 		
 		uvm_config_db #(ConvDataHubCfg)::set(null, "", "test_cfg", test_cfg);
 		uvm_config_db #(PandaMemoryAdapter)::set(null, "", "fmap_mem", fmap_mem_adpt);

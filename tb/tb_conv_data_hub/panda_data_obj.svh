@@ -382,6 +382,10 @@ class FmapBuilder extends uvm_object;
 	endfunction
 	
 	function void build_default_feature_map(const ref ConvDataHubCfg cfg);
+		int unsigned now_fmap_row_baseaddr;
+		
+		now_fmap_row_baseaddr = 0;
+		
 		for(int unsigned i = 0;i < cfg.total_fmrow_n;i++)
 		begin
 			FmapRow row;
@@ -413,14 +417,16 @@ class FmapBuilder extends uvm_object;
 				sfc.set_configuration(sfc_cfg);
 				
 				for(int unsigned k = 0;k < sfc_cfg.len_foreach_sfc;k++)
-					// void'(sfc.set_pt(k, (i << 8) | ((j + k) % 256)));
 					void'(sfc.set_pt(k, $random()));
 				
 				void'(row.set_sfc(j, sfc));
 			end
 			
 			void'(row.finish_adding_sfc());
-			row.set_baseaddr(cfg.abs_baseaddr_foreach_fmrow[i] - cfg.fmap_mem_baseaddr);
+			
+			row.set_baseaddr(now_fmap_row_baseaddr);
+			cfg.abs_baseaddr_foreach_fmrow[i] = cfg.fmap_mem_baseaddr + now_fmap_row_baseaddr;
+			now_fmap_row_baseaddr += row.get_len_in_byte();
 			
 			this.feature_map.put_fmap_row(cfg.actual_sfc_rid_foreach_fmrow[i], row);
 		end
@@ -449,8 +455,10 @@ class KernalSetBuilder extends uvm_object;
 	
 	function void build_default_kernal_set(const ref ConvDataHubCfg cfg);
 		int unsigned now_cgrpid;
+		int unsigned now_cgrp_baseaddr;
 		
 		now_cgrpid = 0;
+		now_cgrp_baseaddr = 0;
 		
 		for(int unsigned k = 0;k < cfg.total_kernal_set_n;k++)
 		begin
@@ -517,7 +525,10 @@ class KernalSetBuilder extends uvm_object;
 				end
 				
 				kernal_cgrp.finish_adding_wgt_blk();
-				kernal_cgrp.set_baseaddr(cfg.abs_baseaddr_foreach_cgrp[now_cgrpid] - cfg.kernal_mem_baseaddr);
+				
+				kernal_cgrp.set_baseaddr(now_cgrp_baseaddr);
+				cfg.abs_baseaddr_foreach_cgrp[now_cgrpid] = cfg.kernal_mem_baseaddr + now_cgrp_baseaddr;
+				now_cgrp_baseaddr += kernal_cgrp.get_len_in_byte();
 				
 				this.kernal_set.put_kernal_cgrp(now_cgrpid, kernal_cgrp);
 				

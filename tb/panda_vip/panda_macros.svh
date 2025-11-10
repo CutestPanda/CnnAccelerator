@@ -72,4 +72,10 @@ uvm_default_printer.knobs.mcd = FID; \
 VAR.print(); \
 uvm_default_printer.knobs.mcd = UVM_STDOUT;
 
+`define panda_set_print_all_elements \
+uvm_default_printer.knobs.begin_elements = -1;
+
+`define panda_set_print_begin_elements_5 \
+uvm_default_printer.knobs.begin_elements = 5;
+
 `endif

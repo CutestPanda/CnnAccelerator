@@ -77,6 +77,26 @@ class DmaStrmAxisVseq #(
 				
 				{btt, baseaddr} = recv_dma_cmd_axis_tr.data[0][55:0];
 				
+				`uvm_create_on(dma_strm_axis_tr, this.p_sequencer.dma_strm_axis_sqr)
+				
+				dma_strm_axis_tr.len = (btt / this.dma_strm_axis_byte_width) + ((btt % this.dma_strm_axis_byte_width) ? 1:0);
+				dma_strm_axis_tr.data = new[dma_strm_axis_tr.len];
+				dma_strm_axis_tr.keep = new[dma_strm_axis_tr.len];
+				
+				for(int i = 0;i < dma_strm_axis_tr.len;i++)
+				begin
+					dma_strm_axis_tr.keep[i] = 
+						((i == (dma_strm_axis_tr.len - 1)) && (btt % this.dma_strm_axis_byte_width)) ? 
+							((1 << (btt % this.dma_strm_axis_byte_width)) - 1):
+							((1 << this.dma_strm_axis_byte_width) - 1);
+					
+					for(int j = 0;j < this.dma_strm_axis_byte_width / 2;j++)
+						dma_strm_axis_tr.data[i][16*j+:16] = this.mem.get(2, baseaddr, i * (this.dma_strm_axis_byte_width / 2) + j);
+				end
+				
+				`uvm_send(dma_strm_axis_tr)
+				
+				/*
 				`uvm_do_on_with(dma_strm_axis_tr, this.p_sequencer.dma_strm_axis_sqr, {
 					len == ((btt / dma_strm_axis_byte_width) + ((btt % dma_strm_axis_byte_width) ? 1:0));
 					
@@ -92,6 +112,7 @@ class DmaStrmAxisVseq #(
 						}
 					}
 				})
+				*/
 			end
 		join
 	endtask
@@ -662,6 +683,7 @@ class KernalRdReqTestcase0Seq extends tue_sequence #(
 			`uvm_do_with(kernal_rd_req_seq, {
 				to_rst_buf == 1'b1;
 				actual_cgrp_id_or_cgrpn == test_cfg.cgrpn_foreach_kernal_set[0];
+				cgrp_id_ofs == 0;
 			})
 		
 		repeat(10)
@@ -690,6 +712,7 @@ class KernalRdReqTestcase0Seq extends tue_sequence #(
 			`uvm_do_with(kernal_rd_req_seq, {
 				to_rst_buf == 1'b1;
 				actual_cgrp_id_or_cgrpn == test_cfg.cgrpn_foreach_kernal_set[0];
+				cgrp_id_ofs == 0;
 			})
 	endtask
 	
@@ -781,6 +804,95 @@ class KernalRdReqTestcase1Seq extends tue_sequence #(
 	endtask
 	
 	`uvm_object_utils(KernalRdReqTestcase1Seq)
+	
+endclass
+
+/**
+卷积核缓存测试用例#2:
+	遍历访问所有权重块, 核组内重复若干次
+**/
+class KernalRdReqTestcase2Seq extends tue_sequence #(
+	.CONFIGURATION(panda_axis_configuration),
+	.STATUS(tue_status_dummy),
+	.REQ(uvm_sequence_item),
+	.RSP(uvm_sequence_item),
+	.PROXY_CONFIGURATION(panda_axis_configuration),
+	.PROXY_STATUS(tue_status_dummy)
+);
+	
+	local ConvDataHubCfg test_cfg;
+	
+	function new(string name = "KernalRdReqTestcase2Seq");
+		super.new(name);
+		
+		this.set_automatic_phase_objection(1);
+    endfunction
+	
+	task pre_body();
+		super.pre_body();
+		
+		if(!uvm_config_db #(ConvDataHubCfg)::get(null, "", "test_cfg", this.test_cfg))
+			`uvm_fatal(this.get_name(), "cannot get test_cfg!!!")
+	endtask
+	
+	task body();
+		KwgtblkRdReqSeq kernal_rd_req_seq;
+		int unsigned cgrp_i_base;
+		int unsigned now_cgrp_id_ofs;
+		
+		if(starting_phase != null)
+			`uvm_do_with(kernal_rd_req_seq, {
+				to_rst_buf == 1'b1;
+				actual_cgrp_id_or_cgrpn == 1;
+				cgrp_id_ofs == 0;
+			})
+		
+		cgrp_i_base = 0;
+		now_cgrp_id_ofs = 0;
+		
+		for(int unsigned i = 0;i < test_cfg.total_kernal_set_n;i++)
+		begin
+			`uvm_do_with(kernal_rd_req_seq, {
+				to_rst_buf == 1'b1;
+				actual_cgrp_id_or_cgrpn == test_cfg.cgrpn_foreach_kernal_set[i];
+				cgrp_id_ofs == now_cgrp_id_ofs;
+			})
+			
+			repeat(5)
+			begin
+				for(int unsigned c = 0;c < test_cfg.cgrpn_foreach_kernal_set[i];c++)
+				begin
+					for(int unsigned k = 0;k < ConvDataHubCfg::kernal_sz_t_to_int(test_cfg.kernal_shape);k++)
+					begin
+						`uvm_do_with(kernal_rd_req_seq, {
+							to_rst_buf == 1'b0;
+							actual_cgrp_id_or_cgrpn == c;
+							wgtblk_id == k;
+							start_sfc_id == 0;
+							sfc_n_to_rd == test_cfg.wgtblk_w_foreach_kernal_set[i];
+							kernal_cgrp_baseaddr == test_cfg.abs_baseaddr_foreach_cgrp[cgrp_i_base + c];
+							sfc_n_foreach_wgtblk == test_cfg.wgtblk_w_foreach_kernal_set[i];
+							vld_data_n_foreach_sfc == test_cfg.depth_foreach_kernal_cgrp[cgrp_i_base + c];
+							
+							kernal_shape == test_cfg.kernal_shape;
+						})
+					end
+				end
+			end
+			
+			cgrp_i_base += test_cfg.cgrpn_foreach_kernal_set[i];
+			now_cgrp_id_ofs += test_cfg.cgrpn_foreach_kernal_set[i];
+		end
+		
+		if(starting_phase != null)
+			`uvm_do_with(kernal_rd_req_seq, {
+				to_rst_buf == 1'b1;
+				actual_cgrp_id_or_cgrpn == 1;
+				cgrp_id_ofs == 0;
+			})
+	endtask
+	
+	`uvm_object_utils(KernalRdReqTestcase2Seq)
 	
 endclass
 
@@ -992,7 +1104,7 @@ class conv_data_hub_test extends panda_test_single_clk_base #(
 		this.dma_axis_vsqr[1].set_default_sequence("main_phase", DmaStrmAxisVseq #(.MEM_NAME("kernal_mem"))::type_id::get());
 		this.fm_rd_req_axis_mst_agt.sequencer.set_default_sequence("main_phase", FmRdReqAllcaseSeq::type_id::get());
 		this.fm_fout_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
-		this.kwgtblk_rd_req_axis_mst_agt.sequencer.set_default_sequence("main_phase", KernalRdReqTestcase1Seq::type_id::get());
+		this.kwgtblk_rd_req_axis_mst_agt.sequencer.set_default_sequence("main_phase", KernalRdReqTestcase2Seq::type_id::get());
 		this.kout_wgtblk_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 		
 		this.fm_rd_req_axis_mst_agt.item_port.connect(this.fm_buf_scb.rd_req_port);

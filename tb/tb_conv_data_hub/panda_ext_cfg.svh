@@ -113,52 +113,10 @@ class ConvDataHubCfg extends tue_configuration;
 	endfunction
 	
 	function void post_randomize();
-		int unsigned cgrp_i;
-		
 		super.post_randomize();
 		
 		this.abs_baseaddr_foreach_fmrow = new[this.total_fmrow_n];
 		this.abs_baseaddr_foreach_cgrp = new[this.total_cgrp_n];
-		
-		foreach(this.abs_baseaddr_foreach_fmrow[i])
-		begin
-			if(i == 0)
-			begin
-				this.abs_baseaddr_foreach_fmrow[i] = this.fmap_mem_baseaddr;
-			end
-			else
-			begin
-				this.abs_baseaddr_foreach_fmrow[i] = this.abs_baseaddr_foreach_fmrow[i-1] + 
-					this.fmrow_len * this.sfc_data_n_foreach_fmrow[i-1] * 
-					this.atomic_c * 2;
-			end
-		end
-		
-		cgrp_i = 0;
-		
-		for(int unsigned k = 0;k < this.total_kernal_set_n;k++)
-		begin
-			int unsigned cgrp_n;
-			
-			cgrp_n = this.cgrpn_foreach_kernal_set[k];
-			
-			for(int unsigned c = 0;c < cgrp_n;c++)
-			begin
-				if(cgrp_i == 0)
-				begin
-					this.abs_baseaddr_foreach_cgrp[cgrp_i] = this.kernal_mem_baseaddr;
-				end
-				else
-				begin
-					this.abs_baseaddr_foreach_cgrp[cgrp_i] = this.abs_baseaddr_foreach_cgrp[cgrp_i - 1] + 
-						ConvDataHubCfg::kernal_sz_t_to_int(this.kernal_shape) * 
-						this.wgtblk_w_foreach_kernal_set[k] * 
-						this.atomic_c * 2;
-				end
-				
-				cgrp_i++;
-			end
-		end
 	endfunction
 	
 	constraint c_valid_stream_data_width{
