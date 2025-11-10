@@ -260,7 +260,7 @@ class conv_mac_array_test extends panda_test_single_clk_base #(
 		this.array_o_cfg = panda_axis_configuration::type_id::create("array_o_cfg");
 		if(!this.array_o_cfg.randomize() with {
 			data_width == 8*48;
-			user_width == 8;
+			user_width == 16;
 			
 			ready_delay.min_delay == 0;
 			ready_delay.mid_delay[0] == 1;
