@@ -12,6 +12,17 @@ class Cst0PackedReal extends PackedReal;
 	
 endclass
 
+class Cst1PackedReal extends PackedReal;
+	
+	constraint c_data{
+		data dist{0.0:/1};
+	}
+	
+	`tue_object_default_constructor(Cst1PackedReal)
+	`uvm_object_utils(Cst1PackedReal)
+	
+endclass
+
 class ArrayInBaseSeq extends tue_sequence #(
 	.CONFIGURATION(panda_axis_configuration),
 	.STATUS(tue_status_dummy),
@@ -47,29 +58,66 @@ class ArrayInFtmTestcase0Seq extends ArrayInBaseSeq;
     endfunction
 	
 	task body();
-		Cst0PackedReal data_gen;
+		Cst0PackedReal normal_data_gen;
+		Cst1PackedReal zero_data_gen;
 		
-		data_gen = Cst0PackedReal::type_id::create("data_gen");
+		normal_data_gen = Cst0PackedReal::type_id::create("normal_data_gen");
+		zero_data_gen = Cst1PackedReal::type_id::create("zero_data_gen");
 		
-		this.run_tr(1, 1, data_gen);
-		this.run_tr(1, 2, data_gen);
-		this.run_tr(1, 3, data_gen);
-		this.run_tr(1, 4, data_gen);
-		this.run_tr(2, 1, data_gen);
-		this.run_tr(2, 2, data_gen);
-		this.run_tr(2, 3, data_gen);
-		this.run_tr(2, 4, data_gen);
-		this.run_tr(3, 1, data_gen);
-		this.run_tr(3, 2, data_gen);
-		this.run_tr(3, 3, data_gen);
-		this.run_tr(3, 4, data_gen);
-		this.run_tr(4, 1, data_gen);
-		this.run_tr(4, 2, data_gen);
-		this.run_tr(4, 3, data_gen);
-		this.run_tr(4, 4, data_gen);
+		this.run_tr(1, 1, normal_data_gen);
+		this.run_tr(1, 2, zero_data_gen);
+		this.run_tr(1, 3, normal_data_gen);
+		this.run_tr(1, 4, normal_data_gen);
+		this.run_tr(2, 1, normal_data_gen);
+		this.run_tr(2, 2, zero_data_gen);
+		this.run_tr(2, 3, normal_data_gen);
+		this.run_tr(2, 4, normal_data_gen);
+		this.run_tr(3, 1, normal_data_gen);
+		this.run_tr(3, 2, normal_data_gen);
+		this.run_tr(3, 3, normal_data_gen);
+		this.run_tr(3, 4, normal_data_gen);
+		this.run_tr(4, 1, normal_data_gen);
+		this.run_tr(4, 2, normal_data_gen);
+		this.run_tr(4, 3, normal_data_gen);
+		this.run_tr(4, 4, normal_data_gen);
 	endtask
 	
 	`uvm_object_utils(ArrayInFtmTestcase0Seq)
+	
+endclass
+
+class ArrayInFtmTestcase1Seq extends ArrayInBaseSeq;
+	
+	function new(string name = "ArrayInFtmTestcase1Seq");
+		super.new(name);
+		
+		this.set_automatic_phase_objection(1);
+    endfunction
+	
+	task body();
+		Cst1PackedReal zero_data_gen;
+		
+		zero_data_gen = Cst1PackedReal::type_id::create("zero_data_gen");
+		
+		this.run_tr(1, 1, zero_data_gen);
+		this.run_tr(1, 2, zero_data_gen);
+		this.run_tr(1, 3, zero_data_gen);
+		this.run_tr(1, 4, zero_data_gen);
+		this.run_tr(2, 1, zero_data_gen);
+		this.run_tr(2, 2, zero_data_gen);
+		this.run_tr(2, 3, zero_data_gen);
+		this.run_tr(2, 4, zero_data_gen);
+		this.run_tr(3, 1, zero_data_gen);
+		this.run_tr(3, 2, zero_data_gen);
+		this.run_tr(3, 3, zero_data_gen);
+		this.run_tr(3, 4, zero_data_gen);
+		this.run_tr(4, 1, zero_data_gen);
+		this.run_tr(4, 2, zero_data_gen);
+		this.run_tr(4, 3, zero_data_gen);
+		this.run_tr(4, 4, zero_data_gen);
+	endtask
+	
+	`uvm_object_utils(ArrayInFtmTestcase1Seq)
 	
 endclass
 
@@ -214,6 +262,14 @@ class conv_mac_array_test extends panda_test_single_clk_base #(
 			data_width == 8*48;
 			user_width == 8;
 			
+			ready_delay.min_delay == 0;
+			ready_delay.mid_delay[0] == 1;
+			ready_delay.mid_delay[1] == 1;
+			ready_delay.max_delay == 3;
+			ready_delay.weight_zero_delay == 2;
+			ready_delay.weight_short_delay == 1;
+			ready_delay.weight_long_delay == 1;
+			
 			has_keep == 1'b0;
 			has_strb == 1'b0;
 			has_last == 1'b0;
@@ -248,7 +304,7 @@ class conv_mac_array_test extends panda_test_single_clk_base #(
 		this.array_i_kernal_agt.set_configuration(this.array_i_kernal_cfg);
 		
 		this.array_o_agt = panda_axis_slave_agent::type_id::create("array_o_agt", this);
-		this.array_o_agt.passive_agent();
+		this.array_o_agt.active_agent();
 		this.array_o_agt.set_configuration(this.array_o_cfg);
 	endfunction
 	
@@ -259,6 +315,7 @@ class conv_mac_array_test extends panda_test_single_clk_base #(
 		
 		this.array_i_ftm_agt.sequencer.set_default_sequence("main_phase", ArrayInFtmTestcase0Seq::type_id::get());
 		this.array_i_kernal_agt.sequencer.set_default_sequence("main_phase", ArrayInKernalTestcase1Seq::type_id::get());
+		this.array_o_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 	endfunction
 	
 	function void report_phase(uvm_phase phase);

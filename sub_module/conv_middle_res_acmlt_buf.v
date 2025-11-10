@@ -125,6 +125,9 @@ module conv_middle_res_acmlt_buf #(
 	localparam CAL_FMT_INT8 = 2'b00;
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
+	// 中间结果输入(user信号各字段的索引)
+	localparam integer S_AXIS_MID_RES_USER_LAST_ROUND = 0;
+	localparam integer S_AXIS_MID_RES_USER_FIRST_ROUND = 1;
 	
 	/** 补充运行时参数 **/
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
@@ -171,9 +174,8 @@ module conv_middle_res_acmlt_buf #(
 			mid_res_sel_s1 <= # SIM_DELAY mid_res_sel_s0;
 			mid_res_first_item_s1 <= # SIM_DELAY mid_res_first_item_s0;
 			mid_res_new_item_s1 <= # SIM_DELAY mid_res_new_item_s0;
-			mid_res_mask_s1 <= # SIM_DELAY 
-				// 说明: 仅在输入最后1组中间结果时才保存项掩码
-				mid_res_mask_s0 & {ATOMIC_K{s_axis_mid_res_user[0]}};
+			// 说明: 仅在输入最后1组中间结果时才保存项掩码
+			mid_res_mask_s1 <= # SIM_DELAY mid_res_mask_s0 & {ATOMIC_K{s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND]}};
 		end
 	end
 	always @(posedge aclk or negedge aresetn)
@@ -306,7 +308,7 @@ module conv_middle_res_acmlt_buf #(
 			(mid_res_upd_pipl_cid <= 16'd11)
 		));
 	
-	assign mid_res_first_item_s0 = s_axis_mid_res_user[1];
+	assign mid_res_first_item_s0 = s_axis_mid_res_user[S_AXIS_MID_RES_USER_FIRST_ROUND];
 	assign mid_res_new_item_s0 = s_axis_mid_res_data;
 	assign mid_res_valid_s0 = aclken & s_axis_mid_res_valid & s_axis_mid_res_ready;
 	
@@ -323,7 +325,7 @@ module conv_middle_res_acmlt_buf #(
 	
 	assign mid_res_line_buf_wen_at_wr = 
 		aclken & s_axis_mid_res_valid & s_axis_mid_res_ready & 
-		s_axis_mid_res_user[0] & (col_cnt_at_wr == ofmap_w);
+		s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & (col_cnt_at_wr == ofmap_w);
 	assign mid_res_line_buf_ren_at_wr = 
 		aclken & fnl_res_valid_s2 & fnl_res_ready_s2 & fnl_res_last_s2;
 	assign mid_res_line_buf_full_n = ~(

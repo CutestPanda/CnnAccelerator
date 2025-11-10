@@ -24,7 +24,7 @@ module tb_conv_middle_res_acmlt_buf();
 	// 待测模块配置
 	localparam integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	localparam integer RBUF_BANK_N = 9; // 缓存MEM个数(>=2)
-	localparam integer RBUF_DEPTH = 16; // 缓存MEM深度(16 | 32 | 64 | ... | 4096)
+	localparam integer RBUF_DEPTH = 16; // 缓存MEM深度(16 | ...)
 	localparam EN_SMALL_FP32 = "true"; // 是否处理极小FP32
 	// 运行时参数
 	localparam bit[1:0] calfmt = CAL_FMT_FP16; // 运算数据格式

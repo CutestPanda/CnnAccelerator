@@ -99,6 +99,55 @@ class FmapAcsReqGenBlkCtrlTestcase1Seq extends tue_sequence #(
 	
 endclass
 
+class FmapAcsReqGenBlkCtrlTestcase2Seq extends tue_sequence #(
+	.CONFIGURATION(panda_blk_ctrl_configuration),
+	.STATUS(tue_status_dummy),
+	.REQ(uvm_sequence_item),
+	.RSP(uvm_sequence_item),
+	.PROXY_CONFIGURATION(panda_blk_ctrl_configuration),
+	.PROXY_STATUS(tue_status_dummy)
+);
+	
+	rand bit is_zero_delay = 1'b0;
+	
+	function new(string name = "FmapAcsReqGenBlkCtrlTestcase2Seq");
+		super.new(name);
+		
+		this.set_automatic_phase_objection(1);
+    endfunction
+	
+	task body();
+		panda_fmap_sfc_row_access_req_gen_blk_ctrl_trans tr;
+		
+		`uvm_do_with(tr, {
+			conv_vertical_stride == 2;
+			
+			is_grp_conv_mode == 1'b0;
+			
+			fmap_baseaddr == 1024;
+			is_16bit_data == 1'b1;
+			ifmap_w == 23;
+			ifmap_h == 65;
+			fmap_chn_n == 256;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_top_bottom == 0;
+			
+			kernal_set_n == 2;
+			kernal_dilation_vtc_n == 1;
+			kernal_w == 3;
+			kernal_h == 3;
+			
+			if(is_zero_delay){
+				process_start_delay == 0;
+			}
+		})
+	endtask
+	
+	`uvm_object_utils(FmapAcsReqGenBlkCtrlTestcase2Seq)
+	
+endclass
+
 class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 	.CONFIGURATION(tue_configuration_dummy),
 	.STATUS(tue_status_dummy)
@@ -195,7 +244,7 @@ class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 		this.blk_ctrl_mst_agt.item_port.connect(this.scb.blk_ctrl_port);
 		this.rd_req_axis_slv_agt.item_port.connect(this.scb.rd_req_port);
 		
-		this.blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", FmapAcsReqGenBlkCtrlTestcase1Seq::type_id::get());
+		this.blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", FmapAcsReqGenBlkCtrlTestcase2Seq::type_id::get());
 		this.rd_req_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 		
 		this.scb.set_blk_ctrl_tr_mcd(this.blk_ctrl_tr_mcd);

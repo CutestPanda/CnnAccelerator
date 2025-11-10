@@ -83,7 +83,6 @@ module fmap_sfc_row_access_req_gen #(
 	input wire[15:0] kernal_set_n, // 核组个数 - 1
 	input wire[3:0] kernal_dilation_vtc_n, // 垂直膨胀量
 	input wire[3:0] kernal_w, // (膨胀前)卷积核宽度 - 1
-	input wire[3:0] kernal_h, // (膨胀前)卷积核高度 - 1
 	input wire[4:0] kernal_h_dilated, // (膨胀后)卷积核高度 - 1
 	
 	// 块级控制
@@ -310,6 +309,7 @@ module fmap_sfc_row_access_req_gen #(
 	reg[3:0] row_repeat_cnt; // 行重复(计数器)
 	wire last_row_repeat_flag; // 最后1次行重复(标志)
 	reg[4:0] ext_fmap_kernal_dy; // 扩展特征图核偏移y坐标
+	reg[3:0] kernal_mixed_zone_cnt; // 卷积核混合带计数器
 	wire last_kernal_row_flag; // 处于卷积核的最后1行(标志)
 	reg[15:0] cgrpn_cnt; // 通道组号(计数器)
 	wire last_fmap_cake_cgrp_flag; // 处于特征图切块的最后1个通道组(标志)
@@ -350,7 +350,20 @@ module fmap_sfc_row_access_req_gen #(
 			ext_fmap_kernal_dy <= # SIM_DELAY 
 				(blk_idle | last_kernal_row_flag) ? 
 					5'd0:
-					(ext_fmap_kernal_dy + 1'b1);
+					(ext_fmap_kernal_dy + kernal_dilation_vtc_n + 1'b1);
+	end
+	
+	// 卷积核混合带计数器
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			(blk_idle | (on_upd_row_access_cnt & last_row_repeat_flag))
+		)
+			kernal_mixed_zone_cnt <= # SIM_DELAY 
+				(blk_idle | last_kernal_row_flag) ? 
+					5'd0:
+					(kernal_mixed_zone_cnt + 1'b1);
 	end
 	
 	// 通道组号(计数器)
@@ -411,93 +424,10 @@ module fmap_sfc_row_access_req_gen #(
 					(kernal_set_cnt + 1'b1);
 	end
 	
-	/**
-	扩展卷积核
-	
-	行#0 * O * O *
-	行#1 O O O O O
-	行#2 * O * O *
-	行#3 O O O O O
-	行#4 * O * O *
-	
-	行#0+行#1是混合带#0
-	行#2+行#3是混合带#1
-	行#4是混合带#2
-	
-	行#1、行#3分别是2个不同的膨胀行
-	**/
-	reg[3:0] kernal_mixed_zone_cnt; // 混合带计数器
-	reg[3:0] kernal_dilation_row_cnt; // 膨胀行计数器
-	reg now_at_ext_kernal_dilation_zone_flag; // 当前处于扩展卷积核的膨胀带(标志)
-	
-	// 混合带计数器
-	always @(posedge aclk)
-	begin
-		if(
-			aclken & 
-			(
-				blk_idle | 
-				(
-					on_upd_row_access_cnt & last_row_repeat_flag & 
-					(
-						now_at_ext_kernal_dilation_zone_flag ? 
-							(kernal_dilation_row_cnt == kernal_dilation_vtc_n):
-							((kernal_dilation_vtc_n == 4'd0) | (kernal_mixed_zone_cnt == kernal_h))
-					)
-				)
-			)
-		)
-			kernal_mixed_zone_cnt <= # SIM_DELAY 
-				(blk_idle | (kernal_mixed_zone_cnt == kernal_h)) ? 
-					4'd0:
-					(kernal_mixed_zone_cnt + 1'b1);
-	end
-	
-	// 膨胀行计数器
-	always @(posedge aclk)
-	begin
-		if(
-			aclken & 
-			(
-				blk_idle | 
-				(
-					on_upd_row_access_cnt & last_row_repeat_flag & 
-					now_at_ext_kernal_dilation_zone_flag
-				)
-			)
-		)
-			kernal_dilation_row_cnt <= # SIM_DELAY 
-				(blk_idle | (kernal_dilation_row_cnt == kernal_dilation_vtc_n)) ? 
-					4'd1:
-					(kernal_dilation_row_cnt + 1'b1);
-	end
-	
-	// 当前处于扩展卷积核的膨胀带(标志)
-	always @(posedge aclk)
-	begin
-		if(
-			aclken & 
-			(
-				blk_idle | 
-				(
-					on_upd_row_access_cnt & last_row_repeat_flag & 
-					(
-						now_at_ext_kernal_dilation_zone_flag ? 
-							(kernal_dilation_row_cnt == kernal_dilation_vtc_n):
-							((kernal_dilation_vtc_n != 4'd0) & (kernal_mixed_zone_cnt != kernal_h))
-					)
-				)
-			)
-		)
-			now_at_ext_kernal_dilation_zone_flag <= # SIM_DELAY 
-				(~blk_idle) & (~now_at_ext_kernal_dilation_zone_flag);
-	end
-	
 	/** 扩展特征图 **/
 	// [坐标转换控制]
 	reg on_start_coordinate_cvt_in_cake; // 启动切块内坐标转换(指示)
 	reg on_done_coordinate_cvt_in_cake; // 完成切块内坐标转换(指示)
-	reg[3:0] coordinate_cvt_in_cake_cnt; // 切块内坐标转换次数(计数器)
 	reg[4:0] coordinate_cvt_dy_in_cake; // 切块内行偏移量
 	reg[11:0] max_vld_row_phy_y; // 有效表面行物理y坐标(最大值)
 	reg[11:0] min_vld_row_phy_y; // 有效表面行物理y坐标(最小值)
@@ -523,23 +453,10 @@ module fmap_sfc_row_access_req_gen #(
 			aclken & 
 			(
 				blk_idle | on_done_coordinate_cvt_in_cake | 
-				(ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_in_cake_cnt == kernal_h))
+				(ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_dy_in_cake == kernal_h_dilated))
 			)
 		)
 			on_done_coordinate_cvt_in_cake <= # SIM_DELAY ~(blk_idle | on_done_coordinate_cvt_in_cake);
-	end
-	
-	// 切块内坐标转换次数(计数器)
-	always @(posedge aclk)
-	begin
-		if(
-			aclken & 
-			(blk_idle | (ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done))
-		)
-			coordinate_cvt_in_cake_cnt <= # SIM_DELAY 
-				(blk_idle | (coordinate_cvt_in_cake_cnt == kernal_h)) ? 
-					4'd0:
-					(coordinate_cvt_in_cake_cnt + 1'b1);
 	end
 	
 	// 切块内行偏移量
@@ -550,7 +467,7 @@ module fmap_sfc_row_access_req_gen #(
 			(blk_idle | (ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done))
 		)
 			coordinate_cvt_dy_in_cake <= # SIM_DELAY 
-				(blk_idle | (coordinate_cvt_in_cake_cnt == kernal_h)) ? 
+				(blk_idle | (coordinate_cvt_dy_in_cake == kernal_h_dilated)) ? 
 					5'd0:
 					(coordinate_cvt_dy_in_cake + kernal_dilation_vtc_n + 1'b1);
 	end
@@ -608,7 +525,7 @@ module fmap_sfc_row_access_req_gen #(
 				blk_idle | 
 				(
 					ext_fmap_coordinate_cvt_blk_start ? 
-						(ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_in_cake_cnt == kernal_h)):
+						(ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_dy_in_cake == kernal_h_dilated)):
 						(on_start_coordinate_cvt_in_cake & ext_fmap_coordinate_cvt_blk_idle)
 				)
 			)
@@ -817,7 +734,7 @@ module fmap_sfc_row_access_req_gen #(
 	assign mul1_req = (aclken & on_start_cal_sfc_row_ofs_addr) | req_for_cal_sfc_row_ofs_addr_pending;
 	
 	assign on_upd_row_access_cnt = aclken & (req_gen_sts == REQ_GEN_STS_UPD_CNT);
-	assign to_skip_row = now_at_ext_kernal_dilation_zone_flag | cur_sfc_row_mask;
+	assign to_skip_row = cur_sfc_row_mask;
 	assign on_rst_coordinate_buf = 
 		blk_idle | 
 		(on_start_coordinate_cvt_in_cake & ext_fmap_coordinate_cvt_blk_idle);
@@ -896,7 +813,6 @@ module fmap_sfc_row_access_req_gen #(
 						req_gen_sts <= # SIM_DELAY REQ_GEN_STS_CAL_ADDR;
 				REQ_GEN_STS_CAL_ADDR: // 状态: 地址计算
 					if(
-						now_at_ext_kernal_dilation_zone_flag | 
 						(cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_START_CAL] & cur_sfc_row_mask) | 
 						(cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_WAIT_CAL] & sfc_row_abs_addr_upd_stage)
 					)
@@ -957,7 +873,7 @@ module fmap_sfc_row_access_req_gen #(
 				(
 					(req_gen_sts == REQ_GEN_STS_CAL_ADDR) & 
 					(
-						(cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_GET_CRDNT] & (~now_at_ext_kernal_dilation_zone_flag)) | 
+						cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_GET_CRDNT] | 
 						(
 							cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_START_CAL] & 
 							(cur_sfc_row_mask | row_data_size_of_cur_fmap_slice_available)
@@ -996,8 +912,7 @@ module fmap_sfc_row_access_req_gen #(
 		if(
 			aclken & 
 			(req_gen_sts == REQ_GEN_STS_CAL_ADDR) & 
-			cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_GET_CRDNT] & 
-			(~now_at_ext_kernal_dilation_zone_flag)
+			cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_GET_CRDNT]
 		)
 		begin
 			cur_sfc_row_mask <= # SIM_DELAY coordinate_buf_mask[kernal_mixed_zone_cnt];

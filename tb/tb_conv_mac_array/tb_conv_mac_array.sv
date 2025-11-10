@@ -76,7 +76,8 @@ module tb_conv_mac_array();
 	wire[ATOMIC_K*48-1:0] array_o_res; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	wire[3:0] array_o_cal_round_id; // 计算轮次编号
 	wire[INFO_ALONG_WIDTH-1:0] array_o_res_info_along; // 随路数据
-	wire array_o_res_vld; // 有效指示
+	wire array_o_res_vld; // 有效标志
+	wire array_o_res_rdy; // 就绪标志
 	// 外部有符号乘法器
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_a; // 操作数A
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_b; // 操作数B
@@ -103,7 +104,7 @@ module tb_conv_mac_array();
 	assign array_o_if_s.data[ATOMIC_K*48-1:0] = array_o_res;
 	assign array_o_if_s.user[INFO_ALONG_WIDTH+4-1:0] = {array_o_cal_round_id, array_o_res_info_along};
 	assign array_o_if_s.valid = array_o_res_vld;
-	assign array_o_if_s.ready = 1'b1;
+	assign array_o_res_rdy = array_o_if_s.ready;
 	
 	genvar mul_i;
 	generate
@@ -161,6 +162,7 @@ module tb_conv_mac_array();
 		.array_o_cal_round_id(array_o_cal_round_id),
 		.array_o_res_info_along(array_o_res_info_along),
 		.array_o_res_vld(array_o_res_vld),
+		.array_o_res_rdy(array_o_res_rdy),
 		
 		.mul_op_a(mul_op_a),
 		.mul_op_b(mul_op_b),

@@ -163,7 +163,6 @@ module tb_fmap_sfc_row_access_req_gen();
 		.kernal_set_n(kernal_set_n),
 		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
 		.kernal_w(kernal_w),
-		.kernal_h(kernal_h),
 		.kernal_h_dilated(kernal_h_dilated),
 		
 		.blk_start(blk_start),

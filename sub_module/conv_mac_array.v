@@ -46,6 +46,8 @@ ATOMIC_K个卷积乘加单元
 
 FP16模式时, 尾数偏移为-50
 
+当乘加阵列输出就绪标志无效时, 直接停止乘加阵列流水线
+
 注意：
 外部有符号乘法器的计算时延 = 1clk
 
@@ -97,7 +99,8 @@ module conv_mac_array #(
 	output wire[ATOMIC_K*48-1:0] array_o_res, // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	output wire[3:0] array_o_cal_round_id, // 计算轮次编号
 	output wire[INFO_ALONG_WIDTH-1:0] array_o_res_info_along, // 随路数据
-	output wire array_o_res_vld, // 有效指示
+	output wire array_o_res_vld, // 有效标志
+	input wire array_o_res_rdy, // 就绪标志
 	
 	// 外部有符号乘法器
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_a, // 操作数A
@@ -271,7 +274,7 @@ module conv_mac_array #(
 	reg[3:0] cal_round_cnt; // 计算轮次计数器
 	
 	assign array_i_ftm_sfc_rdy = 
-		aclken & (~rst_mac_array) & kernal_buf_empty_n & (cal_round_cnt == cal_round);
+		aclken & (~rst_mac_array) & kernal_buf_empty_n & (cal_round_cnt == cal_round) & array_o_res_rdy;
 	
 	// 计算轮次计数器
 	always @(posedge aclk or negedge aresetn)
@@ -282,7 +285,7 @@ module conv_mac_array #(
 			aclken & 
 			(
 				rst_mac_array | 
-				(array_i_ftm_sfc_vld & kernal_buf_empty_n)
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy)
 			)
 		)
 			cal_round_cnt <= # SIM_DELAY 
@@ -316,7 +319,7 @@ module conv_mac_array #(
 		);
 	assign kernal_buf_data_cur = kernal_buf_data[kernal_wgt_sel];
 	assign mac_in_info_along = {array_i_ftm_info_along, cal_round_cnt};
-	assign mac_in_valid = aclken & (~rst_mac_array) & array_i_ftm_sfc_vld & kernal_buf_empty_n;
+	assign mac_in_valid = aclken & (~rst_mac_array) & array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy;
 	
 	genvar mac_cell_i;
 	generate
@@ -330,7 +333,7 @@ module conv_mac_array #(
 			)mac_cell_u(
 				.aclk(aclk),
 				.aresetn(aresetn),
-				.aclken(aclken),
+				.aclken(aclken & array_o_res_rdy),
 				
 				.calfmt(calfmt),
 				
