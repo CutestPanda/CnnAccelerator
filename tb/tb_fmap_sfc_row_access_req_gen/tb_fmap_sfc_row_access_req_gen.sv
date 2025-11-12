@@ -22,6 +22,7 @@ module tb_fmap_sfc_row_access_req_gen();
 	panda_reset_if rst_if(clk_if.clk_p);
 	panda_blk_ctrl_if blk_ctrl_m(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if fmap_rd_req_axis_s(clk_if.clk_p, rst_if.reset_n);
+	panda_axis_if fm_cake_info_axis_s(clk_if.clk_p, rst_if.reset_n);
 	
 	/** 主任务 **/
 	initial begin
@@ -30,6 +31,7 @@ module tb_fmap_sfc_row_access_req_gen();
 		
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "blk_ctrl_vif_m", blk_ctrl_m);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "rd_req_axis_vif_s", fmap_rd_req_axis_s);
+		uvm_config_db #(panda_axis_vif)::set(null, "", "fm_cake_info_axis_vif_s", fm_cake_info_axis_s);
 		
 		run_test("fmap_sfc_row_access_req_gen_test");
 	end
@@ -62,10 +64,17 @@ module tb_fmap_sfc_row_access_req_gen();
 	wire blk_start;
 	wire blk_idle;
 	wire blk_done;
+	// 物理特征图表面行适配器控制
+	wire rst_adapter; // 重置适配器(标志)
+	wire on_incr_phy_row_traffic; // 增加1个物理特征图表面行流量(指示)
 	// 特征图表面行读请求(AXIS主机)
 	wire[103:0] m_fm_rd_req_axis_data;
 	wire m_fm_rd_req_axis_valid;
 	wire m_fm_rd_req_axis_ready;
+	// 特征图切块信息(AXIS主机)
+	wire[7:0] m_fm_cake_info_axis_data;
+	wire m_fm_cake_info_axis_valid;
+	wire m_fm_cake_info_axis_ready;
 	// (共享)无符号乘法器#0
 	// [计算输入]
 	wire[15:0] mul0_op_a; // 操作数A
@@ -101,6 +110,10 @@ module tb_fmap_sfc_row_access_req_gen();
 	assign fmap_rd_req_axis_s.data = m_fm_rd_req_axis_data;
 	assign fmap_rd_req_axis_s.valid = m_fm_rd_req_axis_valid;
 	assign m_fm_rd_req_axis_ready = fmap_rd_req_axis_s.ready;
+	
+	assign fm_cake_info_axis_s.data = m_fm_cake_info_axis_data;
+	assign fm_cake_info_axis_s.valid = m_fm_cake_info_axis_valid;
+	assign m_fm_cake_info_axis_ready = fm_cake_info_axis_s.ready;
 	
 	assign mul0_grant = mul0_req;
 	assign mul1_grant = mul1_req;
@@ -169,9 +182,16 @@ module tb_fmap_sfc_row_access_req_gen();
 		.blk_idle(blk_idle),
 		.blk_done(blk_done),
 		
+		.rst_adapter(rst_adapter),
+		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
+		
 		.m_fm_rd_req_axis_data(m_fm_rd_req_axis_data),
 		.m_fm_rd_req_axis_valid(m_fm_rd_req_axis_valid),
 		.m_fm_rd_req_axis_ready(m_fm_rd_req_axis_ready),
+		
+		.m_fm_cake_info_axis_data(m_fm_cake_info_axis_data),
+		.m_fm_cake_info_axis_valid(m_fm_cake_info_axis_valid),
+		.m_fm_cake_info_axis_ready(m_fm_cake_info_axis_ready),
 		
 		.mul0_op_a(mul0_op_a),
 		.mul0_op_b(mul0_op_b),

@@ -90,6 +90,10 @@ module fmap_sfc_row_access_req_gen #(
 	output wire blk_idle,
 	output wire blk_done,
 	
+	// 物理特征图表面行适配器控制
+	output wire rst_adapter, // 重置适配器(标志)
+	output wire on_incr_phy_row_traffic, // 增加1个物理特征图表面行流量(指示)
+	
 	// 特征图表面行读请求(AXIS主机)
 	/*
 	请求格式 -> 
@@ -107,6 +111,11 @@ module fmap_sfc_row_access_req_gen #(
 	output wire[103:0] m_fm_rd_req_axis_data,
 	output wire m_fm_rd_req_axis_valid,
 	input wire m_fm_rd_req_axis_ready,
+	
+	// 特征图切块信息(AXIS主机)
+	output wire[7:0] m_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
+	output wire m_fm_cake_info_axis_valid,
+	input wire m_fm_cake_info_axis_ready,
 	
 	// (共享)无符号乘法器#0
 	// [计算输入]
@@ -152,7 +161,7 @@ module fmap_sfc_row_access_req_gen #(
 	localparam REQ_GEN_STS_IDLE = 3'b000; // 状态: 空闲
 	localparam REQ_GEN_STS_FMBUF_RST = 3'b001; // 状态: 重置特征图缓存
 	localparam REQ_GEN_STS_CRDNT_CVT = 3'b010; // 状态: 启动坐标转换
-	localparam REQ_GEN_STS_PHY_Y_REOFS = 3'b011; // 状态: 物理y坐标重偏移
+	localparam REQ_GEN_STS_SEND_INFO = 3'b011; // 状态: 发送特征图切块信息
 	localparam REQ_GEN_STS_CAL_ADDR = 3'b100; // 状态: 地址计算
 	localparam REQ_GEN_STS_SEND_REQ = 3'b101; // 状态: 发送请求
 	localparam REQ_GEN_STS_UPD_CNT = 3'b110; // 状态: 更新计数器
@@ -362,7 +371,7 @@ module fmap_sfc_row_access_req_gen #(
 		)
 			kernal_mixed_zone_cnt <= # SIM_DELAY 
 				(blk_idle | last_kernal_row_flag) ? 
-					5'd0:
+					4'd0:
 					(kernal_mixed_zone_cnt + 1'b1);
 	end
 	
@@ -429,8 +438,6 @@ module fmap_sfc_row_access_req_gen #(
 	reg on_start_coordinate_cvt_in_cake; // 启动切块内坐标转换(指示)
 	reg on_done_coordinate_cvt_in_cake; // 完成切块内坐标转换(指示)
 	reg[4:0] coordinate_cvt_dy_in_cake; // 切块内行偏移量
-	reg[11:0] max_vld_row_phy_y; // 有效表面行物理y坐标(最大值)
-	reg[11:0] min_vld_row_phy_y; // 有效表面行物理y坐标(最小值)
 	// [坐标转换单元]
 	reg ext_fmap_coordinate_cvt_blk_start;
 	wire ext_fmap_coordinate_cvt_blk_idle;
@@ -439,10 +446,13 @@ module fmap_sfc_row_access_req_gen #(
 	wire[15:0] ext_fmap_coordinate_cvt_blk_o_phy_y; // 物理y坐标
 	wire ext_fmap_coordinate_cvt_blk_o_is_vld; // 坐标点是否有效
 	// [坐标缓存]
-	reg coordinate_buf_mask[0:15]; // 坐标缓存行掩码
-	reg[15:0] coordinate_buf_phy_y[0:15]; // 坐标缓存物理y坐标
+	reg coordinate_buf_mask[0:10]; // 坐标缓存行掩码
+	reg[15:0] coordinate_buf_phy_y[0:10]; // 坐标缓存物理y坐标
 	reg[3:0] coordinate_buf_wptr; // 坐标缓存写指针
 	wire on_rst_coordinate_buf; // 复位坐标缓存(指示)
+	reg[11:0] max_vld_row_phy_y; // 有效表面行物理y坐标(最大值)
+	reg[11:0] min_vld_row_phy_y; // 有效表面行物理y坐标(最小值)
+	reg[3:0] vld_phy_row_n; // 有效表面行总数
 	
 	assign ext_fmap_coordinate_cvt_blk_i_logic_y = ext_fmap_anchor_y + coordinate_cvt_dy_in_cake;
 	
@@ -471,6 +481,55 @@ module fmap_sfc_row_access_req_gen #(
 					5'd0:
 					(coordinate_cvt_dy_in_cake + kernal_dilation_vtc_n + 1'b1);
 	end
+	
+	// 坐标转换单元(start信号)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			ext_fmap_coordinate_cvt_blk_start <= 1'b0;
+		else if(
+			aclken & 
+			(
+				blk_idle | 
+				(
+					ext_fmap_coordinate_cvt_blk_start ? 
+						(ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_dy_in_cake == kernal_h_dilated)):
+						(on_start_coordinate_cvt_in_cake & ext_fmap_coordinate_cvt_blk_idle)
+				)
+			)
+		)
+			ext_fmap_coordinate_cvt_blk_start <= # SIM_DELAY 
+				(~blk_idle) & (~ext_fmap_coordinate_cvt_blk_start);
+	end
+	
+	// 坐标缓存写指针
+	always @(posedge aclk)
+	begin
+		if(aclken & (on_rst_coordinate_buf | (ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done)))
+			coordinate_buf_wptr <= # SIM_DELAY 
+				on_rst_coordinate_buf ? 
+					4'd0:
+					(coordinate_buf_wptr + 1'b1);
+	end
+	
+	// 坐标缓存(行掩码, 物理y坐标)
+	genvar crdnt_buf_i;
+	generate
+		for(crdnt_buf_i = 0;crdnt_buf_i < 11;crdnt_buf_i = crdnt_buf_i + 1)
+		begin:crdnt_buf_blk
+			always @(posedge aclk)
+			begin
+				if(
+					aclken & (~on_rst_coordinate_buf) & 
+					ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (coordinate_buf_wptr == crdnt_buf_i)
+				)
+				begin
+					coordinate_buf_mask[crdnt_buf_i] <= # SIM_DELAY ~ext_fmap_coordinate_cvt_blk_o_is_vld;
+					coordinate_buf_phy_y[crdnt_buf_i] <= # SIM_DELAY ext_fmap_coordinate_cvt_blk_o_phy_y;
+				end
+			end
+		end
+	endgenerate
 	
 	// 有效表面行物理y坐标(最大值)
 	always @(posedge aclk)
@@ -514,54 +573,22 @@ module fmap_sfc_row_access_req_gen #(
 					12'hfff;
 	end
 	
-	// 坐标转换单元(start信号)
-	always @(posedge aclk or negedge aresetn)
-	begin
-		if(~aresetn)
-			ext_fmap_coordinate_cvt_blk_start <= 1'b0;
-		else if(
-			aclken & 
-			(
-				blk_idle | 
-				(
-					ext_fmap_coordinate_cvt_blk_start ? 
-						(ext_fmap_coordinate_cvt_blk_done & (coordinate_cvt_dy_in_cake == kernal_h_dilated)):
-						(on_start_coordinate_cvt_in_cake & ext_fmap_coordinate_cvt_blk_idle)
-				)
-			)
-		)
-			ext_fmap_coordinate_cvt_blk_start <= # SIM_DELAY 
-				(~blk_idle) & (~ext_fmap_coordinate_cvt_blk_start);
-	end
-	
-	// 坐标缓存写指针
+	// 有效表面行总数
 	always @(posedge aclk)
 	begin
-		if(aclken & (on_rst_coordinate_buf | (ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done)))
-			coordinate_buf_wptr <= # SIM_DELAY 
-				on_rst_coordinate_buf ? 
-					4'd0:
-					(coordinate_buf_wptr + 1'b1);
+		if(
+			aclken & 
+			(
+				ext_fmap_coordinate_cvt_blk_start ? 
+					(ext_fmap_coordinate_cvt_blk_done & ext_fmap_coordinate_cvt_blk_o_is_vld):
+					(on_start_coordinate_cvt_in_cake & ext_fmap_coordinate_cvt_blk_idle)
+			)
+		)
+			vld_phy_row_n <= # SIM_DELAY 
+				ext_fmap_coordinate_cvt_blk_start ? 
+					(vld_phy_row_n + 1'b1):
+					4'd0;
 	end
-	
-	// 坐标缓存(行掩码, 物理y坐标)
-	genvar crdnt_buf_i;
-	generate
-		for(crdnt_buf_i = 0;crdnt_buf_i < 16;crdnt_buf_i = crdnt_buf_i + 1)
-		begin:crdnt_buf_blk
-			always @(posedge aclk)
-			begin
-				if(
-					aclken & (~on_rst_coordinate_buf) & 
-					ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (coordinate_buf_wptr == crdnt_buf_i)
-				)
-				begin
-					coordinate_buf_mask[crdnt_buf_i] <= # SIM_DELAY ~ext_fmap_coordinate_cvt_blk_o_is_vld;
-					coordinate_buf_phy_y[crdnt_buf_i] <= # SIM_DELAY ext_fmap_coordinate_cvt_blk_o_phy_y;
-				end
-			end
-		end
-	endgenerate
 	
 	surface_pos_logic_to_phy #(
 		.SIM_DELAY(SIM_DELAY)
@@ -697,12 +724,14 @@ module fmap_sfc_row_access_req_gen #(
 	reg req_for_cal_sfc_row_ofs_addr_pending; // 请求计算表面行偏移地址(等待标志)
 	reg[2:0] req_gen_sts; // 访问请求生成状态
 	reg to_fns_req_gen; // 准备结束访问请求生成(标志)
+	reg rst_buf_because_phy_y_reofs; // 因物理y坐标重偏移而重置缓存(标志)
 	reg[2:0] cal_addr_sub_sts; // 地址计算子状态
 	reg cur_sfc_row_mask; // 当前表面行掩码
 	reg[15:0] cur_sfc_row_phy_y; // 当前表面行物理y坐标
 	reg[11:0] phy_y_encoding_at_actual_rid; // 当前表面行实际表面行号中物理y坐标的编码
 	wire[11:0] phy_y_encoding_at_actual_rid_rvs; // 当前表面行实际表面行号中物理y坐标的倒转编码
 	reg[11:0] phy_y_encoding_ofs_at_actual_rid; // 实际表面行号中物理y坐标的编码偏移
+	wire phy_y_encoding_at_actual_rid_exceeded; // 当前表面行实际表面行号中物理y坐标的编码超过范围(标志)
 	
 	assign blk_idle = req_gen_sts == REQ_GEN_STS_IDLE;
 	assign blk_done = req_gen_sts == REQ_GEN_STS_DONE;
@@ -714,18 +743,19 @@ module fmap_sfc_row_access_req_gen #(
 	assign m_fm_rd_req_axis_data[84:73] = 12'd0; // 起始表面编号
 	assign m_fm_rd_req_axis_data[96:85] = 
 		phy_y_encoding_at_actual_rid_rvs | cgrpn_cnt[11:0]; // 实际表面行号
-	assign m_fm_rd_req_axis_data[97] = 
-		(req_gen_sts == REQ_GEN_STS_FMBUF_RST) | 
-		(req_gen_sts == REQ_GEN_STS_PHY_Y_REOFS); // 是否重置缓存
-	assign m_fm_rd_req_axis_data[103:98] = 6'bxxxxxx;
+	assign m_fm_rd_req_axis_data[97] = req_gen_sts == REQ_GEN_STS_FMBUF_RST; // 是否重置缓存
+	assign m_fm_rd_req_axis_data[103:98] = 6'b000000;
 	
 	assign m_fm_rd_req_axis_valid = 
 		aclken & 
-		(
-			(req_gen_sts == REQ_GEN_STS_FMBUF_RST) | 
-			(req_gen_sts == REQ_GEN_STS_PHY_Y_REOFS) | 
-			(req_gen_sts == REQ_GEN_STS_SEND_REQ)
-		);
+		((req_gen_sts == REQ_GEN_STS_FMBUF_RST) | (req_gen_sts == REQ_GEN_STS_SEND_REQ));
+	
+	assign m_fm_cake_info_axis_data[7:4] = 4'b0000;
+	assign m_fm_cake_info_axis_data[3:0] = vld_phy_row_n;
+	
+	assign m_fm_cake_info_axis_valid = 
+		aclken & 
+		(req_gen_sts == REQ_GEN_STS_SEND_INFO);
 	
 	// 计算: 表面行偏移地址 = 物理y坐标(u16) * 当前特征图切片的行数据量(u24)
 	assign mul1_op_a = cur_sfc_row_phy_y;
@@ -749,6 +779,8 @@ module fmap_sfc_row_access_req_gen #(
 		phy_y_encoding_at_actual_rid[6], phy_y_encoding_at_actual_rid[7], phy_y_encoding_at_actual_rid[8],
 		phy_y_encoding_at_actual_rid[9], phy_y_encoding_at_actual_rid[10], phy_y_encoding_at_actual_rid[11]
 	};
+	assign phy_y_encoding_at_actual_rid_exceeded = 
+		|((max_vld_row_phy_y - phy_y_encoding_ofs_at_actual_rid) & (~mask_for_phy_y_at_actual_rid_rvs));
 	
 	// 启动切块内坐标转换(指示)
 	always @(posedge aclk or negedge aresetn)
@@ -801,15 +833,19 @@ module fmap_sfc_row_access_req_gen #(
 						req_gen_sts <= # SIM_DELAY 
 							to_fns_req_gen ? 
 								REQ_GEN_STS_DONE:
-								REQ_GEN_STS_CRDNT_CVT;
+								(
+									rst_buf_because_phy_y_reofs ? 
+										REQ_GEN_STS_SEND_INFO:
+										REQ_GEN_STS_CRDNT_CVT
+								);
 				REQ_GEN_STS_CRDNT_CVT: // 状态: 启动坐标转换
 					if(on_done_coordinate_cvt_in_cake)
 						req_gen_sts <= # SIM_DELAY 
-							(|((max_vld_row_phy_y - phy_y_encoding_ofs_at_actual_rid) & (~mask_for_phy_y_at_actual_rid_rvs))) ? 
-								REQ_GEN_STS_PHY_Y_REOFS:
-								REQ_GEN_STS_CAL_ADDR;
-				REQ_GEN_STS_PHY_Y_REOFS: // 状态: 物理y坐标重偏移
-					if(m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready)
+							phy_y_encoding_at_actual_rid_exceeded ? 
+								REQ_GEN_STS_FMBUF_RST:
+								REQ_GEN_STS_SEND_INFO;
+				REQ_GEN_STS_SEND_INFO: // 状态: 发送特征图切块信息
+					if(m_fm_cake_info_axis_valid & m_fm_cake_info_axis_ready)
 						req_gen_sts <= # SIM_DELAY REQ_GEN_STS_CAL_ADDR;
 				REQ_GEN_STS_CAL_ADDR: // 状态: 地址计算
 					if(
@@ -850,17 +886,32 @@ module fmap_sfc_row_access_req_gen #(
 		if(
 			aclken & 
 			(
-				(
-					(req_gen_sts == REQ_GEN_STS_IDLE) & 
-					blk_start
-				) | 
+				((req_gen_sts == REQ_GEN_STS_IDLE) & blk_start) | 
+				((req_gen_sts == REQ_GEN_STS_CRDNT_CVT) & on_done_coordinate_cvt_in_cake & phy_y_encoding_at_actual_rid_exceeded) | 
 				(
 					(req_gen_sts == REQ_GEN_STS_UPD_CNT) & 
 					last_row_repeat_flag & last_kernal_row_flag & last_fmap_cake_cgrp_flag & arrive_ext_fmap_bottom_flag
 				)
 			)
 		)
-			to_fns_req_gen <= # SIM_DELAY (req_gen_sts != REQ_GEN_STS_IDLE) & last_kernal_set;
+			to_fns_req_gen <= # SIM_DELAY (req_gen_sts == REQ_GEN_STS_UPD_CNT) & last_kernal_set;
+	end
+	
+	// 因物理y坐标重偏移而重置缓存(标志)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			(
+				((req_gen_sts == REQ_GEN_STS_IDLE) & blk_start) | 
+				((req_gen_sts == REQ_GEN_STS_CRDNT_CVT) & on_done_coordinate_cvt_in_cake & phy_y_encoding_at_actual_rid_exceeded) | 
+				(
+					(req_gen_sts == REQ_GEN_STS_UPD_CNT) & 
+					last_row_repeat_flag & last_kernal_row_flag & last_fmap_cake_cgrp_flag & arrive_ext_fmap_bottom_flag
+				)
+			)
+		)
+			rst_buf_because_phy_y_reofs <= # SIM_DELAY req_gen_sts == REQ_GEN_STS_CRDNT_CVT;
 	end
 	
 	// 地址计算子状态
@@ -915,8 +966,8 @@ module fmap_sfc_row_access_req_gen #(
 			cal_addr_sub_sts[CAL_ADDR_SUB_STS_ONEHOT_GET_CRDNT]
 		)
 		begin
-			cur_sfc_row_mask <= # SIM_DELAY coordinate_buf_mask[kernal_mixed_zone_cnt];
-			cur_sfc_row_phy_y <= # SIM_DELAY coordinate_buf_phy_y[kernal_mixed_zone_cnt];
+			cur_sfc_row_mask <= # SIM_DELAY coordinate_buf_mask[(kernal_mixed_zone_cnt > 4'd10) ? 4'd10:kernal_mixed_zone_cnt];
+			cur_sfc_row_phy_y <= # SIM_DELAY coordinate_buf_phy_y[(kernal_mixed_zone_cnt > 4'd10) ? 4'd10:kernal_mixed_zone_cnt];
 		end
 	end
 	always @(posedge aclk)
@@ -940,7 +991,7 @@ module fmap_sfc_row_access_req_gen #(
 				(
 					(req_gen_sts == REQ_GEN_STS_CRDNT_CVT) & 
 					on_done_coordinate_cvt_in_cake & 
-					(|((max_vld_row_phy_y - phy_y_encoding_ofs_at_actual_rid) & (~mask_for_phy_y_at_actual_rid_rvs)))
+					phy_y_encoding_at_actual_rid_exceeded
 				)
 			)
 		)
@@ -948,6 +999,27 @@ module fmap_sfc_row_access_req_gen #(
 				(req_gen_sts == REQ_GEN_STS_FMBUF_RST) ? 
 					12'd0:
 					min_vld_row_phy_y;
+	end
+	
+	/** 物理特征图表面行适配器控制 **/
+	reg on_incr_phy_row_traffic_r; // 增加1个物理特征图表面行流量(指示)
+	
+	assign rst_adapter = extra_params_init_stage[1];
+	assign on_incr_phy_row_traffic = on_incr_phy_row_traffic_r;
+	
+	// 增加1个物理特征图表面行流量(指示)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			on_incr_phy_row_traffic_r <= 1'b0;
+		else if(
+			on_incr_phy_row_traffic_r | 
+			(
+				aclken & 
+				(req_gen_sts == REQ_GEN_STS_SEND_REQ) & m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready & (row_repeat_cnt == 4'd0)
+			)
+		)
+			on_incr_phy_row_traffic_r <= # SIM_DELAY ~on_incr_phy_row_traffic_r;
 	end
 	
 endmodule

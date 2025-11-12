@@ -160,9 +160,11 @@ class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 	
 	local panda_blk_ctrl_master_agent blk_ctrl_mst_agt;
 	local panda_axis_slave_agent rd_req_axis_slv_agt;
+	local panda_axis_slave_agent fm_cake_info_axis_slv_agt;
 	
 	local panda_blk_ctrl_configuration blk_ctrl_mst_cfg;
 	local panda_axis_configuration rd_req_axis_slv_cfg;
+	local panda_axis_configuration fm_cake_info_axis_slv_cfg;
 	
 	function new(string name = "fmap_sfc_row_access_req_gen_test", uvm_component parent = null);
 		super.new(name, parent);
@@ -217,10 +219,32 @@ class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize rd_req_axis_slv_cfg!")
 		
+		this.fm_cake_info_axis_slv_cfg = panda_axis_configuration::type_id::create("fm_cake_info_axis_slv_cfg");
+		if(!this.fm_cake_info_axis_slv_cfg.randomize() with {
+			data_width == 8;
+			user_width == 0;
+			
+			ready_delay.min_delay == 0;
+			ready_delay.mid_delay[0] == 6;
+			ready_delay.mid_delay[1] == 10;
+			ready_delay.max_delay == 30;
+			ready_delay.weight_zero_delay == 1;
+			ready_delay.weight_short_delay ==2;
+			ready_delay.weight_long_delay == 4;
+			
+			default_ready == 1'b1;
+			has_keep == 1'b0;
+			has_strb == 1'b0;
+			has_last == 1'b0;
+		})
+			`uvm_fatal(this.get_name(), "cannot randomize fm_cake_info_axis_slv_cfg!")
+		
 		if(!uvm_config_db #(panda_blk_ctrl_vif)::get(null, "", "blk_ctrl_vif_m", blk_ctrl_mst_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for blk_ctrl_vif_m!!!")
 		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "rd_req_axis_vif_s", rd_req_axis_slv_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for rd_req_axis_vif_s!!!")
+		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "fm_cake_info_axis_vif_s", fm_cake_info_axis_slv_cfg.vif))
+			`uvm_fatal(get_name(), "virtual interface must be set for fm_cake_info_axis_vif_s!!!")
 	endfunction
 	
 	protected function void build_status();
@@ -238,6 +262,10 @@ class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 		this.rd_req_axis_slv_agt = panda_axis_slave_agent::type_id::create("rd_req_axis_slv_agt", this);
 		this.rd_req_axis_slv_agt.active_agent();
 		this.rd_req_axis_slv_agt.set_configuration(this.rd_req_axis_slv_cfg);
+		
+		this.fm_cake_info_axis_slv_agt = panda_axis_slave_agent::type_id::create("fm_cake_info_axis_slv_agt", this);
+		this.fm_cake_info_axis_slv_agt.active_agent();
+		this.fm_cake_info_axis_slv_agt.set_configuration(this.fm_cake_info_axis_slv_cfg);
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
@@ -246,6 +274,7 @@ class fmap_sfc_row_access_req_gen_test extends panda_test_single_clk_base #(
 		
 		this.blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", FmapAcsReqGenBlkCtrlTestcase2Seq::type_id::get());
 		this.rd_req_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
+		this.fm_cake_info_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 		
 		this.scb.set_blk_ctrl_tr_mcd(this.blk_ctrl_tr_mcd);
 		this.scb.set_rd_req_tr_mcd(this.rd_req_tr_mcd);
