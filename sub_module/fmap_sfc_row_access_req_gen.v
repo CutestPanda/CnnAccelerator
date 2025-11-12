@@ -90,7 +90,8 @@ module fmap_sfc_row_access_req_gen #(
 	output wire blk_idle,
 	output wire blk_done,
 	
-	// 物理特征图表面行适配器控制
+	// 后级计算单元控制
+	// [物理特征图表面行适配器控制]
 	output wire rst_adapter, // 重置适配器(标志)
 	output wire on_incr_phy_row_traffic, // 增加1个物理特征图表面行流量(指示)
 	
@@ -831,13 +832,9 @@ module fmap_sfc_row_access_req_gen #(
 				REQ_GEN_STS_FMBUF_RST: // 状态: 重置特征图缓存
 					if(m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready)
 						req_gen_sts <= # SIM_DELAY 
-							to_fns_req_gen ? 
-								REQ_GEN_STS_DONE:
-								(
-									rst_buf_because_phy_y_reofs ? 
-										REQ_GEN_STS_SEND_INFO:
-										REQ_GEN_STS_CRDNT_CVT
-								);
+							({3{to_fns_req_gen}} & REQ_GEN_STS_DONE) | 
+							({3{rst_buf_because_phy_y_reofs}} & REQ_GEN_STS_SEND_INFO) | 
+							({3{~(to_fns_req_gen | rst_buf_because_phy_y_reofs)}} & REQ_GEN_STS_CRDNT_CVT);
 				REQ_GEN_STS_CRDNT_CVT: // 状态: 启动坐标转换
 					if(on_done_coordinate_cvt_in_cake)
 						req_gen_sts <= # SIM_DELAY 
@@ -987,7 +984,7 @@ module fmap_sfc_row_access_req_gen #(
 		if(
 			aclken & 
 			(
-				(req_gen_sts == REQ_GEN_STS_FMBUF_RST) | 
+				((req_gen_sts == REQ_GEN_STS_FMBUF_RST) & (~rst_buf_because_phy_y_reofs)) | 
 				(
 					(req_gen_sts == REQ_GEN_STS_CRDNT_CVT) & 
 					on_done_coordinate_cvt_in_cake & 
@@ -1001,7 +998,8 @@ module fmap_sfc_row_access_req_gen #(
 					min_vld_row_phy_y;
 	end
 	
-	/** 物理特征图表面行适配器控制 **/
+	/** 后级计算单元控制 **/
+	// [物理特征图表面行适配器控制]
 	reg on_incr_phy_row_traffic_r; // 增加1个物理特征图表面行流量(指示)
 	
 	assign rst_adapter = extra_params_init_stage[1];
