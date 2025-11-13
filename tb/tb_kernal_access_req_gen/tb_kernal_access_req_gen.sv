@@ -17,7 +17,6 @@ module tb_kernal_access_req_gen();
 	
 	/** 配置参数 **/
 	parameter integer ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer MAX_WGTBLK_W = 8; // 权重块最大宽度(1 | 2 | 4 | 8 | 16 | 32)
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -48,6 +47,7 @@ module tb_kernal_access_req_gen();
 	wire[15:0] n_foreach_group; // 每组的通道数/核数 - 1
 	wire[15:0] group_n; // 分组数 - 1
 	wire[15:0] cgrpn_foreach_kernal_set; // 每个核组的通道组数 - 1
+	wire[5:0] max_wgtblk_w; // 权重块最大宽度
 	// 块级控制
 	wire blk_start;
 	wire blk_idle;
@@ -73,9 +73,10 @@ module tb_kernal_access_req_gen();
 	assign blk_ctrl_m.done = blk_done;
 	
 	assign {
+		max_wgtblk_w,
 		cgrpn_foreach_kernal_set, group_n, n_foreach_group, is_grp_conv_mode, ofmap_h, kernal_shape, kernal_num_n,
 		kernal_chn_n, kernal_wgt_baseaddr, is_16bit_wgt
-	} = blk_ctrl_m.params[132:0];
+	} = blk_ctrl_m.params[138:0];
 	
 	assign kwgtblk_rd_req_axis_s.data = m_kwgtblk_rd_req_axis_data;
 	assign kwgtblk_rd_req_axis_s.valid = m_kwgtblk_rd_req_axis_valid;
@@ -102,7 +103,6 @@ module tb_kernal_access_req_gen();
 	
 	kernal_access_req_gen #(
 		.ATOMIC_C(ATOMIC_C),
-		.MAX_WGTBLK_W(MAX_WGTBLK_W),
 		.SIM_DELAY(0)
 	)dut(
 		.aclk(clk_if.clk_p),
@@ -119,6 +119,7 @@ module tb_kernal_access_req_gen();
 		.n_foreach_group(n_foreach_group),
 		.group_n(group_n),
 		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
+		.max_wgtblk_w(max_wgtblk_w),
 		
 		.blk_start(blk_start),
 		.blk_idle(blk_idle),

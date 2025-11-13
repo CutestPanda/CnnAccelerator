@@ -34,7 +34,8 @@ SOFTWARE.
 支持扩展卷积核(核膨胀)
 
 注意：
-当处于组卷积模式时, 每组的通道数/核数必须<=权重块最大宽度(MAX_WGTBLK_W)
+当处于组卷积模式时, 每组的通道数/核数必须<=权重块最大宽度(max_wgtblk_w)
+权重块最大宽度(max_wgtblk_w)必须<=32
 目前仅支持16位权重数据
 卷积核权重块在内存中必须是连续存储的
 
@@ -50,7 +51,6 @@ REQ/GRANT
 
 module kernal_access_req_gen #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer MAX_WGTBLK_W = 8, // 权重块最大宽度(1 | 2 | 4 | 8 | 16 | 32)
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -69,6 +69,7 @@ module kernal_access_req_gen #(
 	input wire[15:0] n_foreach_group, // 每组的通道数/核数 - 1
 	input wire[15:0] group_n, // 分组数 - 1
 	input wire[15:0] cgrpn_foreach_kernal_set, // 每个核组的通道组数 - 1
+	input wire[5:0] max_wgtblk_w, // 权重块最大宽度
 	
 	// 块级控制
 	input wire blk_start,
@@ -166,7 +167,7 @@ module kernal_access_req_gen #(
 	assign is_last_kernal_set = 
 		is_grp_conv_mode ? 
 			(visited_kernal_num_or_group_cnt == group_n):
-			((visited_kernal_num_or_group_cnt + MAX_WGTBLK_W) > kernal_num_n);
+			((visited_kernal_num_or_group_cnt + max_wgtblk_w) > kernal_num_n);
 	assign is_last_traverse_now_kernal_set = 
 		kernal_set_traverse_cnt == ofmap_h;
 	assign is_last_kernal_cgrp = 
@@ -186,7 +187,7 @@ module kernal_access_req_gen #(
 					(
 						is_grp_conv_mode ? 
 							(visited_kernal_num_or_group_cnt + 1'b1):
-							(visited_kernal_num_or_group_cnt + MAX_WGTBLK_W)
+							(visited_kernal_num_or_group_cnt + max_wgtblk_w)
 					);
 	end
 	
@@ -378,7 +379,7 @@ module kernal_access_req_gen #(
 					(
 						is_last_kernal_set ? 
 							(kernal_num_n - visited_kernal_num_or_group_cnt):
-							(MAX_WGTBLK_W - 1)
+							(max_wgtblk_w - 1)
 					);
 	end
 	

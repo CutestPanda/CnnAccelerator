@@ -17,6 +17,7 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 	rand bit is_grp_conv_mode; // 是否处于组卷积模式
 	rand bit[15:0] group_n; // 分组数
 	rand bit[15:0] cgrpn_foreach_kernal_set; // 每个核组的通道组数
+	rand bit[5:0] max_wgtblk_w; // 权重块最大宽度
 	
 	bit[15:0] n_foreach_group; // 每组的通道数/核数
 	
@@ -56,6 +57,9 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 		this.cgrpn_foreach_kernal_set = params & 'hffff;
 		this.cgrpn_foreach_kernal_set++;
 		params >>= 16;
+		
+		this.max_wgtblk_w = params & 'b111111;
+		params >>= 6;
 	endfunction
 	
 	virtual function panda_blk_ctrl_params pack_params();
@@ -71,6 +75,7 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 		p[100:85] = this.n_foreach_group - 1;
 		p[116:101] = this.group_n - 1;
 		p[132:117] = this.cgrpn_foreach_kernal_set - 1;
+		p[138:133] = this.max_wgtblk_w;
 		
 		return p;
 	endfunction
@@ -90,6 +95,8 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 			printer.print_int("group_n", this.group_n, 32, UVM_DEC);
 		end
 		
+		printer.print_int("max_wgtblk_w", this.max_wgtblk_w, 32, UVM_DEC);
+		
 		printer.print_time("process_begin_time", this.process_begin_time);
 		printer.print_time("process_end_time", this.process_end_time);
 	endfunction
@@ -104,6 +111,10 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 			
 			(kernal_chn_n % group_n) == 0;
 		}
+	}
+	
+	constraint c_valid_max_wgtblk_w{
+		max_wgtblk_w <= 32;
 	}
 	
 	function void post_randomize();
@@ -129,6 +140,7 @@ class panda_kernal_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract
 		`uvm_field_int(n_foreach_group, UVM_DEFAULT | UVM_NOPRINT | UVM_DEC)
 		`uvm_field_int(group_n, UVM_DEFAULT | UVM_NOPRINT | UVM_DEC)
 		`uvm_field_int(cgrpn_foreach_kernal_set, UVM_DEFAULT | UVM_NOPRINT | UVM_DEC)
+		`uvm_field_int(max_wgtblk_w, UVM_DEFAULT | UVM_NOPRINT | UVM_DEC)
 		`uvm_field_int(process_begin_time, UVM_DEFAULT | UVM_TIME | UVM_NOPRINT | UVM_NOCOMPARE)
 		`uvm_field_int(process_end_time, UVM_DEFAULT | UVM_TIME | UVM_NOPRINT | UVM_NOCOMPARE)
 	`uvm_object_utils_end

@@ -29,6 +29,7 @@ class KernalAcsReqGenBlkCtrlTestcase0Seq extends tue_sequence #(
 			ofmap_h == 2;
 			is_grp_conv_mode == 1'b0;
 			cgrpn_foreach_kernal_set == 2;
+			max_wgtblk_w == 8;
 			
 			if(is_zero_delay){
 				process_start_delay == 0;
@@ -68,6 +69,7 @@ class KernalAcsReqGenBlkCtrlTestcase1Seq extends tue_sequence #(
 			ofmap_h == 3;
 			is_grp_conv_mode == 1'b0;
 			cgrpn_foreach_kernal_set == 3;
+			max_wgtblk_w == 8;
 			
 			if(is_zero_delay){
 				process_start_delay == 0;
@@ -108,6 +110,7 @@ class KernalAcsReqGenBlkCtrlTestcase2Seq extends tue_sequence #(
 			is_grp_conv_mode == 1'b1;
 			group_n == 3;
 			cgrpn_foreach_kernal_set == 2;
+			max_wgtblk_w == 8;
 			
 			if(is_zero_delay){
 				process_start_delay == 0;
