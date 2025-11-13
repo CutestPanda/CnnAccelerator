@@ -193,7 +193,7 @@ class kernal_access_req_gen_test extends panda_test_single_clk_base #(
 	protected function void build_configuration();
 		this.blk_ctrl_mst_cfg = panda_blk_ctrl_configuration::type_id::create("blk_ctrl_mst_cfg");
 		if(!this.blk_ctrl_mst_cfg.randomize() with {
-			params_width == 133;
+			params_width == 139;
 			
 			start_delay.min_delay == 0;
 			start_delay.mid_delay[0] == 25;

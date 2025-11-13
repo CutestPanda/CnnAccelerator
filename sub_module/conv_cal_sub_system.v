@@ -29,6 +29,10 @@ SOFTWARE.
 描述:
 包括物理特征图表面行适配器、卷积乘加阵列、卷积中间结果表面行信息打包单元、卷积中间结果累加与缓存
 
+使用ATOMIC_K*ATOMIC_C个s16*s16乘法器
+
+使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH)
+
 注意：
 当参数calfmt(运算数据格式)或cal_round(计算轮次 - 1)无效时, 需要除能乘加阵列(en_mac_array拉低)
 

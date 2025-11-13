@@ -291,7 +291,8 @@ module kernal_access_req_gen #(
 			(wgtblk_n_foreach_cgrp[6:0] | 16'h0000);
 	assign shared_mul_c0_tid = SHARED_MUL_C0_TID_CONST;
 	assign shared_mul_c0_req = 
-		kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ0] | kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ1];
+		aclken & 
+		(kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ0] | kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ1]);
 	
 	assign on_upd_wgtblk_pos_cnt = 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
@@ -324,7 +325,11 @@ module kernal_access_req_gen #(
 					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_GEN_REQ;
 				KWGTBLK_ACCESS_STS_GEN_REQ: // 状态: 生成请求
-					if(~(on_upd_kernal_set_params | on_upd_kernal_cgrp_params | (~kernal_cgrp_len_upd_sts[KWGTBLK_ACCESS_STS_IDLE])))
+					if(~(
+						on_upd_kernal_set_params | 
+						on_upd_kernal_cgrp_params | 
+						(~kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_UPTODT])
+					))
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT;
 				KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT: // 状态: 等待请求被接受
 					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
@@ -462,13 +467,10 @@ module kernal_access_req_gen #(
 	always @(posedge aclk)
 	begin
 		if(
-			aclken & 
 			(
-				(
-					kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT0] | 
-					kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT1]
-				) & shared_mul_ovld & (shared_mul_oid == SHARED_MUL_C0_TID_CONST)
-			)
+				kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT0] | 
+				kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT1]
+			) & shared_mul_ovld & (shared_mul_oid == SHARED_MUL_C0_TID_CONST)
 		)
 			// 警告: 应保证通道组长度 < 2^24字节!
 			btt_of_now_kernal_cgrp <= # SIM_DELAY shared_mul_res[23:0];
@@ -480,21 +482,23 @@ module kernal_access_req_gen #(
 		if(~aresetn)
 			kernal_cgrp_len_upd_sts <= (1 << CGRP_BTT_UPD_STS_ONEHOT_UPTODT);
 		else if(
-			aclken & 
 			(
-				(kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_UPTODT] & on_upd_kernal_cgrp_params) | 
+				aclken & 
 				(
+					(kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_UPTODT] & on_upd_kernal_cgrp_params) | 
 					(
-						kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ0] | 
-						kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ1]
-					) & shared_mul_c0_grant
-				) | 
-				(
-					(
-						kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT0] | 
-						kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT1]
-					) & shared_mul_ovld & (shared_mul_oid == SHARED_MUL_C0_TID_CONST)
+						(
+							kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ0] | 
+							kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ1]
+						) & shared_mul_c0_grant
+					)
 				)
+			) | 
+			(
+				(
+					kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT0] | 
+					kernal_cgrp_len_upd_sts[CGRP_BTT_UPD_STS_ONEHOT_MUL_OUT1]
+				) & shared_mul_ovld & (shared_mul_oid == SHARED_MUL_C0_TID_CONST)
 			)
 		)
 			kernal_cgrp_len_upd_sts <= # SIM_DELAY {kernal_cgrp_len_upd_sts[3:0], kernal_cgrp_len_upd_sts[4]};
