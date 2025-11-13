@@ -53,8 +53,8 @@ module tb_conv_mac_array();
 	end
 	
 	/** 待测模块 **/
-	// 控制/状态
-	wire rst_mac_array; // 复位乘加阵列(指示)
+	// 使能信号
+	wire en_mac_array; // 使能乘加阵列
 	// 运行时参数
 	wire[1:0] calfmt; // 运算数据格式
 	wire[3:0] cal_round; // 计算轮次 - 1
@@ -75,6 +75,7 @@ module tb_conv_mac_array();
 	// 乘加阵列输出
 	wire[ATOMIC_K*48-1:0] array_o_res; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	wire[3:0] array_o_cal_round_id; // 计算轮次编号
+	wire array_o_is_last_cal_round; // 是否最后1轮计算
 	wire[INFO_ALONG_WIDTH-1:0] array_o_res_info_along; // 随路数据
 	wire[ATOMIC_K-1:0] array_o_res_mask; // 计算结果输出项掩码
 	wire array_o_res_vld; // 有效标志
@@ -85,7 +86,7 @@ module tb_conv_mac_array();
 	wire[ATOMIC_K-1:0] mul_ce; // 计算使能
 	wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_res; // 计算结果
 	
-	assign rst_mac_array = 1'b0;
+	assign en_mac_array = 1'b1;
 	
 	assign calfmt = CAL_FMT_FP16;
 	assign cal_round = MAX_CAL_ROUND - 1;
@@ -103,7 +104,8 @@ module tb_conv_mac_array();
 	assign array_i_kernal_if_m.ready = array_i_kernal_buf_full_n;
 	
 	assign array_o_if_s.data[ATOMIC_K*48-1:0] = array_o_res;
-	assign array_o_if_s.user[ATOMIC_K+INFO_ALONG_WIDTH+4-1:0] = {array_o_res_mask, array_o_cal_round_id, array_o_res_info_along};
+	assign array_o_if_s.user[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] = 
+		{array_o_res_mask, array_o_res_info_along, array_o_cal_round_id, array_o_is_last_cal_round};
 	assign array_o_if_s.valid = array_o_res_vld;
 	assign array_o_res_rdy = array_o_if_s.ready;
 	
@@ -142,7 +144,7 @@ module tb_conv_mac_array();
 		.aresetn(rst_if.reset_n),
 		.aclken(1'b1),
 		
-		.rst_mac_array(rst_mac_array),
+		.en_mac_array(en_mac_array),
 		
 		.calfmt(calfmt),
 		.cal_round(cal_round),
@@ -161,6 +163,7 @@ module tb_conv_mac_array();
 		
 		.array_o_res(array_o_res),
 		.array_o_cal_round_id(array_o_cal_round_id),
+		.array_o_is_last_cal_round(array_o_is_last_cal_round),
 		.array_o_res_info_along(array_o_res_info_along),
 		.array_o_res_mask(array_o_res_mask),
 		.array_o_res_vld(array_o_res_vld),

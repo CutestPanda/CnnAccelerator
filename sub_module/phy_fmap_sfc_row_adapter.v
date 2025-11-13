@@ -52,7 +52,7 @@ module phy_fmap_sfc_row_adapter #(
 	input wire aresetn,
 	input wire aclken,
 	
-	// 重置适配器(标志)
+	// 重置适配器
 	input wire rst_adapter,
 	
 	// 运行时参数

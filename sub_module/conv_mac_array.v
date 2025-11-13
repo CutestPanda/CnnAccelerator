@@ -71,8 +71,8 @@ module conv_mac_array #(
 	input wire aresetn,
 	input wire aclken,
 	
-	// 控制/状态
-	input wire rst_mac_array, // 复位乘加阵列(指示)
+	// 使能信号
+	input wire en_mac_array, // 使能乘加阵列
 	
 	// 运行时参数
 	input wire[1:0] calfmt, // 运算数据格式
@@ -96,6 +96,7 @@ module conv_mac_array #(
 	// 乘加阵列输出
 	output wire[ATOMIC_K*48-1:0] array_o_res, // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	output wire[3:0] array_o_cal_round_id, // 计算轮次编号
+	output wire array_o_is_last_cal_round, // 是否最后1轮计算
 	output wire[INFO_ALONG_WIDTH-1:0] array_o_res_info_along, // 随路数据
 	output wire[ATOMIC_K-1:0] array_o_res_mask, // 计算结果输出项掩码
 	output wire array_o_res_vld, // 有效标志
@@ -107,6 +108,11 @@ module conv_mac_array #(
 	output wire[ATOMIC_K-1:0] mul_ce, // 计算使能
 	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_res // 计算结果
 );
+	
+	/** 复位乘加阵列 **/
+	wire rst_mac_array;
+	
+	assign rst_mac_array = ~en_mac_array;
 	
 	/** 卷积核权重乒乓缓存 **/
 	reg kernal_buf_wsel; // 写选择
@@ -320,12 +326,12 @@ module conv_mac_array #(
 	/** 乘加阵列 **/
 	wire[4:0] kernal_wgt_sel; // 卷积核权重选择
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] kernal_buf_data_cur; // 当前选择的卷积核权重(数据)
-	wire[INFO_ALONG_WIDTH+4+ATOMIC_K-1:0] mac_in_info_along; // 输入随路数据
+	wire[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] mac_in_info_along; // 输入随路数据
 	wire mac_in_valid; // 输入有效指示
-	wire[INFO_ALONG_WIDTH+4+ATOMIC_K-1:0] mac_out_info_along_arr[0:ATOMIC_K-1]; // 随路数据(数组)
+	wire[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] mac_out_info_along_arr[0:ATOMIC_K-1]; // 随路数据(数组)
 	wire[ATOMIC_K-1:0] array_o_res_vld_vec; // 计算结果输出有效(指示向量)
 	
-	assign {array_o_res_mask, array_o_res_info_along, array_o_cal_round_id} = mac_out_info_along_arr[0];
+	assign {array_o_res_mask, array_o_res_info_along, array_o_cal_round_id, array_o_is_last_cal_round} = mac_out_info_along_arr[0];
 	// 断言: array_o_res_vld_vec只能是{ATOMIC_K{1'b1}}或{ATOMIC_K{1'b0}}
 	assign array_o_res_vld = aclken & array_o_res_vld_vec[0];
 	
@@ -341,8 +347,9 @@ module conv_mac_array #(
 				cal_round_cnt
 		);
 	assign kernal_buf_data_cur = kernal_buf_data[kernal_wgt_sel];
-	assign mac_in_info_along[INFO_ALONG_WIDTH+4-1:0] = {array_i_ftm_info_along, cal_round_cnt};
-	assign mac_in_info_along[INFO_ALONG_WIDTH+4+ATOMIC_K-1:INFO_ALONG_WIDTH+4] = 
+	assign mac_in_info_along[0] = cal_round_cnt == cal_round;
+	assign mac_in_info_along[INFO_ALONG_WIDTH+4+1-1:1] = {array_i_ftm_info_along, cal_round_cnt};
+	assign mac_in_info_along[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:INFO_ALONG_WIDTH+4+1] = 
 		kernal_buf_mask[kernal_buf_rsel] >> (cal_round_cnt * ATOMIC_K);
 	assign mac_in_valid = aclken & (~rst_mac_array) & array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy;
 	
@@ -353,7 +360,7 @@ module conv_mac_array #(
 			conv_mac_cell #(
 				.ATOMIC_C(ATOMIC_C),
 				.EN_SMALL_FP16(EN_SMALL_FP16),
-				.INFO_ALONG_WIDTH(INFO_ALONG_WIDTH + 4 + ATOMIC_K),
+				.INFO_ALONG_WIDTH(ATOMIC_K + INFO_ALONG_WIDTH + 4 + 1),
 				.SIM_DELAY(SIM_DELAY)
 			)mac_cell_u(
 				.aclk(aclk),

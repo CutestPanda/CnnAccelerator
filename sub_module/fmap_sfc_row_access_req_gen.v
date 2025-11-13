@@ -94,6 +94,8 @@ module fmap_sfc_row_access_req_gen #(
 	// [物理特征图表面行适配器控制]
 	output wire rst_adapter, // 重置适配器(标志)
 	output wire on_incr_phy_row_traffic, // 增加1个物理特征图表面行流量(指示)
+	// [卷积中间结果表面行信息打包单元控制]
+	output wire[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel, // 核组所选定特征图域的通道组数 - 1
 	
 	// 特征图表面行读请求(AXIS主机)
 	/*
@@ -182,7 +184,7 @@ module fmap_sfc_row_access_req_gen #(
 	reg[23:0] actual_ifmap_size; // 输入特征图大小
 	wire[15:0] chn_n_of_fmap_region_that_kernal_set_sel; // 核组所选定特征图域的通道数
 	reg[5:0] sfc_depth_of_last_fmap_cake_cgrp; // 特征图切块最后1个通道组的表面深度
-	reg[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel; // 核组所选定特征图域的通道组数 - 1
+	reg[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel_r; // 核组所选定特征图域的通道组数 - 1
 	reg[11:0] mask_for_cgrpid_at_actual_rid; // 实际表面行号中的通道组号(占用掩码)
 	wire[11:0] mask_for_phy_y_at_actual_rid; // 实际表面行号中的物理y坐标(占用掩码)
 	wire[11:0] mask_for_phy_y_at_actual_rid_rvs; // 实际表面行号中的物理y坐标(倒转占用掩码)
@@ -193,6 +195,8 @@ module fmap_sfc_row_access_req_gen #(
 	reg req_for_cal_row_data_size_of_last_fmap_cake_cgrp; // 请求计算特征图切块最后1个通道组的行数据量(标志)
 	reg[23:0] row_data_size_of_last_fmap_cake_cgrp; // 特征图切块最后1个通道组的行数据量
 	reg row_data_size_of_last_fmap_cake_cgrp_available; // 特征图切块最后1个通道组的行数据量(参数可用标志)
+	
+	assign cgrp_n_of_fmap_region_that_kernal_set_sel = cgrp_n_of_fmap_region_that_kernal_set_sel_r;
 	
 	// 计算: 特征图切块最后1个通道组的行数据量 = 特征图切块最后1个通道组的表面深度(u6) * 输入特征图宽度(u16) * 每个数据的字节数(1或2)
 	assign mul0_op_a = 
@@ -250,7 +254,7 @@ module fmap_sfc_row_access_req_gen #(
 	always @(posedge aclk)
 	begin
 		if(aclken & blk_start & blk_idle)
-			cgrp_n_of_fmap_region_that_kernal_set_sel <= # SIM_DELAY 
+			cgrp_n_of_fmap_region_that_kernal_set_sel_r <= # SIM_DELAY 
 				chn_n_of_fmap_region_that_kernal_set_sel[15:clogb2(ATOMIC_C)] - 
 				(
 					((ATOMIC_C != 1) & (|chn_n_of_fmap_region_that_kernal_set_sel[clogb2(ATOMIC_C-1):0])) ? 
@@ -265,18 +269,18 @@ module fmap_sfc_row_access_req_gen #(
 		if(aclken & extra_params_init_stage[1])
 			mask_for_cgrpid_at_actual_rid <= # SIM_DELAY 
 				{
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:11],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:10],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:9],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:8],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:7],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:6],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:5],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:4],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:3],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:2],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:1],
-					|cgrp_n_of_fmap_region_that_kernal_set_sel[15:0]
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:11],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:10],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:9],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:8],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:7],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:6],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:5],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:4],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:3],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:2],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:1],
+					|cgrp_n_of_fmap_region_that_kernal_set_sel_r[15:0]
 				};
 	end
 	
@@ -333,7 +337,7 @@ module fmap_sfc_row_access_req_gen #(
 	
 	assign last_row_repeat_flag = (row_repeat_cnt == kernal_w) | to_skip_row;
 	assign last_kernal_row_flag = ext_fmap_kernal_dy == kernal_h_dilated;
-	assign last_fmap_cake_cgrp_flag = cgrpn_cnt == cgrp_n_of_fmap_region_that_kernal_set_sel;
+	assign last_fmap_cake_cgrp_flag = cgrpn_cnt == cgrp_n_of_fmap_region_that_kernal_set_sel_r;
 	assign arrive_ext_fmap_bottom_flag = ofmap_y == ofmap_h;
 	assign last_kernal_set = kernal_set_cnt == kernal_set_n;
 	

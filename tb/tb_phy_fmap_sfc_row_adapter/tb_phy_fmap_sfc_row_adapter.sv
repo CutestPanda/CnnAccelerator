@@ -70,7 +70,7 @@ module tb_phy_fmap_sfc_row_adapter();
 	end
 	
 	/** 待测模块 **/
-	// 重置适配器(标志)
+	// 重置适配器
 	wire rst_adapter;
 	// 特征图表面行流量
 	wire on_incr_phy_row_traffic; // 增加1个物理特征图表面行流量(指示)
