@@ -7,6 +7,8 @@ import panda_pkg::*;
 `include "panda_macros.svh"
 
 `include "panda_ext_defines.svh"
+`include "utils.svh"
+
 `include "panda_ext_trans.svh"
 
 `include "panda_ext_scoreboard.svh"
@@ -48,6 +50,11 @@ module tb_kernal_access_req_gen();
 	wire[15:0] group_n; // 分组数 - 1
 	wire[15:0] cgrpn_foreach_kernal_set; // 每个核组的通道组数 - 1
 	wire[5:0] max_wgtblk_w; // 权重块最大宽度
+	wire[2:0] conv_vertical_stride; // 卷积垂直步长 - 1
+	wire[15:0] ext_i_bottom; // 扩展后特征图的垂直边界
+	wire[2:0] external_padding_top; // 上部外填充数
+	wire[2:0] inner_padding_top_bottom; // 上下内填充数
+	wire[3:0] kernal_dilation_vtc_n; // 垂直膨胀量
 	// 块级控制
 	wire blk_start;
 	wire blk_idle;
@@ -73,10 +80,11 @@ module tb_kernal_access_req_gen();
 	assign blk_ctrl_m.done = blk_done;
 	
 	assign {
-		max_wgtblk_w,
+		kernal_dilation_vtc_n, inner_padding_top_bottom, external_padding_top,
+		ext_i_bottom, conv_vertical_stride, max_wgtblk_w,
 		cgrpn_foreach_kernal_set, group_n, n_foreach_group, is_grp_conv_mode, ofmap_h, kernal_shape, kernal_num_n,
 		kernal_chn_n, kernal_wgt_baseaddr, is_16bit_wgt
-	} = blk_ctrl_m.params[138:0];
+	} = blk_ctrl_m.params[167:0];
 	
 	assign kwgtblk_rd_req_axis_s.data = m_kwgtblk_rd_req_axis_data;
 	assign kwgtblk_rd_req_axis_s.valid = m_kwgtblk_rd_req_axis_valid;
@@ -120,6 +128,11 @@ module tb_kernal_access_req_gen();
 		.group_n(group_n),
 		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
 		.max_wgtblk_w(max_wgtblk_w),
+		.conv_vertical_stride(conv_vertical_stride),
+		.ext_i_bottom(ext_i_bottom),
+		.external_padding_top(external_padding_top),
+		.inner_padding_top_bottom(inner_padding_top_bottom),
+		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
 		
 		.blk_start(blk_start),
 		.blk_idle(blk_idle),

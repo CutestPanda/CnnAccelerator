@@ -145,7 +145,7 @@ class FmapAccessReqGenScoreboard extends tue_scoreboard #(
 							exp_tr.sfc_row_btt = blk_ctrl_tr.ifmap_w * exp_tr.vld_data_n_foreach_sfc * bytes_n_foreach_data;
 							exp_tr.sfc_row_baseaddr = 
 								blk_ctrl_tr.fmap_baseaddr + 
-								(blk_ctrl_tr.is_grp_conv_mode ? 0:(s * blk_ctrl_tr.data_size_foreach_group)) + 
+								(blk_ctrl_tr.is_grp_conv_mode ? (s * blk_ctrl_tr.data_size_foreach_group):0) + 
 								(c * blk_ctrl_tr.ifmap_size * this.atomic_c * bytes_n_foreach_data) + 
 								(phy_y * blk_ctrl_tr.ifmap_w * exp_tr.vld_data_n_foreach_sfc * bytes_n_foreach_data);
 							

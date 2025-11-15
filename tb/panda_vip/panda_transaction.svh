@@ -423,4 +423,26 @@ virtual class panda_blk_ctrl_abstract_trans extends tue_sequence_item #(
 	
 endclass
 
+class panda_blk_ctrl_dummy_trans extends panda_blk_ctrl_abstract_trans;
+	
+	int unsigned id;
+	
+	virtual function void unpack_params(panda_blk_ctrl_params params);
+		// blank
+	endfunction
+	
+	virtual function panda_blk_ctrl_params pack_params();
+		return 0;
+	endfunction
+	
+	`tue_object_default_constructor(panda_blk_ctrl_dummy_trans)
+	
+	`uvm_object_utils_begin(panda_blk_ctrl_dummy_trans)
+		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE)
+		`uvm_field_int(process_begin_time, UVM_DEFAULT | UVM_TIME | UVM_NOCOMPARE)
+		`uvm_field_int(process_end_time, UVM_DEFAULT | UVM_TIME | UVM_NOCOMPARE)
+	`uvm_object_utils_end
+	
+endclass
+
 `endif

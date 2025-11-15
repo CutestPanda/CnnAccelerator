@@ -29,7 +29,7 @@ SOFTWARE.
 描述:
 包括卷积核权重访问请求生成单元、特征图表面行访问请求生成单元
 
-使用1个u16*u16乘法器、1个u16*u24乘法器
+使用1个u16*u16乘法器、1个u16*u24乘法器, 时延 = 1clk
 
 注意：
 目前不支持INT8运算数据格式
@@ -198,11 +198,11 @@ module conv_ctrl_sub_system #(
 	assign kernal_w = 
 		(
 			(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
-			(kernal_shape == KBUFGRPSZ_9)  ? 4'd9:
-			(kernal_shape == KBUFGRPSZ_25) ? 4'd25:
-			(kernal_shape == KBUFGRPSZ_49) ? 4'd49:
-			(kernal_shape == KBUFGRPSZ_81) ? 4'd81:
-											 4'd121
+			(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
+			(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
+			(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
+			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
+											 4'd11
 	    ) - 1;
 	
 	/** 后级计算单元控制 **/
@@ -282,6 +282,11 @@ module conv_ctrl_sub_system #(
 		.group_n(group_n),
 		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
 		.max_wgtblk_w(max_wgtblk_w),
+		.conv_vertical_stride(conv_vertical_stride),
+		.ext_i_bottom(fmap_ext_i_bottom),
+		.external_padding_top(external_padding_top),
+		.inner_padding_top_bottom(inner_padding_top_bottom),
+		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
 		
 		.blk_start(kernal_access_blk_start),
 		.blk_idle(kernal_access_blk_idle),

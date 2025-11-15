@@ -1,5 +1,5 @@
-`ifndef __PANDA_ICB_IF_H
-`define __PANDA_ICB_IF_H
+`ifndef __PANDA_IF_H
+`define __PANDA_IF_H
 
 `include "panda_defines.svh"
 

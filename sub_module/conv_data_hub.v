@@ -77,9 +77,7 @@ module conv_data_hub #(
 	// [卷积核缓存]
 	input wire grp_conv_buf_mode, // 是否处于组卷积缓存模式
 	input wire[2:0] kbufgrpsz, // 每个通道组的权重块个数的类型
-	// 说明: 仅当"处于组卷积缓存模式"时可用
 	input wire[2:0] sfc_n_each_wgtblk, // 每个权重块的表面个数的类型
-	// 说明: 仅当"不处于组卷积缓存模式"时可用
 	input wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
 	// [物理缓存]
 	input wire[7:0] fmbufbankn, // 分配给特征图缓存的Bank数
@@ -1380,6 +1378,7 @@ module conv_data_hub #(
 					case(kwgtblk_rd_req_sts[kwgtblk_rd_req_i])
 						KWGTBLK_RD_STS_EMPTY:
 							if(
+								s_kwgtblk_rd_req_axis_valid & 
 								(~rst_logic_kbuf) & 
 								(acceptable_kwgtblk_rd_req_wptr[clogb2(KWGTBLK_RD_REQ_PRE_ACPT_N-1):0] == kwgtblk_rd_req_i) & 
 								(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 该请求项不是"重置缓存"

@@ -1,9 +1,9 @@
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: 乘法器DSP单元
+本模块: 无符号乘法器DSP单元
 
 描述:
-有符号乘加器: mul_out = op_a * op_b
+无符号乘加器: mul_out = op_a * op_b
 时延 = 1clk
 
 注意：
@@ -14,11 +14,11 @@
 无
 
 作者: 陈家耀
-日期: 2024/11/06
+日期: 2024/11/13
 ********************************************************************/
 
 
-module mul #(
+module unsigned_mul #(
 	parameter integer op_a_width = 16, // 操作数A位宽(含1位符号位)
 	parameter integer op_b_width = 16, // 操作数B位宽(含1位符号位)
 	parameter integer output_width = 32, // 输出位宽(含1位符号位)
@@ -31,16 +31,16 @@ module mul #(
 	input wire ce_s0_mul,
 	
 	// 乘加器输入
-	input wire signed[op_a_width-1:0] op_a,
-	input wire signed[op_b_width-1:0] op_b,
+	input wire[op_a_width-1:0] op_a,
+	input wire[op_b_width-1:0] op_b,
 	
 	// 乘加器输出
-	output wire signed[output_width-1:0] res
+	output wire[output_width-1:0] res
 );
     
-	wire signed[op_a_width-1:0] mul_in1;
-	wire signed[op_b_width-1:0] mul_in2;
-	reg signed[(op_a_width+op_b_width)-1:0] mul_res;
+	wire[op_a_width-1:0] mul_in1;
+	wire[op_b_width-1:0] mul_in2;
+	reg[(op_a_width+op_b_width)-1:0] mul_res;
 	
 	assign res = mul_res;
 	

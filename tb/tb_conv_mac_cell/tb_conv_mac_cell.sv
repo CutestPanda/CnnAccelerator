@@ -219,7 +219,7 @@ module tb_conv_mac_cell();
 	generate
 		for(mul_i = 0;mul_i < ATOMIC_C;mul_i = mul_i + 1)
 		begin:mul_blk
-			mul #(
+			signed_mul #(
 				.op_a_width(16),
 				.op_b_width(16),
 				.output_width(32),

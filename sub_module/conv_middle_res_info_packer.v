@@ -273,9 +273,7 @@ module conv_middle_res_info_packer #(
 		((~need_cur_fm_cake_h_param) | cur_fm_cake_h_param_vld);
 	
 	assign need_cur_fm_cake_h_param = arrive_ofmap_row_end & arrive_kernal_vld_region_row_end;
-	assign last_mid_res = 
-		mac_array_is_last_cal_round & 
-		arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake & at_last_cgrp_in_fm_cake;
+	assign last_mid_res = arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake & at_last_cgrp_in_fm_cake;
 	
 	// 第1组中间结果(标志)
 	always @(posedge aclk or negedge aresetn)

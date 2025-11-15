@@ -31,6 +31,12 @@ class KernalAcsReqGenBlkCtrlTestcase0Seq extends tue_sequence #(
 			cgrpn_foreach_kernal_set == 2;
 			max_wgtblk_w == 8;
 			
+			conv_vertical_stride == 1;
+			ext_i_bottom == 2;
+			external_padding_top == 1;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_vtc_n == 0;
+			
 			if(is_zero_delay){
 				process_start_delay == 0;
 			}
@@ -70,6 +76,12 @@ class KernalAcsReqGenBlkCtrlTestcase1Seq extends tue_sequence #(
 			is_grp_conv_mode == 1'b0;
 			cgrpn_foreach_kernal_set == 3;
 			max_wgtblk_w == 8;
+			
+			conv_vertical_stride == 1;
+			ext_i_bottom == 3;
+			external_padding_top == 1;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_vtc_n == 0;
 			
 			if(is_zero_delay){
 				process_start_delay == 0;
@@ -111,6 +123,12 @@ class KernalAcsReqGenBlkCtrlTestcase2Seq extends tue_sequence #(
 			group_n == 3;
 			cgrpn_foreach_kernal_set == 2;
 			max_wgtblk_w == 8;
+			
+			conv_vertical_stride == 1;
+			ext_i_bottom == 3;
+			external_padding_top == 1;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_vtc_n == 0;
 			
 			if(is_zero_delay){
 				process_start_delay == 0;
@@ -193,7 +211,7 @@ class kernal_access_req_gen_test extends panda_test_single_clk_base #(
 	protected function void build_configuration();
 		this.blk_ctrl_mst_cfg = panda_blk_ctrl_configuration::type_id::create("blk_ctrl_mst_cfg");
 		if(!this.blk_ctrl_mst_cfg.randomize() with {
-			params_width == 139;
+			params_width == 168;
 			
 			start_delay.min_delay == 0;
 			start_delay.mid_delay[0] == 25;
@@ -206,6 +224,7 @@ class kernal_access_req_gen_test extends panda_test_single_clk_base #(
 			`uvm_fatal(this.get_name(), "cannot randomize blk_ctrl_mst_cfg!")
 		this.blk_ctrl_mst_cfg.tr_factory = 
 			panda_kernal_access_req_gen_blk_ctrl_trans_factory::type_id::create("blk_ctrl_trans_factory");
+		this.blk_ctrl_mst_cfg.complete_monitor_mode = 1'b0;
 		
 		this.kwgtblk_rd_req_axis_slv_cfg = panda_axis_configuration::type_id::create("kwgtblk_rd_req_axis_slv_cfg");
 		if(!this.kwgtblk_rd_req_axis_slv_cfg.randomize() with {

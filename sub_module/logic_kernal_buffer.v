@@ -73,7 +73,6 @@ module logic_kernal_buffer #(
 	input wire grp_conv_buf_mode, // 是否处于组卷积缓存模式
 	input wire[2:0] kbufgrpsz, // 每个通道组的权重块个数的类型
 	input wire[2:0] sfc_n_each_wgtblk, // 每个权重块的表面个数的类型
-	// 说明: 仅当"不处于组卷积缓存模式"时可用
 	input wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
 	
 	// 核组参数

@@ -2,8 +2,8 @@
 `define __PANDA_TEST_BASE_H
 
 virtual class panda_test_single_clk_base #(
-  type CONFIGURATION = tue_configuration_dummy,
-  type STATUS = tue_status_dummy
+	type CONFIGURATION = tue_configuration_dummy,
+	type STATUS = tue_status_dummy
 )extends tue_test #(CONFIGURATION, STATUS);
 	
 	protected realtime clk_period = 10ns;
@@ -29,8 +29,10 @@ virtual class panda_test_single_clk_base #(
 	
 	virtual task reset_phase(uvm_phase phase);
 		phase.raise_objection(this);
+		
 		this.clk_vif.start(this.clk_period);
 		this.rst_vif.initiate(this.rst_duration, 1'b1);
+		
 		phase.drop_objection(this);
 	endtask
 	
@@ -61,6 +63,39 @@ virtual class panda_test_single_clk_base #(
 	endfunction
 	
 	`tue_component_default_constructor(panda_test_single_clk_base)
+	
+endclass
+
+virtual class panda_env #(
+	type CONFIGURATION = tue_configuration_dummy,
+	type STATUS = tue_status_dummy
+)extends tue_component_base #(uvm_env, CONFIGURATION, STATUS);
+	
+	virtual function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.build_configuration();
+		this.build_status();
+		this.build_agents();
+	endfunction
+	
+	function void create_configuration();
+		this.configuration = CONFIGURATION::type_id::create("configuration");
+	endfunction
+	
+	virtual protected function void build_configuration();
+		// blank
+	endfunction
+	
+	virtual protected function void build_status();
+		// blank
+	endfunction
+	
+	virtual protected function void build_agents();
+		// blank
+	endfunction
+	
+	`tue_component_default_constructor(panda_env)
 	
 endclass
 

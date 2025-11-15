@@ -29,9 +29,9 @@ SOFTWARE.
 描述:
 包括物理特征图表面行适配器、卷积乘加阵列、卷积中间结果表面行信息打包单元、卷积中间结果累加与缓存
 
-使用ATOMIC_K*ATOMIC_C个s16*s16乘法器
+使用ATOMIC_K*ATOMIC_C个s16*s16乘法器, 时延 = 1clk
 
-使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH)
+使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH), 读时延 = 1clk
 
 注意：
 当参数calfmt(运算数据格式)或cal_round(计算轮次 - 1)无效时, 需要除能乘加阵列(en_mac_array拉低)
@@ -91,8 +91,8 @@ module conv_cal_sub_system #(
 	input wire[15:0] ofmap_w, // 输出特征图宽度 - 1
 	input wire[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel, // 核组所选定特征图域的通道组数 - 1
 	// [卷积核参数]
+	input wire[2:0] kernal_shape, // 卷积核形状
 	input wire[3:0] kernal_dilation_hzt_n, // 水平膨胀量
-	input wire[3:0] kernal_w, // (膨胀前)卷积核宽度 - 1
 	input wire[4:0] kernal_w_dilated, // (膨胀后)卷积核宽度 - 1
 	// [中间结果缓存参数]
 	input wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
@@ -142,6 +142,28 @@ module conv_cal_sub_system #(
 	output wire[RBUF_BANK_N*16-1:0] mem_addr_b,
 	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b
 );
+	
+	/** 常量 **/
+	// 卷积核形状的类型编码
+	localparam KBUFGRPSZ_1 = 3'b000; // 1x1
+	localparam KBUFGRPSZ_9 = 3'b001; // 3x3
+	localparam KBUFGRPSZ_25 = 3'b010; // 5x5
+	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
+	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
+	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	
+	/** 补充运行时参数 **/
+	wire[3:0] kernal_w; // (膨胀前)卷积核宽度 - 1
+	
+	assign kernal_w = 
+		(
+			(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
+			(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
+			(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
+			(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
+			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
+											 4'd11
+	    ) - 1;
 	
 	/** 物理特征图表面行适配器 **/
 	// 物理特征图表面行数据(AXIS从机)

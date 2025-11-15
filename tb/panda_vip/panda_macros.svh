@@ -67,15 +67,21 @@ function ``TYPE`` get_``FIELD_NAME``(int index); \
 		return '0; \
 endfunction
 
+`define panda_print_with(VAR, FID, PRINTER) \
+PRINTER.knobs.mcd = FID; \
+VAR.print(PRINTER); \
+PRINTER.knobs.mcd = UVM_STDOUT;
+
 `define panda_print(VAR, FID) \
-uvm_default_printer.knobs.mcd = FID; \
-VAR.print(); \
-uvm_default_printer.knobs.mcd = UVM_STDOUT;
+`panda_print_with(VAR, FID, uvm_default_printer)
 
-`define panda_set_print_all_elements \
-uvm_default_printer.knobs.begin_elements = -1;
+`define panda_set_print_all_elements(PRINTER) \
+PRINTER.knobs.begin_elements = -1;
 
-`define panda_set_print_begin_elements_5 \
-uvm_default_printer.knobs.begin_elements = 5;
+`define panda_set_print_begin_elements_5(PRINTER) \
+PRINTER.knobs.begin_elements = 5;
+
+`define panda_set_default_printer(PRINTER) \
+uvm_default_printer = PRINTER;
 
 `endif

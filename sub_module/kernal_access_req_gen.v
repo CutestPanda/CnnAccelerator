@@ -70,6 +70,11 @@ module kernal_access_req_gen #(
 	input wire[15:0] group_n, // 分组数 - 1
 	input wire[15:0] cgrpn_foreach_kernal_set, // 每个核组的通道组数 - 1
 	input wire[5:0] max_wgtblk_w, // 权重块最大宽度
+	input wire[2:0] conv_vertical_stride, // 卷积垂直步长 - 1
+	input wire[15:0] ext_i_bottom, // 扩展后特征图的垂直边界
+	input wire[2:0] external_padding_top, // 上部外填充数
+	input wire[2:0] inner_padding_top_bottom, // 上下内填充数
+	input wire[3:0] kernal_dilation_vtc_n, // 垂直膨胀量
 	
 	// 块级控制
 	input wire blk_start,
@@ -130,9 +135,10 @@ module kernal_access_req_gen #(
 	// 权重块访问状态编码
 	localparam KWGTBLK_ACCESS_STS_IDLE = 3'b000; // 状态: 空闲
 	localparam KWGTBLK_ACCESS_STS_BUF_PRE_RST = 3'b001; // 状态: 缓存前复位
-	localparam KWGTBLK_ACCESS_STS_GEN_REQ = 3'b010; // 状态: 生成请求
-	localparam KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT = 3'b011; // 状态: 等待请求被接受
-	localparam KWGTBLK_ACCESS_STS_BUF_POST_RST = 3'b100; // 状态: 缓存后复位
+	localparam KWGTBLK_ACCESS_STS_GEN_ROW_MASK = 3'b010; // 状态: 生成行掩码
+	localparam KWGTBLK_ACCESS_STS_GEN_REQ = 3'b011; // 状态: 生成请求
+	localparam KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT = 3'b100; // 状态: 等待请求被接受
+	localparam KWGTBLK_ACCESS_STS_BUF_POST_RST = 3'b101; // 状态: 缓存后复位
 	// 通道组长度更新状态编码
 	localparam integer CGRP_BTT_UPD_STS_ONEHOT_UPTODT = 0; // 状态: 无需更新
 	localparam integer CGRP_BTT_UPD_STS_ONEHOT_MUL_REQ0 = 1; // 状态: 乘法器请求#0
@@ -144,6 +150,7 @@ module kernal_access_req_gen #(
 	
 	/** 内部参数 **/
 	wire[6:0] wgtblk_n_foreach_cgrp; // 每个通道组的权重块个数
+	wire[3:0] kernal_w_h; // 卷积核宽度或高度
 	
 	assign wgtblk_n_foreach_cgrp = 
 		(kernal_shape == KBUFGRPSZ_1)  ? 7'd1:
@@ -152,17 +159,30 @@ module kernal_access_req_gen #(
 		(kernal_shape == KBUFGRPSZ_49) ? 7'd49:
 		(kernal_shape == KBUFGRPSZ_81) ? 7'd81:
 		                                 7'd121;
+	assign kernal_w_h = 
+		(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
+		(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
+		(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
+		(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
+		(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
+		                                 4'd11;
 	
 	/** 权重块位置计数器 **/
 	wire on_upd_wgtblk_pos_cnt; // 更新权重块位置计数器(指示)
 	reg[15:0] visited_kernal_num_or_group_cnt; // 已访问的核数或组数(计数器)
 	wire is_last_kernal_set; // 最后1个核组(标志)
 	reg[15:0] kernal_set_traverse_cnt; // 核组遍历次数(计数器)
+	reg[15:0] ext_fmap_anchor_y; // 扩展特征图锚点y坐标(计数器)
 	wire is_last_traverse_now_kernal_set; // 最后1次遍历当前核组(标志)
 	reg[15:0] visited_kernal_chn_cnt; // 已访问的通道数(计数器)
 	wire is_last_kernal_cgrp; // 最后1个通道组(标志)
 	reg[6:0] kernal_wgtblk_id_cnt; // 当前访问权重块的编号(计数器)
 	wire is_last_kernal_wgtblk; // 最后1个权重块(标志)
+	reg[3:0] kernal_wgtblk_x_cnt; // 权重块x坐标(计数器)
+	wire is_at_kernal_row_end; // 处于卷积核行尾(标志)
+	reg[3:0] kernal_wgtblk_y_cnt; // 权重块y坐标(计数器)
+	reg[10:0] kernal_wgtblk_y_onehot; // 权重块y坐标(独热码)
+	wire is_last_kernal_row; // 处于卷积核的最后1行(标志)
 	
 	assign is_last_kernal_set = 
 		is_grp_conv_mode ? 
@@ -176,6 +196,10 @@ module kernal_access_req_gen #(
 			((visited_kernal_chn_cnt + ATOMIC_C) > kernal_chn_n);
 	assign is_last_kernal_wgtblk = 
 		kernal_wgtblk_id_cnt == (wgtblk_n_foreach_cgrp - 1);
+	assign is_at_kernal_row_end = 
+		kernal_wgtblk_x_cnt == (kernal_w_h - 1);
+	assign is_last_kernal_row = 
+		kernal_wgtblk_y_cnt == (kernal_w_h - 1);
 	
 	// 已访问的核数或组数(计数器)
 	always @(posedge aclk)
@@ -201,6 +225,16 @@ module kernal_access_req_gen #(
 					(kernal_set_traverse_cnt + 1'b1);
 	end
 	
+	// 扩展特征图锚点y坐标(计数器)
+	always @(posedge aclk)
+	begin
+		if(aclken & (blk_idle | (on_upd_wgtblk_pos_cnt & is_last_kernal_wgtblk & is_last_kernal_cgrp)))
+			ext_fmap_anchor_y <= # SIM_DELAY 
+				(blk_idle | is_last_traverse_now_kernal_set) ? 
+					16'd0:
+					(ext_fmap_anchor_y + conv_vertical_stride + 1'b1);
+	end
+	
 	// 已访问的通道数(计数器)
 	always @(posedge aclk)
 	begin
@@ -221,8 +255,143 @@ module kernal_access_req_gen #(
 					(kernal_wgtblk_id_cnt + 1'b1);
 	end
 	
+	// 权重块x坐标(计数器)
+	always @(posedge aclk)
+	begin
+		if(aclken & (blk_idle | on_upd_wgtblk_pos_cnt))
+			kernal_wgtblk_x_cnt <= # SIM_DELAY 
+				(blk_idle | is_at_kernal_row_end) ? 
+					4'd0:
+					(kernal_wgtblk_x_cnt + 1'b1);
+	end
+	
+	// 权重块y坐标(计数器)
+	always @(posedge aclk)
+	begin
+		if(aclken & (blk_idle | (on_upd_wgtblk_pos_cnt & is_at_kernal_row_end)))
+			kernal_wgtblk_y_cnt <= # SIM_DELAY 
+				(blk_idle | is_last_kernal_row) ? 
+					4'd0:
+					(kernal_wgtblk_y_cnt + 1'b1);
+	end
+	
+	// 权重块x坐标(独热码)
+	always @(posedge aclk)
+	begin
+		if(aclken & (blk_idle | (on_upd_wgtblk_pos_cnt & is_at_kernal_row_end)))
+			kernal_wgtblk_y_onehot <= # SIM_DELAY 
+				(blk_idle | is_last_kernal_row) ? 
+					11'b000_0000_0001:
+					{kernal_wgtblk_y_onehot[9:0], kernal_wgtblk_y_onehot[10]};
+	end
+	
+	/** 卷积核行掩码生成 **/
+	// [行掩码生成]
+	wire on_start_gen_kernal_row_mask; // 开始生成行掩码(指示)
+	wire gen_kernal_row_mask_done; // 生成行掩码完成(指示)
+	reg[3:0] row_mask_gen_round_cnt; // 行掩码生成轮次(计数器)
+	reg[4:0] kernal_ofs_logic_y; // 卷积核偏移逻辑y坐标
+	reg[10:0] kernal_row_mask; // 卷积核行掩码
+	// [坐标转换单元]
+	reg ext_fmap_coordinate_cvt_blk_start;
+	wire ext_fmap_coordinate_cvt_blk_idle;
+	wire[15:0] ext_fmap_coordinate_cvt_blk_i_logic_y; // 逻辑y坐标
+	wire ext_fmap_coordinate_cvt_blk_done;
+	wire[15:0] ext_fmap_coordinate_cvt_blk_o_phy_y; // 物理y坐标
+	wire ext_fmap_coordinate_cvt_blk_o_is_vld; // 坐标点是否有效
+	
+	assign gen_kernal_row_mask_done = 
+		ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (row_mask_gen_round_cnt == (kernal_w_h - 1));
+	
+	assign ext_fmap_coordinate_cvt_blk_i_logic_y = ext_fmap_anchor_y + kernal_ofs_logic_y;
+	
+	// 行掩码生成轮次(计数器)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			((~ext_fmap_coordinate_cvt_blk_start) | ext_fmap_coordinate_cvt_blk_done)
+		)
+			row_mask_gen_round_cnt <= # SIM_DELAY 
+				ext_fmap_coordinate_cvt_blk_start ? 
+					(row_mask_gen_round_cnt + 1'b1):
+					4'd0;
+	end
+	
+	// 卷积核偏移逻辑y坐标
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			((~ext_fmap_coordinate_cvt_blk_start) | ext_fmap_coordinate_cvt_blk_done)
+		)
+			kernal_ofs_logic_y <= # SIM_DELAY 
+				ext_fmap_coordinate_cvt_blk_start ? 
+					(kernal_ofs_logic_y + kernal_dilation_vtc_n + 1'b1):
+					5'd0;
+	end
+	
+	// 卷积核行掩码
+	genvar row_mask_i;
+	generate
+		for(row_mask_i = 0;row_mask_i < 11;row_mask_i = row_mask_i + 1)
+		begin:row_mask_blk
+			always @(posedge aclk)
+			begin
+				if(
+					aclken & 
+					ext_fmap_coordinate_cvt_blk_start & ext_fmap_coordinate_cvt_blk_done & (row_mask_gen_round_cnt == row_mask_i)
+				)
+					kernal_row_mask[row_mask_i] <= # SIM_DELAY ~ext_fmap_coordinate_cvt_blk_o_is_vld;
+			end
+		end
+	endgenerate
+	
+	// 坐标转换单元(start信号)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			ext_fmap_coordinate_cvt_blk_start <= 1'b0;
+		else if(
+			aclken & 
+			(
+				ext_fmap_coordinate_cvt_blk_start ? 
+					(ext_fmap_coordinate_cvt_blk_done & (row_mask_gen_round_cnt == (kernal_w_h - 1))):
+					(on_start_gen_kernal_row_mask & ext_fmap_coordinate_cvt_blk_idle)
+			)
+		)
+			ext_fmap_coordinate_cvt_blk_start <= # SIM_DELAY ~ext_fmap_coordinate_cvt_blk_start;
+	end
+	
+	surface_pos_logic_to_phy #(
+		.SIM_DELAY(SIM_DELAY)
+	)surface_pos_logic_to_phy_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(aclken),
+		
+		.ext_j_right(16'hxxxx),
+		.ext_i_bottom(ext_i_bottom),
+		.external_padding_left(3'bxxx),
+		.external_padding_top(external_padding_top),
+		.inner_padding_top_bottom(inner_padding_top_bottom),
+		.inner_padding_left_right(3'bxxx),
+		
+		.blk_start(ext_fmap_coordinate_cvt_blk_start),
+		.blk_idle(ext_fmap_coordinate_cvt_blk_idle),
+		.blk_i_logic_x(16'hxxxx),
+		.blk_i_logic_y(ext_fmap_coordinate_cvt_blk_i_logic_y),
+		.blk_i_en_x_cvt(1'b0),
+		.blk_i_en_y_cvt(1'b1),
+		.blk_done(ext_fmap_coordinate_cvt_blk_done),
+		.blk_o_phy_x(),
+		.blk_o_phy_y(ext_fmap_coordinate_cvt_blk_o_phy_y),
+		.blk_o_is_vld(ext_fmap_coordinate_cvt_blk_o_is_vld)
+	);
+	
 	/** 权重块访问请求 **/
 	// [访问状态]
+	wire to_skip_cur_req; // 跳过当前访问请求(标志)
 	reg[2:0] req_gen_sts; // 访问请求生成(当前状态)
 	// [核组参数]
 	reg on_upd_kernal_set_params; // 更新核组参数(指示)
@@ -273,7 +442,7 @@ module kernal_access_req_gen #(
 			};
 	assign m_kwgtblk_rd_req_axis_valid = 
 		((req_gen_sts == KWGTBLK_ACCESS_STS_BUF_PRE_RST) & (~on_upd_kernal_set_params)) | 
-		(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) | 
+		((req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & (~to_skip_cur_req)) | 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_BUF_POST_RST);
 	
 	/*
@@ -296,7 +465,11 @@ module kernal_access_req_gen #(
 	
 	assign on_upd_wgtblk_pos_cnt = 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-		m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready;
+		((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req);
+	assign on_start_gen_kernal_row_mask = 
+		(req_gen_sts == KWGTBLK_ACCESS_STS_GEN_ROW_MASK) & (~ext_fmap_coordinate_cvt_blk_start);
+	
+	assign to_skip_cur_req = |(kernal_wgtblk_y_onehot & kernal_row_mask);
 	
 	assign cgrpn_of_now_kernal_set = cgrpn_foreach_kernal_set;
 	
@@ -323,6 +496,9 @@ module kernal_access_req_gen #(
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_BUF_PRE_RST;
 				KWGTBLK_ACCESS_STS_BUF_PRE_RST: // 状态: 缓存前复位
 					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
+						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_GEN_ROW_MASK;
+				KWGTBLK_ACCESS_STS_GEN_ROW_MASK: // 状态: 生成行掩码
+					if(gen_kernal_row_mask_done)
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_GEN_REQ;
 				KWGTBLK_ACCESS_STS_GEN_REQ: // 状态: 生成请求
 					if(~(
@@ -332,13 +508,17 @@ module kernal_access_req_gen #(
 					))
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT;
 				KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT: // 状态: 等待请求被接受
-					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
+					if((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req)
 						req_gen_sts <= # SIM_DELAY 
-							(is_last_kernal_wgtblk & is_last_kernal_cgrp & is_last_traverse_now_kernal_set) ? 
+							(is_last_kernal_wgtblk & is_last_kernal_cgrp) ? 
 								(
-									is_last_kernal_set ? 
-										KWGTBLK_ACCESS_STS_BUF_POST_RST:
-										KWGTBLK_ACCESS_STS_BUF_PRE_RST
+									is_last_traverse_now_kernal_set ? 
+										(
+											is_last_kernal_set ? 
+												KWGTBLK_ACCESS_STS_BUF_POST_RST:
+												KWGTBLK_ACCESS_STS_BUF_PRE_RST
+										):
+										KWGTBLK_ACCESS_STS_GEN_ROW_MASK
 								):
 								KWGTBLK_ACCESS_STS_GEN_REQ;
 				KWGTBLK_ACCESS_STS_BUF_POST_RST: // 状态: 缓存后复位
@@ -360,7 +540,7 @@ module kernal_access_req_gen #(
 				((req_gen_sts == KWGTBLK_ACCESS_STS_IDLE) & blk_start) | 
 				(
 					(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-					m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready & 
+					((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
 					is_last_kernal_wgtblk & is_last_kernal_cgrp & is_last_traverse_now_kernal_set & (~is_last_kernal_set)
 				);
 	end
@@ -418,7 +598,7 @@ module kernal_access_req_gen #(
 				((req_gen_sts == KWGTBLK_ACCESS_STS_IDLE) & blk_start) | 
 				(
 					(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-					m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready & 
+					((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
 					is_last_kernal_wgtblk & (~(is_last_kernal_cgrp & is_last_traverse_now_kernal_set & is_last_kernal_set))
 				);
 	end
@@ -429,7 +609,7 @@ module kernal_access_req_gen #(
 		if(
 			aclken & 
 			(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-			m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready & 
+			((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
 			is_last_kernal_wgtblk & (~(is_last_kernal_cgrp & is_last_traverse_now_kernal_set & is_last_kernal_set))
 		)
 			upd_kernal_cgrp_params_for_first_cgrp_flag <= # SIM_DELAY is_last_kernal_cgrp;
