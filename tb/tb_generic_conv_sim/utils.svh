@@ -4,6 +4,7 @@
 
 import "DPI-C" function int unsigned encode_fp16(input real d);
 import "DPI-C" function real decode_fp16(input int unsigned fp16);
+import "DPI-C" function real decode_fp32(input int unsigned fp32);
 
 class Util;
 	
@@ -53,6 +54,10 @@ class Util;
 		end
 		
 		return object_printer;
+	endfunction
+	
+	static function real abs_f(input real r);
+		return (r < 0.0) ? (-r):r;
 	endfunction
 	
 endclass

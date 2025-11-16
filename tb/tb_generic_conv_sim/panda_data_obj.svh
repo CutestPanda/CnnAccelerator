@@ -1,11 +1,64 @@
 `ifndef __PANDA_DATA_OBJ_H
 `define __PANDA_DATA_OBJ_H
 
+virtual class ErrorValue extends uvm_object;
+	
+	int id;
+	
+	pure virtual function bit is_err_acceptable();
+	
+	`tue_object_default_constructor(ErrorValue)
+	
+endclass
+
+class RealErrorValue extends ErrorValue;
+	
+	real v_1;
+	real v_2;
+	
+	real abs_err;
+	real rlt_err;
+	
+	virtual function bit is_err_acceptable();
+		real max_rlt_err;
+		
+		if((Util::abs_f(this.v_1) <= 0.01) && (Util::abs_f(this.v_2) <= 0.01))
+			max_rlt_err = 100.0;
+		else if((Util::abs_f(this.v_1) <= 0.1) && (Util::abs_f(this.v_2) <= 0.1))
+			max_rlt_err = 10.0;
+		else
+			max_rlt_err = 1.0;
+		
+		if((this.abs_err <= 0.1) && (rlt_err <= max_rlt_err))
+			return 1'b1;
+		else
+			return 1'b0;
+	endfunction
+	
+	`tue_object_default_constructor(RealErrorValue)
+	
+	`uvm_object_utils_begin(RealErrorValue)
+		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_real(v_1, UVM_DEFAULT)
+		`uvm_field_real(v_2, UVM_DEFAULT)
+		`uvm_field_real(abs_err, UVM_DEFAULT)
+		`uvm_field_real(rlt_err, UVM_DEFAULT)
+	`uvm_object_utils_end
+	
+endclass
+
 virtual class AbstractData extends uvm_object;
 	
 	pure virtual function bit[15:0] encode_to_int16();
 	pure virtual function void set_by_int16(bit[15:0] int16);
+	pure virtual function void set_by_int32(bit[31:0] int32);
+	
+	pure virtual function AbstractData add(AbstractData rhs);
+	pure virtual function AbstractData mul(AbstractData rhs);
+	pure virtual function void add_assign(AbstractData rhs);
 	pure virtual function void set_to_zero();
+	
+	pure virtual function ErrorValue cmp_err(AbstractData rhs);
 	
 	pure virtual function bit do_rand(uvm_object rand_context);
 	
@@ -31,8 +84,67 @@ class PackedReal extends AbstractData;
 		this.data = decode_fp16(int16);
 	endfunction
 	
+	virtual function void set_by_int32(bit[31:0] int32);
+		this.data = decode_fp32(int32);
+	endfunction
+	
 	virtual function void set_to_zero();
 		this.data = 0.0;
+	endfunction
+	
+	virtual function ErrorValue cmp_err(AbstractData rhs);
+		PackedReal rhs_this;
+		RealErrorValue err_v;
+		
+		if(!$cast(rhs_this, rhs))
+			`uvm_fatal(this.get_name(), "For cmp_err, if lhs is PackedReal, then rhs mush be PackedReal!")
+		
+		err_v = RealErrorValue::type_id::create();
+		err_v.v_1 = this.data;
+		err_v.v_2 = rhs_this.data;
+		err_v.abs_err = Util::abs_f(this.data - rhs_this.data);
+		
+		if((this.data == 0.0) || (rhs_this.data == 0.0))
+			err_v.rlt_err = 0.0;
+		else
+			err_v.rlt_err = Util::abs_f((this.data - rhs_this.data) / rhs_this.data * 100.0);
+		
+		return err_v;
+	endfunction
+	
+	virtual function AbstractData add(AbstractData rhs);
+		PackedReal res;
+		PackedReal rhs_this;
+		
+		if(!$cast(rhs_this, rhs))
+			`uvm_fatal(this.get_name(), "For op +, if lhs is PackedReal, then rhs mush be PackedReal!")
+		
+		res = PackedReal::type_id::create();
+		res.data = this.data + rhs_this.data;
+		
+		return res;
+	endfunction
+	
+	virtual function AbstractData mul(AbstractData rhs);
+		PackedReal res;
+		PackedReal rhs_this;
+		
+		if(!$cast(rhs_this, rhs))
+			`uvm_fatal(this.get_name(), "For op *, if lhs is PackedReal, then rhs mush be PackedReal!")
+		
+		res = PackedReal::type_id::create();
+		res.data = this.data * rhs_this.data;
+		
+		return res;
+	endfunction
+	
+	virtual function void add_assign(AbstractData rhs);
+		PackedReal rhs_this;
+		
+		if(!$cast(rhs_this, rhs))
+			`uvm_fatal(this.get_name(), "For op +=, if lhs is PackedReal, then rhs mush be PackedReal!")
+		
+		this.data += rhs_this.data;
 	endfunction
 	
 	virtual function bit do_rand(uvm_object rand_context);
@@ -63,8 +175,34 @@ class PackedShortInt extends AbstractData;
 		this.data[15:0] = int16;
 	endfunction
 	
+	virtual function void set_by_int32(bit[31:0] int32);
+		this.data[15:0] = int32[15:0];
+	endfunction
+	
 	virtual function void set_to_zero();
 		this.data = 0;
+	endfunction
+	
+	virtual function AbstractData add(AbstractData rhs);
+		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt + ?")
+		
+		return null;
+	endfunction
+	
+	virtual function AbstractData mul(AbstractData rhs);
+		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt * ?")
+		
+		return null;
+	endfunction
+	
+	virtual function void add_assign(AbstractData rhs);
+		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt *= ?")
+	endfunction
+	
+	virtual function ErrorValue cmp_err(AbstractData rhs);
+		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt cmp_err with ?")
+		
+		return null;
 	endfunction
 	
 	virtual function bit do_rand(uvm_object rand_context);
@@ -185,7 +323,7 @@ class Surface extends tue_object_base #(
 	.STATUS(tue_status_dummy)
 );
 	
-	protected AbstractData data[];
+	AbstractData data[];
 	
 	function bit set_pt(int unsigned index, AbstractData val);
 		if(index >= this.data.size())
@@ -384,6 +522,8 @@ class SurfaceSetBase extends tue_object_base #(
 endclass
 
 class Fmap extends SurfaceSetBase;
+	
+	int unsigned rid_hash[int unsigned];
 	
 	function void put_fmap_row(int unsigned actual_rid, FmapRow fmap_row);
 		this.put_sfc(actual_rid, fmap_row);
@@ -599,6 +739,7 @@ class FmapBuilder extends AbstractDataBuilder;
 				cfg.actual_sfc_rid_foreach_fmrow[i] = cfg.abs_baseaddr_foreach_fmrow[i];
 			
 			this.feature_map.put_fmap_row(cfg.actual_sfc_rid_foreach_fmrow[i], row);
+			this.feature_map.rid_hash[i] = cfg.actual_sfc_rid_foreach_fmrow[i];
 		end
 		
 		this.feature_map.finish_adding_fmap_row();

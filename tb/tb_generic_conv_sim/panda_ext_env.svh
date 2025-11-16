@@ -222,8 +222,8 @@ class ConvDataHubTestEnv extends panda_env #(
 	.STATUS(tue_status_dummy)
 );
 	
-	local int fmap_rd_req_tr_mcd;
-	local int kernal_rd_req_tr_mcd;
+	local int fmap_rd_req_tr_mcd = UVM_STDOUT;
+	local int kernal_rd_req_tr_mcd = UVM_STDOUT;
 	
 	local DmaStrmAxisVsqr dma_axis_vsqr[2];
 	
@@ -441,6 +441,10 @@ class GenericConvSimTestEnv extends panda_env #(
 	
 	local virtual generic_conv_sim_cfg_if cfg_vif;
 	
+	local int final_res_tr_mcd = UVM_STDOUT;
+	
+	local FinalResScoreboard final_res_scb;
+	
 	local panda_blk_ctrl_master_agent fmap_blk_ctrl_mst_agt;
 	local panda_blk_ctrl_master_agent kernal_blk_ctrl_mst_agt;
 	local panda_axis_slave_agent final_res_slv_agt;
@@ -460,6 +464,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	
 	function void build_phase(uvm_phase phase);
 		super.build_phase(phase);
+		
+		this.final_res_tr_mcd = $fopen("final_res_tr_log.txt");
 	endfunction
 	
 	protected function void build_configuration();
@@ -541,6 +547,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	protected function void build_agents();
+		this.final_res_scb = FinalResScoreboard::type_id::create("final_res_scb", this);
+		
 		this.fmap_blk_ctrl_mst_agt = panda_blk_ctrl_master_agent::type_id::create("fmap_blk_ctrl_mst_agt", this);
 		this.fmap_blk_ctrl_mst_agt.active_agent();
 		this.fmap_blk_ctrl_mst_agt.set_configuration(this.fmap_blk_ctrl_mst_cfg);
@@ -555,6 +563,9 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
+		this.final_res_slv_agt.item_port.connect(this.final_res_scb.final_res_port);
+		this.final_res_scb.set_final_res_tr_mcd(this.final_res_tr_mcd);
+		
 		this.fmap_blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", ReqGenBlkCtrlDefaultSeq::type_id::get());
 		this.kernal_blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", ReqGenBlkCtrlDefaultSeq::type_id::get());
 		this.final_res_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
@@ -659,6 +670,13 @@ class GenericConvSimTestEnv extends panda_env #(
 		
 		phase.drop_objection(this);
 	endtask
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
+		
+		if(this.final_res_tr_mcd != UVM_STDOUT)
+			$fclose(this.final_res_tr_mcd);
+	endfunction
 	
 	`uvm_component_utils(GenericConvSimTestEnv)
 	

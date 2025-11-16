@@ -627,4 +627,83 @@ class KernalRdReqTransAdapter extends tue_sequence_item #(
 	
 endclass
 
+virtual class AbstractFinalResAdapter extends tue_sequence_item #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy),
+	.PROXY_CONFIGURATION(tue_configuration_dummy),
+	.PROXY_STATUS(tue_status_dummy)
+);
+	
+	local panda_axis_trans axis_tr;
+	
+	int unsigned print_id_base = 0;
+	int unsigned id;
+	AbstractData data_fifo[$];
+	
+	pure virtual protected function AbstractData create_data();
+	
+	function void convert(panda_axis_trans axis_tr = null);
+		if(axis_tr != null)
+		begin
+			this.axis_tr = axis_tr;
+			
+			for(int i = 0;i < this.axis_tr.get_len();i++)
+			begin
+				panda_axis_data cur_data;
+				panda_axis_mask cur_keep;
+				
+				cur_data = this.axis_tr.data[i];
+				cur_keep = this.axis_tr.keep[i];
+				
+				while(cur_keep[3:0] == 4'b1111)
+				begin
+					AbstractData abst_data;
+					
+					abst_data = this.create_data();
+					abst_data.set_by_int32(cur_data[31:0]);
+					
+					this.data_fifo.push_back(abst_data);
+					
+					cur_data >>= 32;
+					cur_keep >>= 4;
+				end
+			end
+		end
+	endfunction
+	
+	function void put_data(ref AbstractData data_arr[]);
+		for(int i = 0;i < data_arr.size();i++)
+			this.data_fifo.push_back(data_arr[i]);
+	endfunction
+	
+	virtual function void do_print(uvm_printer printer);
+		super.do_print(printer);
+		
+		for(int i = 0;i < this.data_fifo.size();i++)
+		begin
+			this.data_fifo[i].print_data(printer, $sformatf("data[%0d]", this.print_id_base + i));
+		end
+	endfunction
+	
+	`tue_object_default_constructor(AbstractFinalResAdapter)
+	
+	`uvm_object_utils_begin(AbstractFinalResAdapter)
+		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE)
+		`uvm_field_queue_object(data_fifo, UVM_DEFAULT | UVM_NOPRINT)
+	`uvm_object_utils_end
+	
+endclass
+
+class Fp16FinalResAdapter extends AbstractFinalResAdapter;
+	
+	virtual protected function AbstractData create_data();
+		return PackedReal::type_id::create();
+	endfunction
+	
+	`tue_object_default_constructor(Fp16FinalResAdapter)
+	
+	`uvm_object_utils(Fp16FinalResAdapter)
+	
+endclass
+
 `endif

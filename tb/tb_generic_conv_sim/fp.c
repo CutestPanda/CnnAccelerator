@@ -56,3 +56,13 @@ double decode_fp16(int unsigned fp16) {
 	
 	return (double)f;
 }
+
+double decode_fp32(int unsigned fp32) {
+	float f;
+	
+	uint32_t* f_ptr = (uint32_t*)(&f);
+	
+	*f_ptr = fp32;
+	
+	return (double)f;
+}

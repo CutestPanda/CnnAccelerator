@@ -5,6 +5,7 @@
 `uvm_analysis_imp_decl(_blk_ctrl)
 `uvm_analysis_imp_decl(_rd_req)
 `uvm_analysis_imp_decl(_fout)
+`uvm_analysis_imp_decl(_final_res)
 
 class FmapAccessReqGenScoreboard extends tue_scoreboard #(
 	.CONFIGURATION(tue_configuration_dummy),
@@ -131,7 +132,7 @@ class FmapAccessReqGenScoreboard extends tue_scoreboard #(
 						int phy_y;
 						bit row_masked;
 						
-						convert_logic_y(blk_ctrl_tr, logic_y_base + logic_y_ofs, phy_y, row_masked);
+						this.convert_logic_y(blk_ctrl_tr, logic_y_base + logic_y_ofs, phy_y, row_masked);
 						
 						if(!row_masked)
 						begin
@@ -252,7 +253,7 @@ class FmapAccessReqGenScoreboard extends tue_scoreboard #(
 		`uvm_info(this.get_name(), $sformatf("rid_mismatch_n = %0d", this.rid_mismatch_n), UVM_LOW)
 	endfunction
 	
-	function void convert_logic_y(panda_fmap_sfc_row_access_req_gen_blk_ctrl_trans blk_ctrl_tr, int logic_y,
+	local function void convert_logic_y(panda_fmap_sfc_row_access_req_gen_blk_ctrl_trans blk_ctrl_tr, int logic_y,
 		output int phy_y, output bit row_masked);
 		if(
 			((logic_y >= blk_ctrl_tr.external_padding_top) && (logic_y <= blk_ctrl_tr.ext_i_bottom)) && 
@@ -438,7 +439,7 @@ class KernalAccessReqGenScoreboard extends tue_scoreboard #(
 					begin
 						for(int x = 0;x < Util::kernal_sz_t_to_w_h(blk_ctrl_tr.kernal_shape);x++)
 						begin
-							if(!get_row_mask(blk_ctrl_tr, logic_y_base + logic_y_ofs))
+							if(!this.get_row_mask(blk_ctrl_tr, logic_y_base + logic_y_ofs))
 							begin
 								exp_rd_req_tr = KernalRdReqTransAdapter::type_id::create();
 								
@@ -498,7 +499,7 @@ class KernalAccessReqGenScoreboard extends tue_scoreboard #(
 		`uvm_info(this.get_name(), $sformatf("pkt%0d completed", blk_ctrl_tr_i), UVM_LOW)
 	endtask
 	
-	function bit get_row_mask(panda_kernal_access_req_gen_blk_ctrl_trans blk_ctrl_tr, int logic_y);
+	local function bit get_row_mask(panda_kernal_access_req_gen_blk_ctrl_trans blk_ctrl_tr, int logic_y);
 		if(
 			((logic_y >= blk_ctrl_tr.external_padding_top) && (logic_y <= blk_ctrl_tr.ext_i_bottom)) && 
 			(((logic_y - blk_ctrl_tr.external_padding_top) % (blk_ctrl_tr.inner_padding_top_bottom + 1)) == 0)
@@ -804,6 +805,427 @@ class KernalBufScoreboard extends ConvDataHubScoreboardBase #(
 	
 	`tue_component_default_constructor(KernalBufScoreboard)
 	`uvm_component_utils(KernalBufScoreboard)
+	
+endclass
+
+class FinalResScoreboard extends tue_scoreboard #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy)
+);
+	
+	uvm_analysis_imp_final_res #(panda_axis_trans, FinalResScoreboard) final_res_port;
+	
+	local FmapCfg fmap_cfg;
+	local KernalCfg kernal_cfg;
+	local ConvCalCfg cal_cfg;
+	local PandaMemoryAdapter fmap_mem;
+	local PandaMemoryAdapter kernal_mem;
+	
+	local AbstractFinalResAdapter exp_res_adpt;
+	
+	local int final_res_tr_id;
+	local int final_res_cmp_id_base;
+	local int final_res_err_n;
+	
+	local int final_res_tr_mcd = UVM_STDOUT;
+	local int exp_res_tr_mcd = UVM_STDOUT;
+	
+	function void set_final_res_tr_mcd(int mcd);
+		this.final_res_tr_mcd = mcd;
+	endfunction
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.final_res_port = new("final_res_port", this);
+		this.final_res_tr_id = 0;
+		this.final_res_cmp_id_base = 0;
+		this.final_res_err_n = 0;
+		
+		if(!uvm_config_db #(FmapCfg)::get(null, "", "fmap_cfg", this.fmap_cfg))
+			`uvm_fatal(this.get_name(), "cannot get fmap_cfg!!!")
+		if(!uvm_config_db #(KernalCfg)::get(null, "", "kernal_cfg", this.kernal_cfg))
+			`uvm_fatal(this.get_name(), "cannot get kernal_cfg!!!")
+		if(!uvm_config_db #(ConvCalCfg)::get(null, "", "cal_cfg", this.cal_cfg))
+			`uvm_fatal(this.get_name(), "cannot get cal_cfg!!!")
+		
+		if(!uvm_config_db #(PandaMemoryAdapter)::get(null, "", "fmap_mem", this.fmap_mem))
+			`uvm_fatal(this.get_name(), "cannot get fmap_mem!!!")
+		if(!uvm_config_db #(PandaMemoryAdapter)::get(null, "", "kernal_mem", this.kernal_mem))
+			`uvm_fatal(this.get_name(), "cannot get kernal_mem!!!")
+		
+		this.exp_res_tr_mcd = $fopen("exp_res_tr_log.txt");
+		this.create_exp_res_adpt();
+		this.gen_exp_final_res();
+		`panda_print_with(this.exp_res_adpt, this.exp_res_tr_mcd, Util::get_object_printer())
+		$fclose(this.exp_res_tr_mcd);
+	endfunction
+	
+	virtual function void write_final_res(panda_axis_trans tr);
+		AbstractFinalResAdapter adapter;
+		
+		adapter = null;
+		
+		if(this.cal_cfg.calfmt == CAL_FMT_FP16)
+			adapter = Fp16FinalResAdapter::type_id::create();
+		else
+			`uvm_error(this.get_name(), "calfmt not supported!")
+		
+		if(adapter != null)
+		begin
+			adapter.id = this.final_res_tr_id;
+			adapter.print_id_base = this.final_res_cmp_id_base;
+			adapter.convert(tr);
+			
+			`panda_print_with(adapter, this.final_res_tr_mcd, Util::get_object_printer())
+			
+			// 比对最终结果的误差
+			for(int i = 0;i < adapter.data_fifo.size();i++)
+			begin
+				ErrorValue err_v;
+				
+				err_v = adapter.data_fifo[i].cmp_err(exp_res_adpt.data_fifo[this.final_res_cmp_id_base + i]);
+				err_v.id = this.final_res_cmp_id_base + i;
+				
+				if(err_v != null)
+				begin
+					if(!err_v.is_err_acceptable())
+					begin
+						`panda_print_with(err_v, this.final_res_tr_mcd, Util::get_object_printer())
+						
+						`uvm_error(this.get_name(), $sformatf("err_v is not acceptable, id = %0d", this.final_res_cmp_id_base + i))
+						
+						this.final_res_err_n++;
+					end
+				end
+			end
+			
+			this.final_res_tr_id++;
+			this.final_res_cmp_id_base += adapter.data_fifo.size();
+		end
+	endfunction
+	
+	task main_phase(uvm_phase phase);
+		// blank
+	endtask
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
+		
+		`uvm_info(this.get_name(), $sformatf("final_res_n = %0d", this.final_res_cmp_id_base), UVM_LOW)
+		`uvm_info(this.get_name(), $sformatf("final_res_err_n = %0d", this.final_res_err_n), UVM_LOW)
+	endfunction
+	
+	local function void gen_exp_final_res();
+		FmapBuilderCfg fmap_builder_cfg;
+		KernalSetBuilderCfg kernal_set_builder_cfg;
+		
+		int unsigned ext_fmap_w; // 扩展特征图宽度
+		int unsigned ext_fmap_h; // 扩展特征图高度
+		int unsigned kernal_x_dilated; // (膨胀后)卷积核宽度或高度
+		int unsigned ofmap_w; // 输出特征图宽度
+		int unsigned ofmap_h; // 输出特征图高度
+		
+		int unsigned kernal_set_cgrp_id_base; // 核组起始通道组号
+		
+		Fmap fmap_this;
+		
+		fmap_builder_cfg = FmapBuilderCfg::type_id::create();
+		kernal_set_builder_cfg = KernalSetBuilderCfg::type_id::create();
+		
+		fmap_builder_cfg.from_cfg(this.fmap_cfg, this.cal_cfg);
+		kernal_set_builder_cfg.from_cfg(this.kernal_cfg, this.cal_cfg);
+		
+		ext_fmap_w = 
+			this.fmap_cfg.fmap_w + this.cal_cfg.external_padding_left + this.cal_cfg.external_padding_right + 
+			(this.fmap_cfg.fmap_w - 1) * this.cal_cfg.inner_padding_left_right;
+		ext_fmap_h = 
+			this.fmap_cfg.fmap_h + this.cal_cfg.external_padding_top + this.cal_cfg.external_padding_bottom + 
+			(this.fmap_cfg.fmap_h - 1) * this.cal_cfg.inner_padding_top_bottom;
+		kernal_x_dilated = 
+			Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) + 
+			(Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) - 1) * this.cal_cfg.kernal_dilation_n;
+		ofmap_w = ((ext_fmap_w - kernal_x_dilated) / this.cal_cfg.conv_horizontal_stride) + 1;
+		ofmap_h = ((ext_fmap_h - kernal_x_dilated) / this.cal_cfg.conv_vertical_stride) + 1;
+		
+		kernal_set_cgrp_id_base = 0;
+		
+		// 得到整个特征图
+		if(!$cast(fmap_this, this.fmap_mem.data_blk))
+		begin
+			`uvm_error(this.get_name(), "cannot cast this.fmap_mem.data_blk -> fmap_this")
+			
+			return;
+		end
+		
+		for(int unsigned s = 0;s < kernal_set_builder_cfg.total_kernal_set_n;s++)
+		begin
+			int unsigned logic_y_base;
+			
+			logic_y_base = 0;
+			
+			for(int unsigned oy = 0;oy < ofmap_h;oy++)
+			begin
+				int unsigned logic_x_base;
+				
+				logic_x_base = 0;
+				
+				for(int unsigned ox = 0;ox < ofmap_w;ox++)
+				begin
+					AbstractData ofmap_sfc[];
+					int unsigned wgtblk_id;
+					int unsigned logic_y_ofs;
+					
+					ofmap_sfc = new[kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s]];
+					wgtblk_id = 0;
+					logic_y_ofs = 0;
+					
+					foreach(ofmap_sfc[_i])
+					begin
+						ofmap_sfc[_i] = this.create_abst_data();
+					end
+					
+					for(int unsigned ky = 0;ky < Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape);ky++)
+					begin
+						int unsigned logic_x_ofs;
+						
+						logic_x_ofs = 0;
+						
+						for(int unsigned kx = 0;kx < Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape);kx++)
+						begin
+							int unsigned logic_x;
+							int unsigned logic_y;
+							int unsigned phy_x;
+							int unsigned phy_y;
+							bit pt_invld;
+							
+							// 坐标转换: (logic_x, logic_y) -> {(phy_x, phy_y), pt_invld}
+							logic_x = logic_x_base + logic_x_ofs;
+							logic_y = logic_y_base + logic_y_ofs;
+							pt_invld = this.convert_logic_pos(logic_x, logic_y, phy_x, phy_y);
+							
+							if(!pt_invld)
+							begin
+								for(int unsigned cg = 0;cg < kernal_set_builder_cfg.cgrpn_foreach_kernal_set[s];cg++)
+								begin
+									DataBlk kernal_data_blk;
+									DataBlk fmap_data_blk;
+									int unsigned fmap_build_rid;
+									int unsigned fmap_actual_rid;
+									
+									FmapSfc fmap_sfc;
+									
+									bit kernal_sfc_err_flag;
+									
+									// 得到整个卷积核权重
+									kernal_data_blk = this.kernal_mem.data_blk;
+									
+									// 取出卷积核通道组
+									kernal_data_blk = kernal_data_blk.get_sub_data_blk(kernal_set_cgrp_id_base + cg);
+									
+									if(kernal_data_blk == null)
+									begin
+										`uvm_error(this.get_name(), $sformatf("cannot get kernal_cgrp(set = %0d, cg = %0d, id = %0d)", s, cg, kernal_set_cgrp_id_base + cg))
+										
+										break;
+									end
+									
+									// 取出权重块
+									kernal_data_blk = kernal_data_blk.get_sub_data_blk(wgtblk_id);
+									
+									if(kernal_data_blk == null)
+									begin
+										`uvm_error(this.get_name(), $sformatf("cannot get kernal_wgtblk(wgtblk_id = %0d)", wgtblk_id))
+										
+										break;
+									end
+									
+									// 检查权重块宽度
+									if(kernal_data_blk.num_of_sub_data_blk() != kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s])
+									begin
+										`uvm_error(this.get_name(), $sformatf("Expected wgtblk_w is %0d, but it's %0d", kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s], kernal_data_blk.num_of_sub_data_blk()))
+										
+										break;
+									end
+									
+									// 取出特征图表面行
+									fmap_build_rid = (((this.cal_cfg.is_grp_conv_mode ? kernal_set_cgrp_id_base:0) + cg) * this.fmap_cfg.fmap_h) + phy_y;
+									fmap_actual_rid = fmap_this.rid_hash[fmap_build_rid];
+									fmap_data_blk = fmap_this.get_sub_data_blk(fmap_actual_rid);
+									
+									if(fmap_data_blk == null)
+									begin
+										`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc_row(set = %0d, cg = %0d, phy_y = %0d, actual_rid = %0d)", s, cg, phy_y, fmap_actual_rid))
+										
+										break;
+									end
+									
+									// 取出特征图表面
+									fmap_data_blk = fmap_data_blk.get_sub_data_blk(phy_x);
+									
+									if(fmap_data_blk == null)
+									begin
+										`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc(phy_x = %0d)", phy_x))
+										
+										break;
+									end
+									
+									if(!$cast(fmap_sfc, fmap_data_blk))
+									begin
+										`uvm_error(this.get_name(), "cannot cast fmap_data_blk -> fmap_sfc")
+										
+										break;
+									end
+									
+									// 检查特征图表面深度
+									if(fmap_sfc.get_size() != fmap_builder_cfg.sfc_data_n_foreach_fmrow[fmap_build_rid])
+									begin
+										`uvm_error(this.get_name(), $sformatf("Expected fmap_sfc_depth is %0d, but it's %0d", fmap_builder_cfg.sfc_data_n_foreach_fmrow[fmap_build_rid], fmap_sfc.get_size()))
+										
+										break;
+									end
+									
+									// 对表面进行乘加计算
+									kernal_sfc_err_flag = 1'b0;
+									
+									for(int unsigned mac_k = 0;mac_k < kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s];mac_k++)
+									begin
+										DataBlk kernal_sfc_base;
+										KernalSfc kernal_sfc_this;
+										
+										// 取出卷积核表面
+										kernal_sfc_base = kernal_data_blk.get_sub_data_blk(mac_k);
+										
+										if(kernal_sfc_base == null)
+										begin
+											`uvm_error(this.get_name(), $sformatf("cannot get kernal_sfc(mac_k = %0d)", mac_k))
+											
+											kernal_sfc_err_flag = 1'b1;
+											
+											break;
+										end
+										
+										if(!$cast(kernal_sfc_this, kernal_sfc_base))
+										begin
+											`uvm_error(this.get_name(), "cannot cast kernal_sfc_base -> kernal_sfc_this")
+											
+											kernal_sfc_err_flag = 1'b1;
+											
+											break;
+										end
+										
+										// 检查卷积核表面深度
+										if(kernal_sfc_this.get_size() != kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg])
+										begin
+											`uvm_error(this.get_name(), $sformatf("Expected kernal_sfc_depth is %0d, but it's %0d", kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg], kernal_sfc_this.get_size()))
+											
+											kernal_sfc_err_flag = 1'b1;
+											
+											break;
+										end
+										
+										// 检查特征图和卷积核表面深度是否匹配
+										if(kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg] != fmap_builder_cfg.sfc_data_n_foreach_fmrow[fmap_build_rid])
+										begin
+											`uvm_error(this.get_name(), $sformatf("sfc_depth mismatch(kernal: %0d, fmap: %0d)", kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg], fmap_builder_cfg.sfc_data_n_foreach_fmrow[fmap_build_rid]))
+											
+											kernal_sfc_err_flag = 1'b1;
+											
+											break;
+										end
+										
+										for(int unsigned mac_c = 0;mac_c < kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg];mac_c++)
+										begin
+											ofmap_sfc[mac_k].add_assign(fmap_sfc.data[mac_c].mul(kernal_sfc_this.data[mac_c]));
+										end
+									end
+									
+									if(kernal_sfc_err_flag)
+										break;
+								end
+							end
+							
+							wgtblk_id++;
+							logic_x_ofs += (this.cal_cfg.kernal_dilation_n + 1);
+						end
+						
+						logic_y_ofs += (this.cal_cfg.kernal_dilation_n + 1);
+					end
+					
+					this.exp_res_adpt.put_data(ofmap_sfc);
+					
+					logic_x_base += this.cal_cfg.conv_horizontal_stride;
+				end
+				
+				logic_y_base += this.cal_cfg.conv_vertical_stride;
+			end
+			
+			kernal_set_cgrp_id_base += kernal_set_builder_cfg.cgrpn_foreach_kernal_set[s];
+		end
+	endfunction
+	
+	local function void create_exp_res_adpt();
+		if(this.cal_cfg.calfmt == CAL_FMT_FP16)
+		begin
+			this.exp_res_adpt = Fp16FinalResAdapter::type_id::create();
+		end
+		else
+			`uvm_error(this.get_name(), "calfmt not supported!")
+	endfunction
+	
+	local function AbstractData create_abst_data();
+		AbstractData abst_data;
+		
+		abst_data = null;
+		
+		if(this.cal_cfg.calfmt == CAL_FMT_FP16)
+		begin
+			abst_data = PackedReal::type_id::create();
+			abst_data.set_to_zero();
+		end
+		else
+			`uvm_error(this.get_name(), "calfmt not supported!")
+		
+		return abst_data;
+	endfunction
+	
+	local function bit convert_logic_pos(
+		input int unsigned logic_x, input int unsigned logic_y,
+		output int unsigned phy_x, output int unsigned phy_y
+	);
+		int unsigned ext_i_bottom; // 扩展后特征图的垂直边界
+		int unsigned ext_j_right; // 扩展后特征图的水平边界
+		
+		ext_i_bottom = 
+			this.cal_cfg.external_padding_top + 
+			this.fmap_cfg.fmap_h + 
+			(this.fmap_cfg.fmap_h - 1) * this.cal_cfg.inner_padding_top_bottom - 1;
+		ext_j_right = 
+			this.cal_cfg.external_padding_left + 
+			this.fmap_cfg.fmap_w + 
+			(this.fmap_cfg.fmap_w - 1) * this.cal_cfg.inner_padding_left_right - 1;
+		
+		if(
+			((logic_x >= this.cal_cfg.external_padding_left) && (logic_x <= ext_j_right)) && 
+			(((logic_x - this.cal_cfg.external_padding_left) % (this.cal_cfg.inner_padding_left_right + 1)) == 0)
+		)
+			phy_x = (logic_x - this.cal_cfg.external_padding_left) / (this.cal_cfg.inner_padding_left_right + 1);
+		else
+			return 1'b1;
+		
+		if(
+			((logic_y >= this.cal_cfg.external_padding_top) && (logic_y <= ext_i_bottom)) && 
+			(((logic_y - this.cal_cfg.external_padding_top) % (this.cal_cfg.inner_padding_top_bottom + 1)) == 0)
+		)
+			phy_y = (logic_y - this.cal_cfg.external_padding_top) / (this.cal_cfg.inner_padding_top_bottom + 1);
+		else
+			return 1'b1;
+		
+		return 1'b0;
+	endfunction
+	
+	`tue_component_default_constructor(FinalResScoreboard)
+	`uvm_component_utils(FinalResScoreboard)
 	
 endclass
 
