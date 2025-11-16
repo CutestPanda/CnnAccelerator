@@ -27,11 +27,12 @@ module tb_generic_conv_sim();
 	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 32; // DMA数据流的位宽(32 | 64 | 128 | 256)
-	parameter integer CBUF_BANK_N = 8; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
-	parameter integer MAX_FMBUF_ROWN = 32; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 6; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 16; // 中间结果缓存MEM深度(16 | ...)
+	parameter string TEST_NAME = "generic_conv_sim_test_4"; // TESTCASE名
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -78,7 +79,7 @@ module tb_generic_conv_sim();
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma1_cmd_axis_vif", dma1_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "final_res_axis_vif", final_res_axis_if);
 		
-		run_test("generic_conv_sim_test");
+		run_test(TEST_NAME);
 	end
 	
 	/** 待测模块 **/
