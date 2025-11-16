@@ -30,9 +30,9 @@ module tb_generic_conv_sim();
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
-	parameter integer RBUF_BANK_N = 6; // 中间结果缓存MEM个数(>=2)
-	parameter integer RBUF_DEPTH = 16; // 中间结果缓存MEM深度(16 | ...)
-	parameter string TEST_NAME = "generic_conv_sim_test_4"; // TESTCASE名
+	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
+	parameter string TEST_NAME = "generic_conv_sim_test_6"; // TESTCASE名
 	
 	/** 接口 **/
 	panda_clock_if clk_if();

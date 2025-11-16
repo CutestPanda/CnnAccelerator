@@ -481,4 +481,248 @@ class generic_conv_sim_test_4 extends generic_conv_sim_base_test;
 	
 endclass
 
+class generic_conv_sim_test_5 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			fmap_w == 50;
+			fmap_h == 28;
+			fmap_c == 2;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 32;
+			kernal_chn_n == 2;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == 2;
+			atomic_k == 4;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 2;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == 32;
+			fmbufbankn == 10;
+			fmbufcoln == COLN_64;
+			fmbufrown == 20;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_8;
+			kbufgrpn == 10;
+			mid_res_item_n_foreach_row == 100;
+			mid_res_buf_row_n_bufferable == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_5)
+	`uvm_component_utils(generic_conv_sim_test_5)
+	
+endclass
+
+class generic_conv_sim_test_6 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			fmap_w == 24;
+			fmap_h == 16;
+			fmap_c == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 16;
+			kernal_chn_n == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == 2;
+			atomic_k == 4;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b1;
+			group_n == 4;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == 32;
+			fmbufbankn == 6;
+			fmbufcoln == COLN_32;
+			fmbufrown == 24;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_4;
+			kbufgrpn == 35;
+			mid_res_item_n_foreach_row == 24;
+			mid_res_buf_row_n_bufferable == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_6)
+	`uvm_component_utils(generic_conv_sim_test_6)
+	
+endclass
+
+class generic_conv_sim_test_7 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			fmap_w == 24;
+			fmap_h == 16;
+			fmap_c == 32;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 32;
+			kernal_chn_n == 32;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == 2;
+			atomic_k == 4;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 2;
+			is_grp_conv_mode == 1'b1;
+			group_n == 4;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == 32;
+			fmbufbankn == 6;
+			fmbufcoln == COLN_32;
+			fmbufrown == 24;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_8;
+			kbufgrpn == 17;
+			mid_res_item_n_foreach_row == 48;
+			mid_res_buf_row_n_bufferable == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_7)
+	`uvm_component_utils(generic_conv_sim_test_7)
+	
+endclass
+
+class generic_conv_sim_test_8 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			fmap_w == 24;
+			fmap_h == 16;
+			fmap_c == 6;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 16;
+			kernal_chn_n == 6;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == 2;
+			atomic_k == 4;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 0;
+			external_padding_right == 0;
+			external_padding_top == 0;
+			external_padding_bottom == 0;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 1;
+			max_wgtblk_w == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == 32;
+			fmbufbankn == 6;
+			fmbufcoln == COLN_32;
+			fmbufrown == 24;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_4;
+			kbufgrpn == 35;
+			mid_res_item_n_foreach_row == 20;
+			mid_res_buf_row_n_bufferable == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_8)
+	`uvm_component_utils(generic_conv_sim_test_8)
+	
+endclass
+
 `endif

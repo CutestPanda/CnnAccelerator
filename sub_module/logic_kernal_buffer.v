@@ -302,7 +302,7 @@ module logic_kernal_buffer #(
 	assign rsv_rgn_full = 
 		grp_conv_buf_mode ? 
 			// 断言: 处于组卷积缓存模式时, 卷积核缓存可存下整个核组
-			((rsv_rgn_vld_grpn_r - 9'd1) >= cgrpn[8:0]): // 驻留区有效通道组数 >= 实际通道组数
+			(rsv_rgn_vld_grpn_r >= (cgrpn[8:0] + 9'd1)): // 驻留区有效通道组数 >= 实际通道组数
 			(
 				has_sw_rgn ? 
 					((rsv_rgn_vld_grpn_r + 9'd1) >= {1'b0, kbufgrpn}): // 驻留区有效通道组数 >= 可缓存的通道组数 - 2
