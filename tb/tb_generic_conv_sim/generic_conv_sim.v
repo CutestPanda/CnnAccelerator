@@ -451,7 +451,7 @@ module generic_conv_sim #(
 		.ATOMIC_C(ATOMIC_C),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
-		.EN_SMALL_FP32("false"),
+		.EN_SMALL_FP32("true"),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
 		.SIM_DELAY(SIM_DELAY)

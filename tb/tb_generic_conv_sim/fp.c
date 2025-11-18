@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "svdpi.h"
+#include <math.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -63,6 +64,12 @@ double decode_fp32(int unsigned fp32) {
 	uint32_t* f_ptr = (uint32_t*)(&f);
 	
 	*f_ptr = fp32;
+	
+	return (double)f;
+}
+
+double get_fixed36_exp(long long int frac, int exp) {
+	float f = ((float)frac) * powf(2.0f, exp);
 	
 	return (double)f;
 }

@@ -6,6 +6,31 @@
 `uvm_analysis_imp_decl(_rd_req)
 `uvm_analysis_imp_decl(_fout)
 `uvm_analysis_imp_decl(_final_res)
+`uvm_analysis_imp_decl(_acmlt_in)
+
+virtual class FmapOutPtCalProcListener extends uvm_object;
+	
+	virtual function void on_upd_out_pt_type0(
+		uvm_object tr,
+		int unsigned kset_id, int unsigned oy, int unsigned ox,
+		int unsigned ky, int unsigned kx, int unsigned cgrp_id,
+		int unsigned cal_rid
+	);
+		// blank
+	endfunction
+	
+	virtual function void on_upd_out_pt_type1(
+		uvm_object tr,
+		int unsigned kset_id, int unsigned oy, int unsigned ox,
+		int unsigned ky, int unsigned kx, int unsigned cgrp_id,
+		int unsigned sfc_id
+	);
+		// blank
+	endfunction
+	
+	`tue_object_default_constructor(FmapOutPtCalProcListener)
+	
+endclass
 
 class FmapAccessReqGenScoreboard extends tue_scoreboard #(
 	.CONFIGURATION(tue_configuration_dummy),
@@ -830,6 +855,12 @@ class FinalResScoreboard extends tue_scoreboard #(
 	local int final_res_tr_mcd = UVM_STDOUT;
 	local int exp_res_tr_mcd = UVM_STDOUT;
 	
+	local FmapOutPtCalProcListener cal_proc_listener = null;
+	
+	function void register_cal_proc_listener(FmapOutPtCalProcListener listener);
+		this.cal_proc_listener = listener;
+	endfunction
+	
 	function void set_final_res_tr_mcd(int mcd);
 		this.final_res_tr_mcd = mcd;
 	endfunction
@@ -1092,6 +1123,9 @@ class FinalResScoreboard extends tue_scoreboard #(
 									begin
 										DataBlk kernal_sfc_base;
 										KernalSfc kernal_sfc_this;
+										AbstractData sfc_chn_mac_res;
+										
+										sfc_chn_mac_res = this.create_abst_data();
 										
 										// 取出卷积核表面
 										kernal_sfc_base = kernal_data_blk.get_sub_data_blk(mac_k);
@@ -1136,8 +1170,17 @@ class FinalResScoreboard extends tue_scoreboard #(
 										
 										for(int unsigned mac_c = 0;mac_c < kernal_set_builder_cfg.depth_foreach_kernal_cgrp[kernal_set_cgrp_id_base + cg];mac_c++)
 										begin
-											ofmap_sfc[mac_k].add_assign(fmap_sfc.data[mac_c].mul(kernal_sfc_this.data[mac_c]));
+											sfc_chn_mac_res.add_assign(fmap_sfc.data[mac_c].mul(kernal_sfc_this.data[mac_c]));
 										end
+										
+										ofmap_sfc[mac_k].add_assign(sfc_chn_mac_res);
+										
+										// 跟踪输出特征图某个点的累加计算过程
+										if(this.cal_proc_listener != null)
+											this.cal_proc_listener.on_upd_out_pt_type1(
+												sfc_chn_mac_res,
+												s, oy, ox, ky, kx, cg, mac_k
+											);
 									end
 									
 									if(kernal_sfc_err_flag)
@@ -1152,7 +1195,14 @@ class FinalResScoreboard extends tue_scoreboard #(
 						logic_y_ofs += (this.cal_cfg.kernal_dilation_n + 1);
 					end
 					
+					// 添加输出表面数据
 					this.exp_res_adpt.put_data(ofmap_sfc);
+					
+					// 添加打印信息
+					for(int unsigned _i = 0;_i < kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s];_i++)
+					begin
+						this.exp_res_adpt.print_context.push_back($sformatf("kset%0d, oy%0d, ox%0d, sfc_i%0d", s, oy, ox, _i));
+					end
 					
 					logic_x_base += this.cal_cfg.conv_horizontal_stride;
 				end
@@ -1226,6 +1276,139 @@ class FinalResScoreboard extends tue_scoreboard #(
 	
 	`tue_component_default_constructor(FinalResScoreboard)
 	`uvm_component_utils(FinalResScoreboard)
+	
+endclass
+
+class MidResAcmltCalScoreboard extends tue_scoreboard #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy)
+);
+	
+	uvm_analysis_imp_acmlt_in #(panda_axis_trans, MidResAcmltCalScoreboard) acmlt_in_port;
+	
+	local mailbox #(panda_axis_trans) acmlt_in_mb;
+	
+	local FmapCfg fmap_cfg;
+	local KernalCfg kernal_cfg;
+	local ConvCalCfg cal_cfg;
+	
+	local FmapBuilderCfg fmap_builder_cfg;
+	local KernalSetBuilderCfg kernal_set_builder_cfg;
+	
+	local FmapOutPtCalProcListener cal_proc_listener = null;
+	
+	function void register_cal_proc_listener(FmapOutPtCalProcListener listener);
+		this.cal_proc_listener = listener;
+	endfunction
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.acmlt_in_port = new("acmlt_in_port", this);
+		
+		this.acmlt_in_mb = new();
+		
+		if(!uvm_config_db #(FmapCfg)::get(null, "", "fmap_cfg", this.fmap_cfg))
+			`uvm_fatal(this.get_name(), "cannot get fmap_cfg!!!")
+		if(!uvm_config_db #(KernalCfg)::get(null, "", "kernal_cfg", this.kernal_cfg))
+			`uvm_fatal(this.get_name(), "cannot get kernal_cfg!!!")
+		if(!uvm_config_db #(ConvCalCfg)::get(null, "", "cal_cfg", this.cal_cfg))
+			`uvm_fatal(this.get_name(), "cannot get cal_cfg!!!")
+		
+		this.fmap_builder_cfg = FmapBuilderCfg::type_id::create();
+		this.kernal_set_builder_cfg = KernalSetBuilderCfg::type_id::create();
+		
+		this.fmap_builder_cfg.from_cfg(this.fmap_cfg, this.cal_cfg);
+		this.kernal_set_builder_cfg.from_cfg(this.kernal_cfg, this.cal_cfg);
+	endfunction
+	
+	virtual function void write_acmlt_in(panda_axis_trans tr);
+		if(!this.acmlt_in_mb.try_put(tr))
+			`uvm_error(this.get_name(), "cannot put acmlt_in_mb!")
+	endfunction
+	
+	task main_phase(uvm_phase phase);
+		int unsigned ext_fmap_w; // 扩展特征图宽度
+		int unsigned ext_fmap_h; // 扩展特征图高度
+		int unsigned kernal_x_dilated; // (膨胀后)卷积核宽度或高度
+		int unsigned ofmap_w; // 输出特征图宽度
+		int unsigned ofmap_h; // 输出特征图高度
+		
+		ext_fmap_w = 
+			this.fmap_cfg.fmap_w + this.cal_cfg.external_padding_left + this.cal_cfg.external_padding_right + 
+			(this.fmap_cfg.fmap_w - 1) * this.cal_cfg.inner_padding_left_right;
+		ext_fmap_h = 
+			this.fmap_cfg.fmap_h + this.cal_cfg.external_padding_top + this.cal_cfg.external_padding_bottom + 
+			(this.fmap_cfg.fmap_h - 1) * this.cal_cfg.inner_padding_top_bottom;
+		kernal_x_dilated = 
+			Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) + 
+			(Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) - 1) * this.cal_cfg.kernal_dilation_n;
+		ofmap_w = ((ext_fmap_w - kernal_x_dilated) / this.cal_cfg.conv_horizontal_stride) + 1;
+		ofmap_h = ((ext_fmap_h - kernal_x_dilated) / this.cal_cfg.conv_vertical_stride) + 1;
+		
+		for(int unsigned s = 0;s < this.kernal_set_builder_cfg.total_kernal_set_n;s++)
+		begin
+			int unsigned logic_y_base;
+			
+			logic_y_base = 0;
+			
+			for(int unsigned oy = 0;oy < ofmap_h;oy++)
+			begin
+				for(int unsigned cg = 0;cg < this.kernal_set_builder_cfg.cgrpn_foreach_kernal_set[s];cg++)
+				begin
+					int unsigned logic_y_ofs;
+					
+					logic_y_ofs = 0;
+					
+					for(int unsigned ky = 0;ky < Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape);ky++)
+					begin
+						if(this.is_row_vld(logic_y_base + logic_y_ofs))
+						begin
+							for(int unsigned kx = 0;kx < Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape);kx++)
+							begin
+								for(int unsigned ox = 0;ox < ofmap_w;ox++)
+								begin
+									for(int unsigned r = 0;r < this.cal_cfg.cal_round;r++)
+									begin
+										panda_axis_trans axis_tr;
+										
+										this.acmlt_in_mb.get(axis_tr);
+										
+										if(this.cal_proc_listener != null)
+											this.cal_proc_listener.on_upd_out_pt_type0(axis_tr, s, oy, ox, ky, kx, cg, r);
+									end
+								end
+							end
+						end
+						
+						logic_y_ofs += (this.cal_cfg.kernal_dilation_n + 1);
+					end
+				end
+				
+				logic_y_base += this.cal_cfg.conv_vertical_stride;
+			end
+		end
+	endtask
+	
+	local function bit is_row_vld(int unsigned logic_y);
+		int unsigned ext_i_bottom; // 扩展后特征图的垂直边界
+		
+		ext_i_bottom = 
+			this.cal_cfg.external_padding_top + 
+			this.fmap_cfg.fmap_h + 
+			(this.fmap_cfg.fmap_h - 1) * this.cal_cfg.inner_padding_top_bottom - 1;
+		
+		if(
+			((logic_y >= this.cal_cfg.external_padding_top) && (logic_y <= ext_i_bottom)) && 
+			(((logic_y - this.cal_cfg.external_padding_top) % (this.cal_cfg.inner_padding_top_bottom + 1)) == 0)
+		)
+			return 1'b1;
+		else
+			return 1'b0;
+	endfunction
+	
+	`tue_component_default_constructor(MidResAcmltCalScoreboard)
+	`uvm_component_utils(MidResAcmltCalScoreboard)
 	
 endclass
 

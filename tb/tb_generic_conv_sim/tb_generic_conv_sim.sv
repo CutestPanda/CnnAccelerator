@@ -32,7 +32,6 @@ module tb_generic_conv_sim();
 	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
-	parameter string TEST_NAME = "generic_conv_sim_test_6"; // TESTCASE名
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -55,6 +54,8 @@ module tb_generic_conv_sim();
 	panda_axis_if dma0_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if dma1_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if final_res_axis_if(clk_if.clk_p, rst_if.reset_n);
+	
+	panda_axis_if acmlt_in_if[ATOMIC_K-1:0](clk_if.clk_p, rst_if.reset_n);
 	
 	/** 主任务 **/
 	initial begin
@@ -79,7 +80,7 @@ module tb_generic_conv_sim();
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma1_cmd_axis_vif", dma1_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "final_res_axis_vif", final_res_axis_if);
 		
-		run_test(TEST_NAME);
+		run_test();
 	end
 	
 	/** 待测模块 **/
@@ -322,6 +323,35 @@ module tb_generic_conv_sim();
 	assign kout_wgtblk_axis_if.last = dut.conv_data_hub_u.m_kout_wgtblk_axis_last;
 	assign kout_wgtblk_axis_if.valid = dut.conv_data_hub_u.m_kout_wgtblk_axis_valid;
 	assign kout_wgtblk_axis_if.ready = dut.conv_data_hub_u.m_kout_wgtblk_axis_ready;
+	
+	genvar mid_res_acmlt_i;
+	generate
+		for(mid_res_acmlt_i = 0;mid_res_acmlt_i < ATOMIC_K;mid_res_acmlt_i = mid_res_acmlt_i + 1)
+		begin:mid_res_acmlt_blk
+			assign acmlt_in_if[mid_res_acmlt_i].data[79:0] = 
+				{
+					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_exp[mid_res_acmlt_i][7:0],
+					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_frac[mid_res_acmlt_i][39:0],
+					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_org_mid_res[mid_res_acmlt_i][31:0]
+				};
+			assign acmlt_in_if[mid_res_acmlt_i].user[0] = 
+				dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_first_item[mid_res_acmlt_i];
+			assign acmlt_in_if[mid_res_acmlt_i].last = 1'b1;
+			assign acmlt_in_if[mid_res_acmlt_i].valid = 
+				dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_valid[mid_res_acmlt_i];
+			assign acmlt_in_if[mid_res_acmlt_i].ready = 1'b1;
+			
+			initial
+			begin
+				uvm_config_db #(panda_axis_vif)::set(
+					null,
+					$sformatf("uvm_test_top.mid_res_acmlt_cal_obsv_env[%0d]", mid_res_acmlt_i),
+					"acmlt_in_vif",
+					acmlt_in_if[mid_res_acmlt_i]
+				);
+			end
+		end
+ 	endgenerate
 	
 	generic_conv_sim #(
 		.ATOMIC_K(ATOMIC_K),

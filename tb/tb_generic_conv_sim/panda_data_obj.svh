@@ -155,6 +155,10 @@ class PackedReal extends AbstractData;
 		printer.print_real(field_name, this.data);
 	endfunction
 	
+	virtual function string convert2string();
+		return $sformatf("%0f", this.data);
+	endfunction
+	
 	`tue_object_default_constructor(PackedReal)
 	
 	`uvm_object_utils_begin(PackedReal)

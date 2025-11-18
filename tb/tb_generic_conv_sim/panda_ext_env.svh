@@ -458,6 +458,12 @@ class GenericConvSimTestEnv extends panda_env #(
 	local ConvCalCfg cal_cfg;
 	local BufferCfg buf_cfg;
 	
+	local FmapOutPtCalProcListener cal_proc_listener = null;
+	
+	function void register_cal_proc_listener(FmapOutPtCalProcListener listener);
+		this.cal_proc_listener = listener;
+	endfunction
+	
 	function new(string name = "GenericConvSimTestEnv", uvm_component parent = null);
 		super.new(name, parent);
 	endfunction
@@ -548,6 +554,7 @@ class GenericConvSimTestEnv extends panda_env #(
 	
 	protected function void build_agents();
 		this.final_res_scb = FinalResScoreboard::type_id::create("final_res_scb", this);
+		this.final_res_scb.register_cal_proc_listener(this.cal_proc_listener);
 		
 		this.fmap_blk_ctrl_mst_agt = panda_blk_ctrl_master_agent::type_id::create("fmap_blk_ctrl_mst_agt", this);
 		this.fmap_blk_ctrl_mst_agt.active_agent();
@@ -679,6 +686,65 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	`uvm_component_utils(GenericConvSimTestEnv)
+	
+endclass
+
+class MidResAcmltCalObsvEnv extends panda_env #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy)
+);
+	
+	local MidResAcmltCalScoreboard scb;
+	
+	local panda_axis_slave_agent acmlt_in_slv_agt;
+	
+	local panda_axis_configuration acmlt_in_cfg;
+	
+	function void register_cal_proc_listener(FmapOutPtCalProcListener listener);
+		this.scb.register_cal_proc_listener(listener);
+	endfunction
+	
+	function new(string name = "MidResAcmltCalObsvEnv", uvm_component parent = null);
+		super.new(name, parent);
+	endfunction
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+	endfunction
+	
+	protected function void build_configuration();
+		this.acmlt_in_cfg = panda_axis_configuration::type_id::create("acmlt_in_cfg");
+		if(!this.acmlt_in_cfg.randomize() with {
+			data_width == 80;
+			user_width == 1;
+			
+			has_keep == 1'b0;
+			has_strb == 1'b0;
+			has_last == 1'b0;
+		})
+			`uvm_fatal(this.get_name(), "cannot randomize acmlt_in_cfg!")
+		
+		if(!uvm_config_db #(panda_axis_vif)::get(this, "", "acmlt_in_vif", this.acmlt_in_cfg.vif))
+			`uvm_fatal(this.get_name(), "virtual interface must be set for acmlt_in_vif!!!")
+	endfunction
+	
+	protected function void build_status();
+		// blank
+	endfunction
+	
+	protected function void build_agents();
+		this.scb = MidResAcmltCalScoreboard::type_id::create("obsv_scb", this);
+		
+		this.acmlt_in_slv_agt = panda_axis_slave_agent::type_id::create("acmlt_in_slv_agt", this);
+		this.acmlt_in_slv_agt.passive_agent();
+		this.acmlt_in_slv_agt.set_configuration(this.acmlt_in_cfg);
+	endfunction
+	
+	function void connect_phase(uvm_phase phase);
+		this.acmlt_in_slv_agt.item_port.connect(this.scb.acmlt_in_port);
+	endfunction
+	
+	`uvm_component_utils(MidResAcmltCalObsvEnv)
 	
 endclass
 

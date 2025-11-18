@@ -2,6 +2,13 @@
 
 `define __PANDA_EXT_TRANS_H
 
+typedef tue_sequence_item #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy),
+	.PROXY_CONFIGURATION(tue_configuration_dummy),
+	.PROXY_STATUS(tue_status_dummy)
+)pure_tue_sequence_item;
+
 class panda_fmap_sfc_row_access_req_gen_blk_ctrl_trans extends panda_blk_ctrl_abstract_trans;
 	
 	int unsigned id;
@@ -449,12 +456,7 @@ class panda_dummy_blk_ctrl_trans_factory extends panda_trans_factory;
 	
 endclass
 
-class FmRdReqTransAdapter extends tue_sequence_item #(
-	.CONFIGURATION(tue_configuration_dummy),
-	.STATUS(tue_status_dummy),
-	.PROXY_CONFIGURATION(tue_configuration_dummy),
-	.PROXY_STATUS(tue_status_dummy)
-);
+class FmRdReqTransAdapter extends pure_tue_sequence_item;
 	
 	local panda_axis_trans axis_tr;
 	
@@ -518,12 +520,7 @@ class FmRdReqTransAdapter extends tue_sequence_item #(
 	
 endclass
 
-class KernalRdReqTransAdapter extends tue_sequence_item #(
-	.CONFIGURATION(tue_configuration_dummy),
-	.STATUS(tue_status_dummy),
-	.PROXY_CONFIGURATION(tue_configuration_dummy),
-	.PROXY_STATUS(tue_status_dummy)
-);
+class KernalRdReqTransAdapter extends pure_tue_sequence_item;
 	
 	local panda_axis_trans axis_tr;
 	
@@ -627,18 +624,15 @@ class KernalRdReqTransAdapter extends tue_sequence_item #(
 	
 endclass
 
-virtual class AbstractFinalResAdapter extends tue_sequence_item #(
-	.CONFIGURATION(tue_configuration_dummy),
-	.STATUS(tue_status_dummy),
-	.PROXY_CONFIGURATION(tue_configuration_dummy),
-	.PROXY_STATUS(tue_status_dummy)
-);
+virtual class AbstractFinalResAdapter extends pure_tue_sequence_item;
 	
 	local panda_axis_trans axis_tr;
 	
 	int unsigned print_id_base = 0;
 	int unsigned id;
+	
 	AbstractData data_fifo[$];
+	string print_context[$];
 	
 	pure virtual protected function AbstractData create_data();
 	
@@ -681,7 +675,15 @@ virtual class AbstractFinalResAdapter extends tue_sequence_item #(
 		
 		for(int i = 0;i < this.data_fifo.size();i++)
 		begin
-			this.data_fifo[i].print_data(printer, $sformatf("data[%0d]", this.print_id_base + i));
+			this.data_fifo[i].print_data(
+				printer,
+				{
+					$sformatf("data[id: %0d]", this.print_id_base + i),
+					(i < this.print_context.size()) ? 
+						$sformatf("[%0s]", this.print_context[i]):
+						""
+				}
+			);
 		end
 	endfunction
 	
@@ -703,6 +705,57 @@ class Fp16FinalResAdapter extends AbstractFinalResAdapter;
 	`tue_object_default_constructor(Fp16FinalResAdapter)
 	
 	`uvm_object_utils(Fp16FinalResAdapter)
+	
+endclass
+
+virtual class MidResAccumInTr extends pure_tue_sequence_item;
+	
+	bit is_first_item; // 是否第1项
+	
+	pure virtual function void from_axis_tr(panda_axis_trans axis_tr);
+	
+	`tue_object_default_constructor(MidResAccumInTr)
+	
+endclass
+
+class FpMidResAccumInTr extends MidResAccumInTr;
+	
+	int new_v_exp; // 新中间结果的指数部分
+	longint new_v_frac; // 新中间结果的尾数部分
+	real new_v_fp; // 新中间结果的浮点表示
+	
+	real org_v_fp; // 原中间结果的浮点表示
+	
+	virtual function void from_axis_tr(panda_axis_trans axis_tr);
+		if(axis_tr != null)
+		begin
+			this.is_first_item = axis_tr.user[0][0];
+			
+			if(this.is_first_item)
+				this.org_v_fp = 0.0;
+			else
+				this.org_v_fp = decode_fp32(axis_tr.data[0][31:0]);
+			
+			this.new_v_frac = {{24{axis_tr.data[0][71]}}, axis_tr.data[0][71:32]};
+			this.new_v_exp = {24'd0, axis_tr.data[0][79:72]} - 50;
+			
+			this.new_v_fp = get_fixed36_exp(this.new_v_frac, this.new_v_exp);
+		end
+	endfunction
+	
+	virtual function string convert2string();
+		return $sformatf("%0f + %0f = %0f", this.org_v_fp, this.new_v_fp, this.org_v_fp + this.new_v_fp);
+	endfunction
+	
+	`tue_object_default_constructor(FpMidResAccumInTr)
+	
+	`uvm_object_utils_begin(FpMidResAccumInTr)
+		`uvm_field_int(is_first_item, UVM_DEFAULT | UVM_BIN)
+		`uvm_field_int(new_v_exp, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_int(new_v_frac, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_real(new_v_fp, UVM_DEFAULT)
+		`uvm_field_real(org_v_fp, UVM_DEFAULT)
+	`uvm_object_utils_end
 	
 endclass
 

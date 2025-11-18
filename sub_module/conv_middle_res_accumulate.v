@@ -291,7 +291,7 @@ module conv_middle_res_accumulate #(
 		生成绝对指数更大的浮点数的尾数
 		对阶算术右移(阶段1: 粗粒度算术右移)
 	第3级流水线: 
-		对阶算术右移(阶段2: 粗粒度算术右移)
+		对阶算术右移(阶段2: 细粒度算术右移)
 	第4级流水线: 
 		尾数求和
 	第5级流水线: 
@@ -350,6 +350,7 @@ module conv_middle_res_accumulate #(
 	reg signed[8:0] acmlt_exp_nml_s2; // 标准化阶段2后的绝对指数
 	// 累加计算(第7级流水线)
 	reg signed[29:0] acmlt_frac_nml_s3; // 标准化阶段3后的尾数(Q23)
+	reg acmlt_frac_low23_eq0_nml_s3; // 标准化阶段3后的尾数低23位全0(标志)
 	reg signed[8:0] acmlt_exp_nml_s3; // 标准化阶段3后的绝对指数
 	// 累加计算(第8级流水线)
 	reg signed[24:0] acmlt_frac_nml_s4; // 标准化阶段4后的尾数(Q23)
@@ -608,6 +609,7 @@ module conv_middle_res_accumulate #(
 	end
 	
 	// 标准化阶段3后的尾数(Q23)
+	// 标准化阶段3后的尾数低23位全0(标志)
 	// 标准化阶段3后的绝对指数
 	always @(posedge aclk)
 	begin
@@ -618,11 +620,13 @@ module conv_middle_res_accumulate #(
 				if(acmlt_frac_nml_s2[32:28] != 5'b11111) // 整数部分<-2^5
 				begin
 					acmlt_frac_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[33:4]; // 算术右移4位
+					acmlt_frac_low23_eq0_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[26:4] == 23'd0;
 					acmlt_exp_nml_s3 <= # SIM_DELAY acmlt_exp_nml_s2 + 9'sd4;
 				end
 				else // 整数部分>=-2^5
 				begin
 					acmlt_frac_nml_s3 <= # SIM_DELAY {acmlt_frac_nml_s2[28], acmlt_frac_nml_s2[28:0]};
+					acmlt_frac_low23_eq0_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[22:0] == 23'd0;
 					acmlt_exp_nml_s3 <= # SIM_DELAY acmlt_exp_nml_s2;
 				end
 			end
@@ -631,11 +635,13 @@ module conv_middle_res_accumulate #(
 				if(acmlt_frac_nml_s2[32:28] != 5'b00000) // 整数部分>=2^5
 				begin
 					acmlt_frac_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[33:4]; // 算术右移4位
+					acmlt_frac_low23_eq0_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[26:4] == 23'd0;
 					acmlt_exp_nml_s3 <= # SIM_DELAY acmlt_exp_nml_s2 + 9'sd4;
 				end
 				else // 整数部分<2^5
 				begin
 					acmlt_frac_nml_s3 <= # SIM_DELAY {acmlt_frac_nml_s2[28], acmlt_frac_nml_s2[28:0]};
+					acmlt_frac_low23_eq0_nml_s3 <= # SIM_DELAY acmlt_frac_nml_s2[22:0] == 23'd0;
 					acmlt_exp_nml_s3 <= # SIM_DELAY acmlt_exp_nml_s2;
 				end
 			end
@@ -650,27 +656,49 @@ module conv_middle_res_accumulate #(
 		begin
 			if(acmlt_frac_nml_s3[29])
 			begin
-				if($signed(acmlt_frac_nml_s3[29:23]) < -32)
+				if(
+					($signed(acmlt_frac_nml_s3[29:23]) == -64) & acmlt_frac_low23_eq0_nml_s3
+				) // -64.0
+				begin
+					acmlt_frac_nml_s4 <= # SIM_DELAY {2'b11, 23'd0}; // -1.0
+					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd6;
+				end
+				else if(
+					($signed(acmlt_frac_nml_s3[29:23]) < -32) | 
+					(($signed(acmlt_frac_nml_s3[29:23]) == -32) & acmlt_frac_low23_eq0_nml_s3)
+				) // [-32.0, 64.0)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[29:5]; // 算术右移5位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd5;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) < -16)
+				else if(
+					($signed(acmlt_frac_nml_s3[29:23]) < -16) | 
+					(($signed(acmlt_frac_nml_s3[29:23]) == -16) & acmlt_frac_low23_eq0_nml_s3)
+				) // [-16.0, 32.0)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[28:4]; // 算术右移4位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd4;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) < -8)
+				else if(
+					($signed(acmlt_frac_nml_s3[29:23]) < -8) | 
+					(($signed(acmlt_frac_nml_s3[29:23]) == -8) & acmlt_frac_low23_eq0_nml_s3)
+				) // [-8.0, 16.0)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[27:3]; // 算术右移3位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd3;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) < -4)
+				else if(
+					($signed(acmlt_frac_nml_s3[29:23]) < -4) | 
+					(($signed(acmlt_frac_nml_s3[29:23]) == -4) & acmlt_frac_low23_eq0_nml_s3)
+				) // [-4.0, 8.0)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[26:2]; // 算术右移2位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd2;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) < -2)
+				else if(
+					($signed(acmlt_frac_nml_s3[29:23]) < -2) | 
+					(($signed(acmlt_frac_nml_s3[29:23]) == -2) & acmlt_frac_low23_eq0_nml_s3)
+				) // [-2.0, 4.0)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[25:1]; // 算术右移1位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd1;
@@ -683,27 +711,27 @@ module conv_middle_res_accumulate #(
 			end
 			else
 			begin
-				if($signed(acmlt_frac_nml_s3[29:23]) >= 32)
+				if($signed(acmlt_frac_nml_s3[29:23]) >= 32) // [32, 64)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[29:5]; // 算术右移5位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd5;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) >= 16)
+				else if($signed(acmlt_frac_nml_s3[29:23]) >= 16) // [16, 32)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[28:4]; // 算术右移4位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd4;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) >= 8)
+				else if($signed(acmlt_frac_nml_s3[29:23]) >= 8) // [8, 16)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[27:3]; // 算术右移3位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd3;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) >= 4)
+				else if($signed(acmlt_frac_nml_s3[29:23]) >= 4) // [4, 8)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[26:2]; // 算术右移2位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd2;
 				end
-				else if($signed(acmlt_frac_nml_s3[29:23]) >= 2)
+				else if($signed(acmlt_frac_nml_s3[29:23]) >= 2) // [2, 4)
 				begin
 					acmlt_frac_nml_s4 <= # SIM_DELAY acmlt_frac_nml_s3[25:1]; // 算术右移1位
 					acmlt_exp_nml_s4 <= # SIM_DELAY acmlt_exp_nml_s3 + 9'sd1;
@@ -724,8 +752,15 @@ module conv_middle_res_accumulate #(
 		begin
 			// 符号位
 			acmlt_out_data_fp16[31] <= # SIM_DELAY acmlt_frac_nml_s4[24];
+			
 			// 阶码
-			acmlt_out_data_fp16[30:23] <= # SIM_DELAY acmlt_exp_nml_s4 + 9'sd127;
+			if(acmlt_frac_nml_s4[24:23] == 2'b00) // [0.0, 1.0)
+				acmlt_out_data_fp16[30:23] <= # SIM_DELAY 9'sd0;
+			else if(acmlt_frac_nml_s4 == {2'b10, 23'd0}) // -2.0
+				acmlt_out_data_fp16[30:23] <= # SIM_DELAY acmlt_exp_nml_s4 + 9'sd128;
+			else
+				acmlt_out_data_fp16[30:23] <= # SIM_DELAY acmlt_exp_nml_s4 + 9'sd127;
+			
 			// 尾数位
 			acmlt_out_data_fp16[22:0] <= # SIM_DELAY 
 				acmlt_frac_nml_s4[24] ? 

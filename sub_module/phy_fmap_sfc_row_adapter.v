@@ -427,6 +427,7 @@ module phy_fmap_sfc_row_adapter #(
 					(row_n_submitted_to_mac_array_r + 1'b1);
 	end
 	
+	/** 物理特征图表面行适配控制 **/
 	assign m_row_reg_axis_ready = 
 		aclken & 
 		has_phy_row_traffic & 
