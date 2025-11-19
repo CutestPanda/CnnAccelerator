@@ -174,8 +174,7 @@ module conv_middle_res_acmlt_buf #(
 			mid_res_sel_s1 <= # SIM_DELAY mid_res_sel_s0;
 			mid_res_first_item_s1 <= # SIM_DELAY mid_res_first_item_s0;
 			mid_res_new_item_s1 <= # SIM_DELAY mid_res_new_item_s0;
-			// 说明: 仅在输入最后1组中间结果时才保存项掩码
-			mid_res_mask_s1 <= # SIM_DELAY mid_res_mask_s0 & {ATOMIC_K{s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND]}};
+			mid_res_mask_s1 <= # SIM_DELAY mid_res_mask_s0;
 		end
 	end
 	always @(posedge aclk or negedge aresetn)
@@ -528,7 +527,9 @@ module conv_middle_res_acmlt_buf #(
 			assign acmlt_in_org_mid_res[acmlt_i] = mid_res_data_s2[acmlt_i*32+31:acmlt_i*32];
 			assign acmlt_in_first_item[acmlt_i] = mid_res_first_item_s2;
 			assign acmlt_in_info_along[acmlt_i] = mid_res_mask_s2;
-			assign acmlt_in_valid[acmlt_i] = mid_res_valid_s2;
+			assign acmlt_in_valid[acmlt_i] = 
+				mid_res_valid_s2 & 
+				mid_res_mask_s2[acmlt_i]; // 若中间结果里的某个表面无效, 则对应的累加单元无需作计算
 			
 			assign acmlt_out_data_flattened[acmlt_i*32+31:acmlt_i*32] = acmlt_out_data[acmlt_i];
 			

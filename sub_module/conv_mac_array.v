@@ -232,27 +232,14 @@ module conv_mac_array #(
 					array_i_kernal_sfc_vld & kernal_buf_full_n & 
 					(kernal_buf_wsel == (kernal_buf_sfc_i / (ATOMIC_K * MAX_CAL_ROUND))) & 
 					(
-						(array_i_kernal_sfc_last & (~kernal_buf_loaded_sfc_vec[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)])) | 
-						(
-							(USE_INNER_SFC_CNT == "true") ? 
-								kernal_sfc_cnt[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]:
-								array_i_kernal_sfc_id[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]
-						)
+						(USE_INNER_SFC_CNT == "true") ? 
+							kernal_sfc_cnt[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]:
+							array_i_kernal_sfc_id[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]
 					)
 				)
-					kernal_buf_data[kernal_buf_sfc_i/ATOMIC_K][((kernal_buf_sfc_i%ATOMIC_K)+1)*(ATOMIC_C*16)-1:
+					kernal_buf_data[kernal_buf_sfc_i/ATOMIC_K][
+						((kernal_buf_sfc_i%ATOMIC_K)+1)*(ATOMIC_C*16)-1:
 						(kernal_buf_sfc_i%ATOMIC_K)*(ATOMIC_C*16)] <= # SIM_DELAY 
-							// 说明: 每加载完1个卷积核权重块, 对未加载的表面作填0处理
-							{(ATOMIC_C*16){
-								~(
-									array_i_kernal_sfc_last & (~kernal_buf_loaded_sfc_vec[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]) & 
-									(~(
-										(USE_INNER_SFC_CNT == "true") ? 
-											kernal_sfc_cnt[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]:
-											array_i_kernal_sfc_id[kernal_buf_sfc_i%(ATOMIC_K*MAX_CAL_ROUND)]
-									))
-								)
-							}} & 
 							array_i_kernal_sfc;
 			end
 		end
@@ -326,8 +313,9 @@ module conv_mac_array #(
 	/** 乘加阵列 **/
 	wire[4:0] kernal_wgt_sel; // 卷积核权重选择
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] kernal_buf_data_cur; // 当前选择的卷积核权重(数据)
+	wire[ATOMIC_K-1:0] kernal_buf_mask_cur; // 当前选择的卷积核权重(掩码)
 	wire[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] mac_in_info_along; // 输入随路数据
-	wire mac_in_valid; // 输入有效指示
+	wire[ATOMIC_K-1:0] mac_in_valid; // 输入有效指示
 	wire[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] mac_out_info_along_arr[0:ATOMIC_K-1]; // 随路数据(数组)
 	wire[ATOMIC_K-1:0] array_o_res_vld_vec; // 计算结果输出有效(指示向量)
 	
@@ -347,16 +335,21 @@ module conv_mac_array #(
 				cal_round_cnt
 		);
 	assign kernal_buf_data_cur = kernal_buf_data[kernal_wgt_sel];
+	assign kernal_buf_mask_cur = kernal_buf_mask[kernal_buf_rsel] >> (cal_round_cnt * ATOMIC_K);
+	
 	assign mac_in_info_along[0] = cal_round_cnt == cal_round;
 	assign mac_in_info_along[INFO_ALONG_WIDTH+4+1-1:1] = {array_i_ftm_info_along, cal_round_cnt};
-	assign mac_in_info_along[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:INFO_ALONG_WIDTH+4+1] = 
-		kernal_buf_mask[kernal_buf_rsel] >> (cal_round_cnt * ATOMIC_K);
-	assign mac_in_valid = aclken & (~rst_mac_array) & array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy;
+	assign mac_in_info_along[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:INFO_ALONG_WIDTH+4+1] = kernal_buf_mask_cur;
 	
 	genvar mac_cell_i;
 	generate
 		for(mac_cell_i = 0;mac_cell_i < ATOMIC_K;mac_cell_i = mac_cell_i + 1)
 		begin:mac_array_blk
+			assign mac_in_valid[mac_cell_i] = 
+				aclken & (~rst_mac_array) & 
+				array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy & 
+				kernal_buf_mask_cur[mac_cell_i]; // 若当前权重表面未加载, 则对应CELL无需作这个表面的乘加计算
+			
 			conv_mac_cell #(
 				.ATOMIC_C(ATOMIC_C),
 				.EN_SMALL_FP16(EN_SMALL_FP16),
@@ -372,7 +365,7 @@ module conv_mac_array #(
 				.mac_in_ftm(array_i_ftm_sfc),
 				.mac_in_wgt(kernal_buf_data_cur[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
 				.mac_in_info_along(mac_in_info_along),
-				.mac_in_valid(mac_in_valid),
+				.mac_in_valid(mac_in_valid[mac_cell_i]),
 				
 				.mac_out_exp(array_o_res[mac_cell_i*48+47:mac_cell_i*48+40]),
 				.mac_out_frac(array_o_res[mac_cell_i*48+39:mac_cell_i*48+0]),
