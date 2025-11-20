@@ -69,6 +69,7 @@ module conv_mac_cell #(
 	// 乘加单元计算输入
 	input wire[ATOMIC_C*16-1:0] mac_in_ftm, // 特征图数据
 	input wire[ATOMIC_C*16-1:0] mac_in_wgt, // 卷积核权重
+	input wire mac_in_ftm_masked, // 特征图数据(无效标志)
 	input wire[INFO_ALONG_WIDTH-1:0] mac_in_info_along, // 随路数据
 	input wire mac_in_valid, // 输入有效指示
 	
@@ -84,6 +85,19 @@ module conv_mac_cell #(
 	output wire mul_ce, // 计算使能
 	input wire[ATOMIC_C*32-1:0] mul_res // 计算结果
 );
+	
+	// 计算bit_depth的最高有效位编号(即位数-1)
+    function integer clogb2(input integer bit_depth);
+    begin
+		if(bit_depth == 0)
+			clogb2 = 0;
+		else
+		begin
+			for(clogb2 = -1;bit_depth > 0;clogb2 = clogb2 + 1)
+				bit_depth = bit_depth >> 1;
+		end
+    end
+    endfunction
 	
 	/** 常量 **/
 	// 运算数据格式
@@ -123,9 +137,11 @@ module conv_mac_cell #(
 	// 加法树输入
 	wire signed[31:0] add_tree_in_arr[0:ATOMIC_C-1];
 	wire[ATOMIC_C*32-1:0] add_tree_in;
+	wire add_tree_in_mask;
 	wire add_tree_in_valid;
 	// 加法树输出
 	wire signed[36:0] add_tree_out;
+	wire add_tree_out_mask;
 	wire add_tree_out_valid;
 	
 	genvar add_tree_in_i;
@@ -154,10 +170,26 @@ module conv_mac_cell #(
 				.add_out(add_tree_out),
 				.add_out_vld(add_tree_out_valid)
 			);
+			
+			ram_based_shift_regs #(
+				.data_width(1),
+				.delay_n(clogb2(ATOMIC_C)),
+				.shift_type("ff"),
+				.en_output_register_init("false"),
+				.simulation_delay(SIM_DELAY)
+			)delay_for_mask_along_with_add_tree_u(
+				.clk(aclk),
+				.resetn(aresetn),
+				
+				.shift_in(add_tree_in_mask),
+				.ce(aclken),
+				.shift_out(add_tree_out_mask)
+			);
 		end
 		else
 		begin
 			assign add_tree_out = $signed(add_tree_in);
+			assign add_tree_out_mask = add_tree_in_mask;
 			assign add_tree_out_valid = add_tree_in_valid;
 		end
 	endgenerate
@@ -178,6 +210,37 @@ module conv_mac_cell #(
 				{mac_in_valid_d3, mac_in_valid_d2, mac_in_valid_d1, mac_in_valid};
 	end
 	
+	/** 特征图数据(无效标志)延迟链 **/
+	reg mac_in_ftm_masked_d1; // 延迟1clk的特征图数据(无效标志)
+	reg mac_in_ftm_masked_d2; // 延迟2clk的特征图数据(无效标志)
+	reg mac_in_ftm_masked_d3; // 延迟3clk的特征图数据(无效标志)
+	reg mac_in_ftm_masked_d4; // 延迟4clk的特征图数据(无效标志)
+	
+	// 延迟1clk的特征图数据(无效标志)
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_in_valid)
+			mac_in_ftm_masked_d1 <= # SIM_DELAY mac_in_ftm_masked;
+	end
+	// 延迟2clk的特征图数据(无效标志)
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_in_valid_d1)
+			mac_in_ftm_masked_d2 <= # SIM_DELAY mac_in_ftm_masked_d1;
+	end
+	// 延迟3clk的特征图数据(无效标志)
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_in_valid_d2)
+			mac_in_ftm_masked_d3 <= # SIM_DELAY mac_in_ftm_masked_d2;
+	end
+	// 延迟4clk的特征图数据(无效标志)
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_in_valid_d3)
+			mac_in_ftm_masked_d4 <= # SIM_DELAY mac_in_ftm_masked_d3;
+	end
+	
 	/** INT16计算 **/
 	// 外部有符号乘法器
 	wire signed[15:0] mul_op_a_int16_arr[0:ATOMIC_C-1]; // 操作数A
@@ -185,15 +248,19 @@ module conv_mac_cell #(
 	wire mul_ce_int16; // 计算使能
 	// 加法树输入
 	wire signed[31:0] add_tree_in_int16_arr[0:ATOMIC_C-1];
+	wire add_tree_in_int16_mask;
 	wire add_tree_in_int16_valid;
 	// 乘加单元结果输出
 	wire signed[39:0] mac_out_frac_int16; // 定点数
+	wire mac_out_int16_mask;
 	wire mac_out_int16_valid;
 	
-	assign mul_ce_int16 = mac_in_valid;
+	assign mul_ce_int16 = mac_in_valid & (~mac_in_ftm_masked);
+	assign add_tree_in_int16_mask = mac_in_ftm_masked_d1;
 	assign add_tree_in_int16_valid = mac_in_valid_d1;
 	
 	assign mac_out_frac_int16 = {{3{add_tree_out[36]}}, add_tree_out};
+	assign mac_out_int16_mask = add_tree_out_mask;
 	assign mac_out_int16_valid = add_tree_out_valid;
 	
 	genvar cal_int16_i;
@@ -222,6 +289,7 @@ module conv_mac_cell #(
 	wire mul_ce_fp16; // 计算使能
 	// 加法树输入
 	wire signed[31:0] add_tree_in_fp16_arr[0:ATOMIC_C-1];
+	wire add_tree_in_fp16_mask;
 	wire add_tree_in_fp16_valid;
 	// 最大值求解树
 	wire signed[4:0] max_cmp_tree_in_arr[0:ATOMIC_C-1]; // 比较输入(数组)
@@ -231,6 +299,7 @@ module conv_mac_cell #(
 	// 乘加单元结果输出
 	wire[7:0] mac_out_exp_fp16; // 指数部分
 	wire signed[39:0] mac_out_frac_fp16; // 尾数部分
+	wire mac_out_fp16_mask;
 	wire mac_out_fp16_valid;
 	// FP16输入
 	wire fp16_s_f[0:ATOMIC_C-1]; // 特征图数据的符号位
@@ -256,13 +325,15 @@ module conv_mac_cell #(
 	reg signed[28:0] fp16_signed_mtso[0:ATOMIC_C-1]; // 原始的有符号MTSO
 	reg signed[28:0] fp16_shifted_mtso[0:ATOMIC_C-1]; // 右移的有符号MTSO
 	
-	assign mul_ce_fp16 = mac_in_valid_d1;
+	assign mul_ce_fp16 = mac_in_valid_d1 & (~mac_in_ftm_masked_d1);
 	
+	assign add_tree_in_fp16_mask = mac_in_ftm_masked_d4;
 	assign add_tree_in_fp16_valid = mac_in_valid_d4;
 	
-	assign max_cmp_tree_in_valid = (calfmt == CAL_FMT_FP16) & mac_in_valid_d1;
+	assign max_cmp_tree_in_valid = (calfmt == CAL_FMT_FP16) & mac_in_valid_d1 & (~mac_in_ftm_masked_d1);
 	
 	assign mac_out_frac_fp16 = {{3{add_tree_out[36]}}, add_tree_out};
+	assign mac_out_fp16_mask = add_tree_out_mask;
 	assign mac_out_fp16_valid = add_tree_out_valid;
 	
 	assign fp16_func = max_cmp_tree_out[3:0];
@@ -284,7 +355,7 @@ module conv_mac_cell #(
 		begin:fp16_mts_blk
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
 					fp16_mts_f[fp16_mts_i] <= # SIM_DELAY 
 						{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_f[fp16_mts_i] != 5'b00000), fp16_m_f[fp16_mts_i]} << 
 							(
@@ -296,7 +367,7 @@ module conv_mac_cell #(
 			
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
 					fp16_mts_w[fp16_mts_i] <= # SIM_DELAY 
 						{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_w[fp16_mts_i] != 5'b00000), fp16_m_w[fp16_mts_i]} << 
 							(
@@ -314,13 +385,13 @@ module conv_mac_cell #(
 		begin:fp16_mtso_sign_blk
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
 					fp16_mtso_sign[fp16_mtso_sign_i] <= # SIM_DELAY fp16_s_f[fp16_mtso_sign_i] ^ fp16_s_w[fp16_mtso_sign_i];
 			end
 			
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d1)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d1 & (~mac_in_ftm_masked_d1))
 					fp16_mtso_sign_d1[fp16_mtso_sign_i] <= # SIM_DELAY fp16_mtso_sign[fp16_mtso_sign_i];
 			end
 		end
@@ -341,21 +412,21 @@ module conv_mac_cell #(
 		begin:fp16_e_h3_f_add_w_blk
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
 					fp16_e_h3_f_add_w[fp16_e_h3_f_add_w_i] <= # SIM_DELAY 
 						fp16_e_f[fp16_e_h3_f_add_w_i][4:2] + fp16_e_w[fp16_e_h3_f_add_w_i][4:2];
 			end
 			
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d1)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d1 & (~mac_in_ftm_masked_d1))
 					fp16_e_h3_f_add_w_d1[fp16_e_h3_f_add_w_i] <= # SIM_DELAY 
 						fp16_e_h3_f_add_w[fp16_e_h3_f_add_w_i];
 			end
 			
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d2)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d2 & (~mac_in_ftm_masked_d2))
 					fp16_e_h3_f_add_w_d2[fp16_e_h3_f_add_w_i] <= # SIM_DELAY 
 						fp16_e_h3_f_add_w_d1[fp16_e_h3_f_add_w_i];
 			end
@@ -368,7 +439,7 @@ module conv_mac_cell #(
 		begin:fp16_signed_mtso_blk
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d2)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d2 & (~mac_in_ftm_masked_d2))
 					fp16_signed_mtso[fp16_signed_mtso_i] <= # SIM_DELAY 
 						fp16_mtso_sign_d1[fp16_signed_mtso_i] ? 
 							({1'b1, ~mul_res_arr[fp16_signed_mtso_i][27:0]} + 1'b1):
@@ -449,7 +520,7 @@ module conv_mac_cell #(
 			
 			always @(posedge aclk)
 			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d3)
+				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d3 & (~mac_in_ftm_masked_d3))
 				begin
 					if(fp16_set[fp16_shifted_mtso_i] >= 6'd32)
 						fp16_shifted_mtso[fp16_shifted_mtso_i] <= # SIM_DELAY 29'd0;
@@ -538,7 +609,7 @@ module conv_mac_cell #(
 	
 	always @(posedge aclk)
 	begin
-		if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d3)
+		if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid_d3 & (~mac_in_ftm_masked_d3))
 			fp16_func_d1 <= # SIM_DELAY fp16_func;
 	end
 	
@@ -565,6 +636,11 @@ module conv_mac_cell #(
 	endgenerate
 	
 	/** 加法树复用 **/
+	assign add_tree_in_mask = 
+		aclken & (
+			((calfmt == CAL_FMT_FP16) & add_tree_in_fp16_mask) | 
+			((calfmt == CAL_FMT_INT16) & add_tree_in_int16_mask)
+		);
 	assign add_tree_in_valid = 
 		aclken & (
 			((calfmt == CAL_FMT_FP16) & add_tree_in_fp16_valid) | 
@@ -586,11 +662,14 @@ module conv_mac_cell #(
 	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along_fp16; // 计算FP16时的随路数据输出
 	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along_int16; // 计算INT16时的随路数据输出
 	
-	assign mac_out_exp = mac_out_exp_fp16;
+	assign mac_out_exp = 
+		((calfmt == CAL_FMT_FP16) & (~mac_out_fp16_mask)) ? 
+			mac_out_exp_fp16:
+			8'd24;
 	assign mac_out_frac = 
 		(calfmt == CAL_FMT_FP16) ? 
-			mac_out_frac_fp16:
-			mac_out_frac_int16;
+			(mac_out_fp16_mask ? 40'd0:mac_out_frac_fp16):
+			(mac_out_int16_mask ? 40'd0:mac_out_frac_int16);
 	assign mac_out_info_along = 
 		(calfmt == CAL_FMT_FP16) ? 
 			mac_out_info_along_fp16:

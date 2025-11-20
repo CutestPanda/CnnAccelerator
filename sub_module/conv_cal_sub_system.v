@@ -238,6 +238,7 @@ module conv_cal_sub_system #(
 	// [特征图]
 	wire[ATOMIC_C*16-1:0] array_i_ftm_sfc; // 特征图表面(数据)
 	wire array_i_ftm_sfc_last; // 卷积核参数对应的最后1个特征图表面(标志)
+	wire array_i_ftm_sfc_masked; // 特征图表面(无效标志)
 	wire array_i_ftm_sfc_vld; // 有效标志
 	wire array_i_ftm_sfc_rdy; // 就绪标志
 	// [卷积核]
@@ -255,6 +256,7 @@ module conv_cal_sub_system #(
 	
 	assign array_i_ftm_sfc = m_adapter_axis_data;
 	assign array_i_ftm_sfc_last = m_adapter_axis_last;
+	assign array_i_ftm_sfc_masked = m_adapter_axis_user;
 	assign array_i_ftm_sfc_vld = m_adapter_axis_valid;
 	assign m_adapter_axis_ready = array_i_ftm_sfc_rdy;
 	
@@ -285,6 +287,7 @@ module conv_cal_sub_system #(
 		.array_i_ftm_sfc(array_i_ftm_sfc),
 		.array_i_ftm_info_along(1'bx),
 		.array_i_ftm_sfc_last(array_i_ftm_sfc_last),
+		.array_i_ftm_sfc_masked(array_i_ftm_sfc_masked),
 		.array_i_ftm_sfc_vld(array_i_ftm_sfc_vld),
 		.array_i_ftm_sfc_rdy(array_i_ftm_sfc_rdy),
 		

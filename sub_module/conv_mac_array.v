@@ -85,6 +85,7 @@ module conv_mac_array #(
 	input wire[ATOMIC_C*16-1:0] array_i_ftm_sfc, // 特征图表面(数据)
 	input wire[INFO_ALONG_WIDTH-1:0] array_i_ftm_info_along, // 随路数据
 	input wire array_i_ftm_sfc_last, // 卷积核参数对应的最后1个特征图表面(标志)
+	input wire array_i_ftm_sfc_masked, // 特征图表面(无效标志)
 	input wire array_i_ftm_sfc_vld, // 有效标志
 	output wire array_i_ftm_sfc_rdy, // 就绪标志
 	// [卷积核]
@@ -424,6 +425,7 @@ module conv_mac_array #(
 				
 				.mac_in_ftm(array_i_ftm_sfc),
 				.mac_in_wgt(kernal_buf_data_cur[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
+				.mac_in_ftm_masked(array_i_ftm_sfc_masked),
 				.mac_in_info_along(mac_in_info_along),
 				.mac_in_valid(mac_in_valid[mac_cell_i]),
 				
