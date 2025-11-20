@@ -167,6 +167,7 @@ module tb_generic_conv_sim();
 	// 最终结果输出(AXIS主机)
 	wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data;
 	wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep;
+	wire[4:0] m_axis_fnl_res_user; // {是否最后1个子行(1bit), 子行号(4bit)}
 	wire m_axis_fnl_res_last; // 本行最后1个最终结果(标志)
 	wire m_axis_fnl_res_valid;
 	wire m_axis_fnl_res_ready;
@@ -247,6 +248,7 @@ module tb_generic_conv_sim();
 	
 	assign final_res_axis_if.data[ATOMIC_K*32-1:0] = m_axis_fnl_res_data;
 	assign final_res_axis_if.keep[ATOMIC_K*4-1:0] = m_axis_fnl_res_keep;
+	assign final_res_axis_if.user[4:0] = m_axis_fnl_res_user;
 	assign final_res_axis_if.last = m_axis_fnl_res_last;
 	assign final_res_axis_if.valid = m_axis_fnl_res_valid;
 	assign m_axis_fnl_res_ready = final_res_axis_if.ready;
@@ -444,6 +446,7 @@ module tb_generic_conv_sim();
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
 		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
+		.m_axis_fnl_res_user(m_axis_fnl_res_user),
 		.m_axis_fnl_res_last(m_axis_fnl_res_last),
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready)

@@ -122,6 +122,7 @@ module conv_cal_sub_system #(
 	*/
 	output wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data,
 	output wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep,
+	output wire[4:0] m_axis_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
 	input wire m_axis_fnl_res_ready,
@@ -142,6 +143,19 @@ module conv_cal_sub_system #(
 	output wire[RBUF_BANK_N*16-1:0] mem_addr_b,
 	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b
 );
+	
+	// 计算bit_depth的最高有效位编号(即位数-1)
+    function integer clogb2(input integer bit_depth);
+    begin
+		if(bit_depth == 0)
+			clogb2 = 0;
+		else
+		begin
+			for(clogb2 = -1;bit_depth > 0;clogb2 = clogb2 + 1)
+				bit_depth = bit_depth >> 1;
+		end
+    end
+    endfunction
 	
 	/** 常量 **/
 	// 卷积核形状的类型编码
@@ -256,6 +270,7 @@ module conv_cal_sub_system #(
 		.EN_SMALL_FP16(EN_SMALL_FP16),
 		.INFO_ALONG_WIDTH(1),
 		.USE_INNER_SFC_CNT("true"),
+		.TO_SKIP_EMPTY_CAL_ROUND("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_mac_array_u(
 		.aclk(aclk),
@@ -304,7 +319,8 @@ module conv_cal_sub_system #(
 	wire[ATOMIC_K*48-1:0] m_axis_pkt_out_data; // ATOMIC_K个中间结果
 	                                           // ({指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	wire[ATOMIC_K*6-1:0] m_axis_pkt_out_keep;
-	wire[1:0] m_axis_pkt_out_user; // {初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire[2:0] m_axis_pkt_out_user; // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire m_axis_pkt_out_last; // 本行最后1个中间结果(标志)
 	wire m_axis_pkt_out_valid;
 	wire m_axis_pkt_out_ready;
 	
@@ -316,6 +332,8 @@ module conv_cal_sub_system #(
 	
 	conv_middle_res_info_packer #(
 		.ATOMIC_K(ATOMIC_K),
+		.EN_MAC_ARRAY_REG_SLICE("true"),
+		.EN_PKT_OUT_REG_SLICE("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_middle_res_info_packer_u(
 		.aclk(aclk),
@@ -341,11 +359,14 @@ module conv_cal_sub_system #(
 		.m_axis_pkt_out_data(m_axis_pkt_out_data),
 		.m_axis_pkt_out_keep(m_axis_pkt_out_keep),
 		.m_axis_pkt_out_user(m_axis_pkt_out_user),
+		.m_axis_pkt_out_last(m_axis_pkt_out_last),
 		.m_axis_pkt_out_valid(m_axis_pkt_out_valid),
 		.m_axis_pkt_out_ready(m_axis_pkt_out_ready)
 	);
 	
 	/** 卷积中间结果累加与缓存 **/
+	// 运行时参数
+	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
 	// 中间结果输入(AXIS从机)
 	/*
 	对于ATOMIC_K个中间结果 -> 
@@ -353,7 +374,8 @@ module conv_cal_sub_system #(
 	*/
 	wire[ATOMIC_K*48-1:0] s_axis_mid_res_buf_data;
 	wire[ATOMIC_K*6-1:0] s_axis_mid_res_buf_keep;
-	wire[1:0] s_axis_mid_res_buf_user; // {初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire[2:0] s_axis_mid_res_buf_user; // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire s_axis_mid_res_buf_last; // 本行最后1个中间结果(标志)
 	wire s_axis_mid_res_buf_valid;
 	wire s_axis_mid_res_buf_ready;
 	// 最终结果输出(AXIS主机)
@@ -363,18 +385,24 @@ module conv_cal_sub_system #(
 	*/
 	wire[ATOMIC_K*32-1:0] m_axis_mid_res_buf_data;
 	wire[ATOMIC_K*4-1:0] m_axis_mid_res_buf_keep;
+	wire[4:0] m_axis_mid_res_buf_user; // {是否最后1个子行(1bit), 子行号(4bit)}
 	wire m_axis_mid_res_buf_last; // 本行最后1个最终结果(标志)
 	wire m_axis_mid_res_buf_valid;
 	wire m_axis_mid_res_buf_ready;
 	
+	assign bank_n_foreach_ofmap_row = 
+		(mid_res_item_n_foreach_row[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
+	
 	assign s_axis_mid_res_buf_data = m_axis_pkt_out_data;
 	assign s_axis_mid_res_buf_keep = m_axis_pkt_out_keep;
 	assign s_axis_mid_res_buf_user = m_axis_pkt_out_user;
+	assign s_axis_mid_res_buf_last = m_axis_pkt_out_last;
 	assign s_axis_mid_res_buf_valid = m_axis_pkt_out_valid;
 	assign m_axis_pkt_out_ready = s_axis_mid_res_buf_ready;
 	
 	assign m_axis_fnl_res_data = m_axis_mid_res_buf_data;
 	assign m_axis_fnl_res_keep = m_axis_mid_res_buf_keep;
+	assign m_axis_fnl_res_user = m_axis_mid_res_buf_user;
 	assign m_axis_fnl_res_last = m_axis_mid_res_buf_last;
 	assign m_axis_fnl_res_valid = m_axis_mid_res_buf_valid;
 	assign m_axis_mid_res_buf_ready = m_axis_fnl_res_ready;
@@ -391,17 +419,19 @@ module conv_cal_sub_system #(
 		.aclken(aclken),
 		
 		.calfmt(calfmt),
-		.ofmap_w(mid_res_item_n_foreach_row),
 		.row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
 		
 		.s_axis_mid_res_data(s_axis_mid_res_buf_data),
 		.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
 		.s_axis_mid_res_user(s_axis_mid_res_buf_user),
+		.s_axis_mid_res_last(s_axis_mid_res_buf_last),
 		.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
 		.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
 		
 		.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
 		.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
+		.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
 		.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
 		.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
 		.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),

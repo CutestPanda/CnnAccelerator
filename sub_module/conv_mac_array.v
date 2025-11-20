@@ -32,6 +32,7 @@ ATOMIC_K个卷积乘加单元
 带有全局时钟使能
 
 支持计算轮次拓展, 以适应更宽(>ATOMIC_K)的卷积核权重块
+支持跳过空的(未加载权重的)计算轮次
 
 带有卷积核权重乒乓缓存, 可存储2个权重块
 
@@ -64,6 +65,7 @@ module conv_mac_array #(
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
 	parameter integer INFO_ALONG_WIDTH = 1, // 随路数据的位宽(必须>=1)
 	parameter USE_INNER_SFC_CNT = "true", // 是否使用内部表面计数器
+	parameter TO_SKIP_EMPTY_CAL_ROUND = "true", // 是否跳过空的计算轮次
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -121,7 +123,9 @@ module conv_mac_array #(
 	wire kernal_buf_empty_n; // 卷积核权重缓存空(标志)
 	wire kernal_buf_full_n; // 卷积核权重缓存满(标志)
 	reg[MAX_CAL_ROUND*ATOMIC_K-1:0] kernal_buf_loaded_sfc_vec; // 已加载表面(标志向量)
+	wire[MAX_CAL_ROUND*ATOMIC_K-1:0] kernal_buf_loaded_sfc_vec_new; // 最新的已加载表面(标志向量)
 	reg[ATOMIC_K*ATOMIC_C*16-1:0] kernal_buf_data[0:MAX_CAL_ROUND*2-1]; // 缓存的卷积核权重(数据)
+	reg[MAX_CAL_ROUND-1:0] kernal_region_vld[0:1]; // 缓存的权重域(有效标志)
 	reg[MAX_CAL_ROUND*ATOMIC_K-1:0] kernal_buf_mask[0:1]; // 缓存的卷积核权重(掩码)
 	reg[MAX_CAL_ROUND*ATOMIC_K-1:0] kernal_sfc_cnt; // 卷积核表面计数器
 	
@@ -129,6 +133,14 @@ module conv_mac_array #(
 	
 	assign kernal_buf_empty_n = (~rst_mac_array) & (kernal_buf_stored[0] | kernal_buf_stored[1]);
 	assign kernal_buf_full_n = rst_mac_array | (~(kernal_buf_stored[0] & kernal_buf_stored[1]));
+	
+	assign kernal_buf_loaded_sfc_vec_new = 
+		kernal_buf_loaded_sfc_vec | 
+		(
+			(USE_INNER_SFC_CNT == "true") ? 
+				kernal_sfc_cnt:
+				array_i_kernal_sfc_id
+		);
 	
 	// 写选择
 	always @(posedge aclk or negedge aresetn)
@@ -245,6 +257,29 @@ module conv_mac_array #(
 		end
 	endgenerate
 	
+	// 缓存的权重域(有效标志)
+	genvar kernal_region_vld_i;
+	generate
+		for(kernal_region_vld_i = 0;kernal_region_vld_i < MAX_CAL_ROUND*2;kernal_region_vld_i = kernal_region_vld_i + 1)
+		begin
+			always @(posedge aclk or negedge aresetn)
+			begin
+				if(~aresetn)
+					kernal_region_vld[kernal_region_vld_i/MAX_CAL_ROUND][kernal_region_vld_i%MAX_CAL_ROUND] <= 1'b0;
+				else if(
+					aclken & 
+					array_i_kernal_sfc_vld & array_i_kernal_sfc_last & kernal_buf_full_n & 
+					(kernal_buf_wsel == (kernal_region_vld_i/MAX_CAL_ROUND))
+				)
+					kernal_region_vld[kernal_region_vld_i/MAX_CAL_ROUND][kernal_region_vld_i%MAX_CAL_ROUND] <= # SIM_DELAY 
+						|kernal_buf_loaded_sfc_vec_new[
+							((kernal_region_vld_i%MAX_CAL_ROUND)+1)*ATOMIC_K-1:
+							(kernal_region_vld_i%MAX_CAL_ROUND)*ATOMIC_K
+						];
+			end
+		end
+	endgenerate
+	
 	genvar kernal_buf_mask_i;
 	generate
 		for(kernal_buf_mask_i = 0;kernal_buf_mask_i < 2;kernal_buf_mask_i = kernal_buf_mask_i + 1)
@@ -258,12 +293,7 @@ module conv_mac_array #(
 					(kernal_buf_wsel == kernal_buf_mask_i)
 				)
 					kernal_buf_mask[kernal_buf_mask_i] <= # SIM_DELAY 
-						kernal_buf_loaded_sfc_vec | 
-						(
-							(USE_INNER_SFC_CNT == "true") ? 
-								kernal_sfc_cnt:
-								array_i_kernal_sfc_id
-						);
+						kernal_buf_loaded_sfc_vec_new;
 			end
 		end
 	endgenerate
@@ -288,9 +318,21 @@ module conv_mac_array #(
 	
 	/** 计算轮次拓展 **/
 	reg[3:0] cal_round_cnt; // 计算轮次计数器
+	reg[MAX_CAL_ROUND-1:0] cal_round_onehot; // 计算轮次独热码
+	wire nxt_kernal_rgn_to_cal_invld; // 下一待计算权重域无效(标志)
 	
 	assign array_i_ftm_sfc_rdy = 
-		aclken & (~rst_mac_array) & kernal_buf_empty_n & (cal_round_cnt == cal_round) & array_o_res_rdy;
+		aclken & (~rst_mac_array) & kernal_buf_empty_n & array_o_res_rdy & 
+		((cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld);
+	
+	assign nxt_kernal_rgn_to_cal_invld = 
+		(TO_SKIP_EMPTY_CAL_ROUND == "true") & 
+		(
+			(
+				kernal_region_vld[kernal_buf_rsel] & 
+				((cal_round_onehot << 1) | (cal_round_onehot >> (MAX_CAL_ROUND-1)))
+			) == 16'h0000
+		);
 	
 	// 计算轮次计数器
 	always @(posedge aclk or negedge aresetn)
@@ -305,9 +347,27 @@ module conv_mac_array #(
 			)
 		)
 			cal_round_cnt <= # SIM_DELAY 
-				(rst_mac_array | (cal_round_cnt == cal_round)) ? 
+				(rst_mac_array | (cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld) ? 
 					4'd0:
 					(cal_round_cnt + 1'b1);
+	end
+	
+	// 计算轮次独热码
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			cal_round_onehot <= 1;
+		else if(
+			aclken & 
+			(
+				rst_mac_array | 
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy)
+			)
+		)
+			cal_round_onehot <= # SIM_DELAY 
+				(rst_mac_array | (cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld) ? 
+					1:
+					((cal_round_onehot << 1) | (cal_round_onehot >> (MAX_CAL_ROUND-1)));
 	end
 	
 	/** 乘加阵列 **/
@@ -337,7 +397,7 @@ module conv_mac_array #(
 	assign kernal_buf_data_cur = kernal_buf_data[kernal_wgt_sel];
 	assign kernal_buf_mask_cur = kernal_buf_mask[kernal_buf_rsel] >> (cal_round_cnt * ATOMIC_K);
 	
-	assign mac_in_info_along[0] = cal_round_cnt == cal_round;
+	assign mac_in_info_along[0] = (cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld;
 	assign mac_in_info_along[INFO_ALONG_WIDTH+4+1-1:1] = {array_i_ftm_info_along, cal_round_cnt};
 	assign mac_in_info_along[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:INFO_ALONG_WIDTH+4+1] = kernal_buf_mask_cur;
 	

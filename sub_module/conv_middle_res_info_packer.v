@@ -42,6 +42,8 @@ AXIS MASTER/SLAVE
 
 module conv_middle_res_info_packer #(
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter EN_MAC_ARRAY_REG_SLICE = "true", // 是否在"乘加阵列得到的中间结果"处插入寄存器片
+	parameter EN_PKT_OUT_REG_SLICE = "true", // 是否在"打包后的中间结果"处插入寄存器片
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -73,10 +75,108 @@ module conv_middle_res_info_packer #(
 	output wire[ATOMIC_K*48-1:0] m_axis_pkt_out_data, // ATOMIC_K个中间结果
 	                                                  // ({指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	output wire[ATOMIC_K*6-1:0] m_axis_pkt_out_keep,
-	output wire[1:0] m_axis_pkt_out_user, // {初始化中间结果(标志), 最后1组中间结果(标志)}
+	output wire[2:0] m_axis_pkt_out_user, // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	output wire m_axis_pkt_out_last, // 本行最后1个中间结果(标志)
 	output wire m_axis_pkt_out_valid,
 	input wire m_axis_pkt_out_ready
 );
+	
+	/** 内部配置 **/
+	localparam EN_FM_CAKE_INFO_FIFO_FAST_RD = "false"; // 是否使能"特征图切块信息fifo尽快读取"
+	
+	/** AXIS寄存器片 **/
+	// [寄存器片#0]
+	wire[ATOMIC_K*48-1:0] s_axis_mac_array_reg_data; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
+	wire[1+ATOMIC_K-1:0] s_axis_mac_array_reg_user; // {是否最后1轮计算(1bit), 计算结果输出项掩码(ATOMIC_K bit)}
+	wire s_axis_mac_array_reg_valid;
+	wire s_axis_mac_array_reg_ready;
+	wire[ATOMIC_K*48-1:0] m_axis_mac_array_reg_data; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
+	wire[1+ATOMIC_K-1:0] m_axis_mac_array_reg_user; // {是否最后1轮计算(1bit), 计算结果输出项掩码(ATOMIC_K bit)}
+	wire m_axis_mac_array_reg_valid;
+	wire m_axis_mac_array_reg_ready;
+	// [寄存器片#1]
+	wire[ATOMIC_K*48-1:0] s_axis_pkt_out_reg_data; // ATOMIC_K个中间结果
+	                                               // ({指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
+	wire[ATOMIC_K*6-1:0] s_axis_pkt_out_reg_keep;
+	wire[2:0] s_axis_pkt_out_reg_user; // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire s_axis_pkt_out_reg_last; // 本行最后1个中间结果(标志)
+	wire s_axis_pkt_out_reg_valid;
+	wire s_axis_pkt_out_reg_ready;
+	wire[ATOMIC_K*48-1:0] m_axis_pkt_out_reg_data; // ATOMIC_K个中间结果
+	                                               // ({指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
+	wire[ATOMIC_K*6-1:0] m_axis_pkt_out_reg_keep;
+	wire[2:0] m_axis_pkt_out_reg_user; // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire m_axis_pkt_out_reg_last; // 本行最后1个中间结果(标志)
+	wire m_axis_pkt_out_reg_valid;
+	wire m_axis_pkt_out_reg_ready;
+	
+	assign s_axis_mac_array_reg_data = mac_array_res;
+	assign s_axis_mac_array_reg_user = {mac_array_is_last_cal_round, mac_array_res_mask};
+	assign s_axis_mac_array_reg_valid = mac_array_res_vld;
+	assign mac_array_res_rdy = s_axis_mac_array_reg_ready;
+	
+	assign m_axis_pkt_out_data = m_axis_pkt_out_reg_data;
+	assign m_axis_pkt_out_keep = m_axis_pkt_out_reg_keep;
+	assign m_axis_pkt_out_user = m_axis_pkt_out_reg_user;
+	assign m_axis_pkt_out_last = m_axis_pkt_out_reg_last;
+	assign m_axis_pkt_out_valid = m_axis_pkt_out_reg_valid;
+	assign m_axis_pkt_out_reg_ready = m_axis_pkt_out_ready;
+	
+	axis_reg_slice #(
+		.data_width(ATOMIC_K*48),
+		.user_width(1+ATOMIC_K),
+		.forward_registered("false"),
+		.back_registered(EN_MAC_ARRAY_REG_SLICE),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)mac_array_reg_slice(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_axis_mac_array_reg_data),
+		.s_axis_keep({(ATOMIC_K*6){1'bx}}),
+		.s_axis_user(s_axis_mac_array_reg_user),
+		.s_axis_last(1'bx),
+		.s_axis_valid(s_axis_mac_array_reg_valid),
+		.s_axis_ready(s_axis_mac_array_reg_ready),
+		
+		.m_axis_data(m_axis_mac_array_reg_data),
+		.m_axis_keep(),
+		.m_axis_user(m_axis_mac_array_reg_user),
+		.m_axis_last(),
+		.m_axis_valid(m_axis_mac_array_reg_valid),
+		.m_axis_ready(m_axis_mac_array_reg_ready)
+	);
+	
+	axis_reg_slice #(
+		.data_width(ATOMIC_K*48),
+		.user_width(3),
+		.forward_registered(EN_PKT_OUT_REG_SLICE),
+		.back_registered("false"),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)pkt_out_reg_slice(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_axis_pkt_out_reg_data),
+		.s_axis_keep(s_axis_pkt_out_reg_keep),
+		.s_axis_user(s_axis_pkt_out_reg_user),
+		.s_axis_last(s_axis_pkt_out_reg_last),
+		.s_axis_valid(s_axis_pkt_out_reg_valid),
+		.s_axis_ready(s_axis_pkt_out_reg_ready),
+		
+		.m_axis_data(m_axis_pkt_out_reg_data),
+		.m_axis_keep(m_axis_pkt_out_reg_keep),
+		.m_axis_user(m_axis_pkt_out_reg_user),
+		.m_axis_last(m_axis_pkt_out_reg_last),
+		.m_axis_valid(m_axis_pkt_out_reg_valid),
+		.m_axis_ready(m_axis_pkt_out_reg_ready)
+	);
 	
 	/** 特征图切块信息fifo **/
 	// [写端口]
@@ -126,7 +226,17 @@ module conv_middle_res_info_packer #(
 	reg[15:0] cgrpid_in_fm_cake_cnt; // 特征图切块内通道组号(计数器)
 	wire at_last_cgrp_in_fm_cake; // 位于特征图切块内的最后1个通道组(标志)
 	
-	assign fm_cake_info_fifo_ren = aclken & en_packer & (~cur_fm_cake_h_param_vld);
+	assign fm_cake_info_fifo_ren = 
+		aclken & en_packer & 
+		(
+			(~cur_fm_cake_h_param_vld) | 
+			(
+				(EN_FM_CAKE_INFO_FIFO_FAST_RD == "true") & 
+				m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+				m_axis_mac_array_reg_user[ATOMIC_K] & 
+				arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake & at_last_cgrp_in_fm_cake
+			)
+		);
 	
 	assign cur_fm_cake_h = fm_cake_info_fifo_dout;
 	
@@ -147,9 +257,10 @@ module conv_middle_res_info_packer #(
 				(
 					cur_fm_cake_h_param_vld ? 
 						(
-							mac_array_res_vld & mac_array_res_rdy & 
-							mac_array_is_last_cal_round & 
-							arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake & at_last_cgrp_in_fm_cake
+							m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+							m_axis_mac_array_reg_user[ATOMIC_K] & 
+							arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake & at_last_cgrp_in_fm_cake & 
+							((EN_FM_CAKE_INFO_FIFO_FAST_RD == "false") | (~fm_cake_info_fifo_empty_n))
 						):
 						fm_cake_info_fifo_empty_n
 				)
@@ -168,8 +279,8 @@ module conv_middle_res_info_packer #(
 			(
 				(~en_packer) | 
 				(
-					mac_array_res_vld & mac_array_res_rdy & 
-					mac_array_is_last_cal_round
+					m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+					m_axis_mac_array_reg_user[ATOMIC_K]
 				)
 			)
 		)
@@ -189,8 +300,8 @@ module conv_middle_res_info_packer #(
 			(
 				(~en_packer) | 
 				(
-					mac_array_res_vld & mac_array_res_rdy & 
-					mac_array_is_last_cal_round & arrive_ofmap_row_end
+					m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+					m_axis_mac_array_reg_user[ATOMIC_K] & arrive_ofmap_row_end
 				)
 			)
 		)
@@ -210,8 +321,8 @@ module conv_middle_res_info_packer #(
 			(
 				(~en_packer) | 
 				(
-					mac_array_res_vld & mac_array_res_rdy & 
-					mac_array_is_last_cal_round & arrive_ofmap_row_end & arrive_kernal_vld_region_row_end
+					m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+					m_axis_mac_array_reg_user[ATOMIC_K] & arrive_ofmap_row_end & arrive_kernal_vld_region_row_end
 				)
 			)
 		)
@@ -231,8 +342,8 @@ module conv_middle_res_info_packer #(
 			(
 				(~en_packer) | 
 				(
-					mac_array_res_vld & mac_array_res_rdy & 
-					mac_array_is_last_cal_round & arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake
+					m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+					m_axis_mac_array_reg_user[ATOMIC_K] & arrive_ofmap_row_end & arrive_kernal_vld_region_row_end & at_last_row_in_fm_cake
 				)
 			)
 		)
@@ -247,29 +358,32 @@ module conv_middle_res_info_packer #(
 	reg first_mid_res; // 第1组中间结果(标志)
 	wire last_mid_res; // 最后1组中间结果(标志)
 	
-	assign mac_array_res_rdy = 
+	assign m_axis_mac_array_reg_ready = 
 		aclken & 
 		en_packer & 
-		m_axis_pkt_out_ready & 
+		s_axis_pkt_out_reg_ready & 
 		((~need_cur_fm_cake_h_param) | cur_fm_cake_h_param_vld);
 	
-	assign m_axis_pkt_out_data = mac_array_res;
+	assign s_axis_pkt_out_reg_data = m_axis_mac_array_reg_data;
 	
 	genvar res_mask_i;
 	generate
 		for(res_mask_i = 0;res_mask_i < ATOMIC_K;res_mask_i = res_mask_i + 1)
 		begin:res_mask_blk
-			assign m_axis_pkt_out_keep[6*res_mask_i+5:6*res_mask_i] = {6{mac_array_res_mask[res_mask_i]}};
+			assign s_axis_pkt_out_reg_keep[6*res_mask_i+5:6*res_mask_i] = {6{m_axis_mac_array_reg_user[res_mask_i]}};
 		end
 	endgenerate
 	
-	assign m_axis_pkt_out_user[0] = last_mid_res; // 最后1组中间结果(标志)
-	assign m_axis_pkt_out_user[1] = first_mid_res; // 初始化中间结果(标志)
+	assign s_axis_pkt_out_reg_user[0] = last_mid_res; // 最后1组中间结果(标志)
+	assign s_axis_pkt_out_reg_user[1] = first_mid_res; // 初始化中间结果(标志)
+	assign s_axis_pkt_out_reg_user[2] = m_axis_mac_array_reg_user[ATOMIC_K]; // 是否最后1轮计算
 	
-	assign m_axis_pkt_out_valid = 
+	assign s_axis_pkt_out_reg_last = m_axis_mac_array_reg_user[ATOMIC_K] & arrive_ofmap_row_end;
+	
+	assign s_axis_pkt_out_reg_valid = 
 		aclken & 
 		en_packer & 
-		mac_array_res_vld & 
+		m_axis_mac_array_reg_valid & 
 		((~need_cur_fm_cake_h_param) | cur_fm_cake_h_param_vld);
 	
 	assign need_cur_fm_cake_h_param = arrive_ofmap_row_end & arrive_kernal_vld_region_row_end;
@@ -285,8 +399,8 @@ module conv_middle_res_info_packer #(
 			(
 				(~en_packer) | 
 				(
-					mac_array_res_vld & mac_array_res_rdy & 
-					mac_array_is_last_cal_round & arrive_ofmap_row_end
+					m_axis_mac_array_reg_valid & m_axis_mac_array_reg_ready & 
+					m_axis_mac_array_reg_user[ATOMIC_K] & arrive_ofmap_row_end
 				)
 			)
 		)

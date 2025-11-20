@@ -630,6 +630,8 @@ virtual class AbstractFinalResAdapter extends pure_tue_sequence_item;
 	
 	int unsigned print_id_base = 0;
 	int unsigned id;
+	int unsigned sub_rid;
+	bit is_last_sub_row;
 	
 	AbstractData data_fifo[$];
 	string print_context[$];
@@ -640,6 +642,9 @@ virtual class AbstractFinalResAdapter extends pure_tue_sequence_item;
 		if(axis_tr != null)
 		begin
 			this.axis_tr = axis_tr;
+			
+			this.sub_rid = this.axis_tr.user[0][3:0];
+			this.is_last_sub_row = this.axis_tr.user[0][4];
 			
 			for(int i = 0;i < this.axis_tr.get_len();i++)
 			begin
@@ -690,7 +695,9 @@ virtual class AbstractFinalResAdapter extends pure_tue_sequence_item;
 	`tue_object_default_constructor(AbstractFinalResAdapter)
 	
 	`uvm_object_utils_begin(AbstractFinalResAdapter)
-		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE)
+		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE | UVM_NOPRINT)
+		`uvm_field_int(sub_rid, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE | UVM_NOPRINT)
+		`uvm_field_int(is_last_sub_row, UVM_DEFAULT | UVM_BIN | UVM_NOCOMPARE | UVM_NOPRINT)
 		`uvm_field_queue_object(data_fifo, UVM_DEFAULT | UVM_NOPRINT)
 	`uvm_object_utils_end
 	

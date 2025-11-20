@@ -144,6 +144,7 @@ module generic_conv_sim #(
 	// 最终结果输出(AXIS主机)
 	output wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data,
 	output wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep,
+	output wire[4:0] m_axis_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
 	input wire m_axis_fnl_res_ready
@@ -496,6 +497,7 @@ module generic_conv_sim #(
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
 		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
+		.m_axis_fnl_res_user(m_axis_fnl_res_user),
 		.m_axis_fnl_res_last(m_axis_fnl_res_last),
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),

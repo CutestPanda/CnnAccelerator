@@ -848,6 +848,9 @@ class FinalResScoreboard extends tue_scoreboard #(
 	
 	local AbstractFinalResAdapter exp_res_adpt;
 	
+	local int unsigned ofmap_w; // 输出特征图宽度
+	local int unsigned ofmap_h; // 输出特征图高度
+	
 	local int final_res_tr_id;
 	local int final_res_cmp_id_base;
 	local int final_res_err_n;
@@ -856,6 +859,8 @@ class FinalResScoreboard extends tue_scoreboard #(
 	local int exp_res_tr_mcd = UVM_STDOUT;
 	
 	local FmapOutPtCalProcListener cal_proc_listener = null;
+	
+	local mailbox #(AbstractFinalResAdapter) final_res_mb;
 	
 	function void register_cal_proc_listener(FmapOutPtCalProcListener listener);
 		this.cal_proc_listener = listener;
@@ -872,6 +877,8 @@ class FinalResScoreboard extends tue_scoreboard #(
 		this.final_res_tr_id = 0;
 		this.final_res_cmp_id_base = 0;
 		this.final_res_err_n = 0;
+		
+		this.final_res_mb = new();
 		
 		if(!uvm_config_db #(FmapCfg)::get(null, "", "fmap_cfg", this.fmap_cfg))
 			`uvm_fatal(this.get_name(), "cannot get fmap_cfg!!!")
@@ -895,19 +902,63 @@ class FinalResScoreboard extends tue_scoreboard #(
 	virtual function void write_final_res(panda_axis_trans tr);
 		AbstractFinalResAdapter adapter;
 		
-		adapter = null;
-		
-		if(this.cal_cfg.calfmt == CAL_FMT_FP16)
-			adapter = Fp16FinalResAdapter::type_id::create();
-		else
-			`uvm_error(this.get_name(), "calfmt not supported!")
+		adapter = this.create_final_res_adapter();
 		
 		if(adapter != null)
 		begin
 			adapter.id = this.final_res_tr_id;
-			adapter.print_id_base = this.final_res_cmp_id_base;
 			adapter.convert(tr);
 			
+			if(!this.final_res_mb.try_put(adapter))
+				`uvm_error(this.get_name(), "cannot try_put final_res_mb")
+			
+			this.final_res_tr_id++;
+		end
+	endfunction
+	
+	task main_phase(uvm_phase phase);
+		forever
+		begin
+			AbstractFinalResAdapter adapter;
+			AbstractFinalResAdapter adapter_grp[$];
+			int sfc_depth_arr[];
+			
+			while(1)
+			begin
+				AbstractFinalResAdapter cur_adapter;
+				
+				this.final_res_mb.get(cur_adapter);
+				
+				adapter_grp.push_back(cur_adapter);
+				
+				if(cur_adapter.is_last_sub_row)
+					break;
+			end
+			
+			// 合并子行
+			adapter = this.create_final_res_adapter();
+			
+			if(adapter == null)
+				continue;
+			
+			sfc_depth_arr = new[adapter_grp.size()];
+			
+			for(int k = 0;k < adapter_grp.size();k++)
+			begin
+				sfc_depth_arr[k] = adapter_grp[k].data_fifo.size() / this.ofmap_w;
+			end
+			
+			for(int i = 0;i < this.ofmap_w;i++)
+			begin
+				for(int j = 0;j < adapter_grp.size();j++)
+				begin
+					for(int d = 0;d < sfc_depth_arr[j];d++)
+						adapter.data_fifo.push_back(adapter_grp[j].data_fifo[(i * sfc_depth_arr[j]) + d]);
+				end
+			end
+			
+			// 打印最终结果
+			adapter.print_id_base = this.final_res_cmp_id_base;
 			`panda_print_with(adapter, this.final_res_tr_mcd, Util::get_object_printer())
 			
 			// 比对最终结果的误差
@@ -931,13 +982,8 @@ class FinalResScoreboard extends tue_scoreboard #(
 				end
 			end
 			
-			this.final_res_tr_id++;
 			this.final_res_cmp_id_base += adapter.data_fifo.size();
 		end
-	endfunction
-	
-	task main_phase(uvm_phase phase);
-		// blank
 	endtask
 	
 	function void report_phase(uvm_phase phase);
@@ -954,8 +1000,6 @@ class FinalResScoreboard extends tue_scoreboard #(
 		int unsigned ext_fmap_w; // 扩展特征图宽度
 		int unsigned ext_fmap_h; // 扩展特征图高度
 		int unsigned kernal_x_dilated; // (膨胀后)卷积核宽度或高度
-		int unsigned ofmap_w; // 输出特征图宽度
-		int unsigned ofmap_h; // 输出特征图高度
 		
 		int unsigned kernal_set_cgrp_id_base; // 核组起始通道组号
 		
@@ -976,8 +1020,8 @@ class FinalResScoreboard extends tue_scoreboard #(
 		kernal_x_dilated = 
 			Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) + 
 			(Util::kernal_sz_t_to_w_h(this.kernal_cfg.kernal_shape) - 1) * this.cal_cfg.kernal_dilation_n;
-		ofmap_w = ((ext_fmap_w - kernal_x_dilated) / this.cal_cfg.conv_horizontal_stride) + 1;
-		ofmap_h = ((ext_fmap_h - kernal_x_dilated) / this.cal_cfg.conv_vertical_stride) + 1;
+		this.ofmap_w = ((ext_fmap_w - kernal_x_dilated) / this.cal_cfg.conv_horizontal_stride) + 1;
+		this.ofmap_h = ((ext_fmap_h - kernal_x_dilated) / this.cal_cfg.conv_vertical_stride) + 1;
 		
 		kernal_set_cgrp_id_base = 0;
 		
@@ -1211,6 +1255,17 @@ class FinalResScoreboard extends tue_scoreboard #(
 			end
 			
 			kernal_set_cgrp_id_base += kernal_set_builder_cfg.cgrpn_foreach_kernal_set[s];
+		end
+	endfunction
+	
+	local function AbstractFinalResAdapter create_final_res_adapter();
+		if(this.cal_cfg.calfmt == CAL_FMT_FP16)
+			return Fp16FinalResAdapter::type_id::create();
+		else
+		begin
+			`uvm_error(this.get_name(), "calfmt not supported!")
+			
+			return null;
 		end
 	endfunction
 	
