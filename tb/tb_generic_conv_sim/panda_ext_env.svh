@@ -520,7 +520,7 @@ class GenericConvSimTestEnv extends panda_env #(
 		
 		this.final_res_slv_cfg = panda_axis_configuration::type_id::create("final_res_slv_cfg");
 		if(!this.final_res_slv_cfg.randomize() with {
-			data_width == (cal_cfg.atomic_k * 32);
+			data_width == buf_cfg.fnl_res_data_width;
 			user_width == 5;
 			
 			ready_delay.min_delay == 0;

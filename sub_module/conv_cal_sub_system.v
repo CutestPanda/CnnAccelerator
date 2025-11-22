@@ -54,10 +54,11 @@ module conv_cal_sub_system #(
 	// [子系统配置参数]
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer STREAM_DATA_WIDTH = 32, // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
-	parameter EN_SMALL_FP32 = "false", // 是否处理极小FP32
+	parameter EN_SMALL_FP32 = "true", // 是否处理极小FP32
 	// [中间结果缓存配置参数]
 	parameter integer RBUF_BANK_N = 8, // 缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 缓存MEM深度(16 | ...)
@@ -115,13 +116,9 @@ module conv_cal_sub_system #(
 	input wire s_kwgtblk_axis_valid,
 	output wire s_kwgtblk_axis_ready,
 	
-	// 最终结果输出(AXIS主机)
-	/*
-	对于ATOMIC_K个最终结果 -> 
-		{单精度浮点数或定点数(32位)}
-	*/
-	output wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data,
-	output wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep,
+	// 最终结果数据流(AXIS主机)
+	output wire[STREAM_DATA_WIDTH-1:0] m_axis_fnl_res_data,
+	output wire[STREAM_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep,
 	output wire[4:0] m_axis_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
@@ -403,13 +400,6 @@ module conv_cal_sub_system #(
 	assign s_axis_mid_res_buf_valid = m_axis_pkt_out_valid;
 	assign m_axis_pkt_out_ready = s_axis_mid_res_buf_ready;
 	
-	assign m_axis_fnl_res_data = m_axis_mid_res_buf_data;
-	assign m_axis_fnl_res_keep = m_axis_mid_res_buf_keep;
-	assign m_axis_fnl_res_user = m_axis_mid_res_buf_user;
-	assign m_axis_fnl_res_last = m_axis_mid_res_buf_last;
-	assign m_axis_fnl_res_valid = m_axis_mid_res_buf_valid;
-	assign m_axis_mid_res_buf_ready = m_axis_fnl_res_ready;
-	
 	conv_middle_res_acmlt_buf #(
 		.ATOMIC_K(ATOMIC_K),
 		.RBUF_BANK_N(RBUF_BANK_N),
@@ -447,6 +437,64 @@ module conv_cal_sub_system #(
 		.mem_ren_b(mem_ren_b),
 		.mem_addr_b(mem_addr_b),
 		.mem_dout_b(mem_dout_b)
+	);
+	
+	/** 最终结果数据收集器 **/
+	// 收集器输入(AXIS从机)
+	wire[ATOMIC_K*32-1:0] s_axis_collector_data;
+	wire[ATOMIC_K*4-1:0] s_axis_collector_keep;
+	wire[4:0] s_axis_collector_user;
+	wire s_axis_collector_last;
+	wire s_axis_collector_valid;
+	wire s_axis_collector_ready;
+	// 收集器输出(AXIS主机)
+	wire[STREAM_DATA_WIDTH-1:0] m_axis_collector_data;
+	wire[STREAM_DATA_WIDTH/8-1:0] m_axis_collector_keep;
+	wire[4:0] m_axis_collector_user;
+	wire m_axis_collector_last;
+	wire m_axis_collector_valid;
+	wire m_axis_collector_ready;
+	
+	assign s_axis_collector_data = m_axis_mid_res_buf_data;
+	assign s_axis_collector_keep = m_axis_mid_res_buf_keep;
+	assign s_axis_collector_user = m_axis_mid_res_buf_user;
+	assign s_axis_collector_last = m_axis_mid_res_buf_last;
+	assign s_axis_collector_valid = m_axis_mid_res_buf_valid;
+	assign m_axis_mid_res_buf_ready = s_axis_collector_ready;
+	
+	assign m_axis_fnl_res_data = m_axis_collector_data;
+	assign m_axis_fnl_res_keep = m_axis_collector_keep;
+	assign m_axis_fnl_res_user = m_axis_collector_user;
+	assign m_axis_fnl_res_last = m_axis_collector_last;
+	assign m_axis_fnl_res_valid = m_axis_collector_valid;
+	assign m_axis_collector_ready = m_axis_fnl_res_ready;
+	
+	conv_final_data_collector #(
+		.IN_ITEM_WIDTH(ATOMIC_K),
+		.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/32),
+		.DATA_WIDTH_FOREACH_ITEM(32),
+		.HAS_USER("true"),
+		.USER_WIDTH(5),
+		.EN_COLLECTOR_OUT_REG_SLICE("true"),
+		.SIM_DELAY(SIM_DELAY)
+	)conv_final_data_collector_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(aclken),
+		
+		.s_axis_collector_data(s_axis_collector_data),
+		.s_axis_collector_keep(s_axis_collector_keep),
+		.s_axis_collector_user(s_axis_collector_user),
+		.s_axis_collector_last(s_axis_collector_last),
+		.s_axis_collector_valid(s_axis_collector_valid),
+		.s_axis_collector_ready(s_axis_collector_ready),
+		
+		.m_axis_collector_data(m_axis_collector_data),
+		.m_axis_collector_keep(m_axis_collector_keep),
+		.m_axis_collector_user(m_axis_collector_user),
+		.m_axis_collector_last(m_axis_collector_last),
+		.m_axis_collector_valid(m_axis_collector_valid),
+		.m_axis_collector_ready(m_axis_collector_ready)
 	);
 	
 endmodule

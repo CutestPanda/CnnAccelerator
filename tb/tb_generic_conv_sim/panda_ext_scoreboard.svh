@@ -946,6 +946,9 @@ class FinalResScoreboard extends tue_scoreboard #(
 			for(int k = 0;k < adapter_grp.size();k++)
 			begin
 				sfc_depth_arr[k] = adapter_grp[k].data_fifo.size() / this.ofmap_w;
+				
+				if(adapter_grp[k].data_fifo.size() % this.ofmap_w)
+					`uvm_error(this.get_name(), $sformatf("adapter_grp[%0d].data_fifo.size() = %0d, ofmap_w = %0d", k, adapter_grp[k].data_fifo.size(), this.ofmap_w))
 			end
 			
 			for(int i = 0;i < this.ofmap_w;i++)

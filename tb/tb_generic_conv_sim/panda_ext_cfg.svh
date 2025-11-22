@@ -181,6 +181,7 @@ endclass
 class BufferCfg extends tue_configuration;
 	
 	rand int unsigned stream_data_width; // DMA数据流的位宽
+	rand int unsigned fnl_res_data_width; // 最终结果数据流的位宽
 	
 	rand int unsigned fmbufbankn; // 分配给特征图缓存的Bank数
 	rand fmbuf_coln_t fmbufcoln; // 每个表面行的表面个数类型
@@ -194,6 +195,7 @@ class BufferCfg extends tue_configuration;
 	
 	constraint c_default_cst{
 		stream_data_width inside {32, 64, 128, 256};
+		fnl_res_data_width inside {32, 64, 128, 256};
 		
 		fmbufbankn >= 1;
 		fmbufrown >= 2;

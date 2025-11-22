@@ -27,6 +27,7 @@ module tb_generic_conv_sim();
 	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 32; // DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
@@ -165,8 +166,8 @@ module tb_generic_conv_sim();
 	wire s1_dma_strm_axis_valid;
 	wire s1_dma_strm_axis_ready;
 	// 最终结果输出(AXIS主机)
-	wire[ATOMIC_K*32-1:0] m_axis_fnl_res_data;
-	wire[ATOMIC_K*4-1:0] m_axis_fnl_res_keep;
+	wire[FNL_RES_DATA_WIDTH-1:0] m_axis_fnl_res_data;
+	wire[FNL_RES_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep;
 	wire[4:0] m_axis_fnl_res_user; // {是否最后1个子行(1bit), 子行号(4bit)}
 	wire m_axis_fnl_res_last; // 本行最后1个最终结果(标志)
 	wire m_axis_fnl_res_valid;
@@ -246,8 +247,8 @@ module tb_generic_conv_sim();
 	assign s1_dma_strm_axis_valid = dma1_strm_axis_if.valid;
 	assign dma1_strm_axis_if.ready = s1_dma_strm_axis_ready;
 	
-	assign final_res_axis_if.data[ATOMIC_K*32-1:0] = m_axis_fnl_res_data;
-	assign final_res_axis_if.keep[ATOMIC_K*4-1:0] = m_axis_fnl_res_keep;
+	assign final_res_axis_if.data[FNL_RES_DATA_WIDTH-1:0] = m_axis_fnl_res_data;
+	assign final_res_axis_if.keep[FNL_RES_DATA_WIDTH/8-1:0] = m_axis_fnl_res_keep;
 	assign final_res_axis_if.user[4:0] = m_axis_fnl_res_user;
 	assign final_res_axis_if.last = m_axis_fnl_res_last;
 	assign final_res_axis_if.valid = m_axis_fnl_res_valid;
@@ -360,6 +361,7 @@ module tb_generic_conv_sim();
 		.ATOMIC_C(ATOMIC_C),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.STREAM_DATA_WIDTH(STREAM_DATA_WIDTH),
+		.FNL_RES_DATA_WIDTH(FNL_RES_DATA_WIDTH),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
 		.MAX_FMBUF_ROWN(MAX_FMBUF_ROWN),
