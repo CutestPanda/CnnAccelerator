@@ -147,6 +147,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	
 	protected FmapReqGenTestEnv fmap_req_gen_env;
 	protected KernalReqGenTestEnv kernal_req_gen_env;
+	protected FnlResTransReqGenTestEnv fnl_res_trans_req_gen_env;
 	protected ConvDataHubTestEnv conv_data_hub_env;
 	protected GenericConvSimTestEnv top_sim_env;
 	protected MidResAcmltCalObsvEnv mid_res_acmlt_cal_obsv_env_arr[];
@@ -238,6 +239,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected function void build_agents();
 		this.fmap_req_gen_env = FmapReqGenTestEnv::type_id::create("fmap_req_gen_env", this);
 		this.kernal_req_gen_env = KernalReqGenTestEnv::type_id::create("kernal_req_gen_env", this);
+		this.fnl_res_trans_req_gen_env = FnlResTransReqGenTestEnv::type_id::create("fnl_res_trans_req_gen_env", this);
 		this.conv_data_hub_env = ConvDataHubTestEnv::type_id::create("conv_data_hub_env", this);
 		this.top_sim_env = GenericConvSimTestEnv::type_id::create("top_sim_env", this);
 		
@@ -283,9 +285,11 @@ class generic_conv_sim_test_0 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 30;
 			fmap_h == 6;
 			fmap_c == 19;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -345,9 +349,11 @@ class generic_conv_sim_test_1 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 30;
 			fmap_h == 10;
 			fmap_c == 26;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -407,9 +413,11 @@ class generic_conv_sim_test_2 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 30;
 			fmap_h == 10;
 			fmap_c == 26;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -469,9 +477,11 @@ class generic_conv_sim_test_3 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 40;
 			fmap_h == 24;
 			fmap_c == 37;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -531,9 +541,11 @@ class generic_conv_sim_test_4 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 16;
 			fmap_h == 9;
 			fmap_c == 11;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -593,9 +605,11 @@ class generic_conv_sim_test_5 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 50;
 			fmap_h == 28;
 			fmap_c == 2;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -655,9 +669,11 @@ class generic_conv_sim_test_6 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 24;
 			fmap_h == 16;
 			fmap_c == 16;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -717,9 +733,11 @@ class generic_conv_sim_test_7 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 24;
 			fmap_h == 16;
 			fmap_c == 32;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -779,9 +797,11 @@ class generic_conv_sim_test_8 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 24;
 			fmap_h == 16;
 			fmap_c == 6;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -841,9 +861,11 @@ class generic_conv_sim_test_9 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 50;
 			fmap_h == 28;
 			fmap_c == 2;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -903,9 +925,11 @@ class generic_conv_sim_test_10 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 50;
 			fmap_h == 28;
 			fmap_c == 2;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		
@@ -965,9 +989,11 @@ class generic_conv_sim_test_11 extends generic_conv_sim_base_test;
 		this.fmap_cfg = FmapCfg::type_id::create();
 		if(!fmap_cfg.randomize() with{
 			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
 			fmap_w == 11;
 			fmap_h == 6;
 			fmap_c == 13;
+			ofmap_data_type == DATA_4_BYTE;
 		})
 			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
 		

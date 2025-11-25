@@ -63,9 +63,12 @@ endclass
 class FmapCfg extends tue_configuration;
 	
 	rand int unsigned fmap_mem_baseaddr; // 特征图在存储映射中的基地址
+	rand int unsigned ofmap_baseaddr; // 输出特征图基地址
 	rand int unsigned fmap_w; // 特征图宽度
 	rand int unsigned fmap_h; // 特征图高度
 	rand int unsigned fmap_c; // 特征图通道数
+	
+	rand ofmap_data_type_t ofmap_data_type; // 输出特征图数据大小类型
 	
 	constraint c_default_cst{
 		fmap_w >= 1;
@@ -77,9 +80,11 @@ class FmapCfg extends tue_configuration;
 	
 	`uvm_object_utils_begin(FmapCfg)
 		`uvm_field_int(fmap_mem_baseaddr, UVM_DEFAULT | UVM_HEX)
+		`uvm_field_int(ofmap_baseaddr, UVM_DEFAULT | UVM_HEX)
 		`uvm_field_int(fmap_w, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_int(fmap_h, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_int(fmap_c, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_enum(ofmap_data_type_t, ofmap_data_type, UVM_DEFAULT)
 	`uvm_object_utils_end
 	
 endclass

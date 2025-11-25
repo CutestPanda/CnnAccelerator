@@ -22,7 +22,8 @@ interface generic_conv_sim_cfg_if(
 	logic[15:0] n_foreach_group; // 每组的通道数/核数 - 1
 	logic[31:0] data_size_foreach_group; // (特征图)每组的数据量
 	// [特征图参数]
-	logic[31:0] fmap_baseaddr; // 特征图数据基地址
+	logic[31:0] ifmap_baseaddr; // 输入特征图基地址
+	logic[31:0] ofmap_baseaddr; // 输出特征图基地址
 	logic[15:0] ifmap_w; // 输入特征图宽度 - 1
 	logic[23:0] ifmap_size; // 输入特征图大小 - 1
 	logic[15:0] fmap_chn_n; // 特征图通道数 - 1
@@ -33,6 +34,7 @@ interface generic_conv_sim_cfg_if(
 	logic[2:0] inner_padding_top_bottom; // 上下内填充数
 	logic[15:0] ofmap_w; // 输出特征图宽度 - 1
 	logic[15:0] ofmap_h; // 输出特征图高度 - 1
+	logic[1:0] ofmap_data_type; // 输出特征图数据大小类型
 	// [卷积核参数]
 	logic[31:0] kernal_wgt_baseaddr; // 卷积核权重基地址
 	logic[2:0] kernal_shape; // 卷积核形状
@@ -67,7 +69,8 @@ interface generic_conv_sim_cfg_if(
 		output group_n;
 		output n_foreach_group;
 		output data_size_foreach_group;
-		output fmap_baseaddr;
+		output ifmap_baseaddr;
+		output ofmap_baseaddr;
 		output ifmap_w;
 		output ifmap_size;
 		output fmap_chn_n;
@@ -78,6 +81,7 @@ interface generic_conv_sim_cfg_if(
 		output inner_padding_top_bottom;
 		output ofmap_w;
 		output ofmap_h;
+		output ofmap_data_type;
 		output kernal_wgt_baseaddr;
 		output kernal_shape;
 		output kernal_dilation_hzt_n;

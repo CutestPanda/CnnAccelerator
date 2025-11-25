@@ -36,7 +36,7 @@ SOFTWARE.
 请填写
 
 作者: 陈家耀
-日期: 2025/11/13
+日期: 2025/11/25
 ********************************************************************/
 
 
@@ -73,7 +73,8 @@ module generic_conv_sim #(
 	input wire[15:0] n_foreach_group, // 每组的通道数/核数 - 1
 	input wire[31:0] data_size_foreach_group, // (特征图)每组的数据量
 	// [特征图参数]
-	input wire[31:0] fmap_baseaddr, // 特征图数据基地址
+	input wire[31:0] ifmap_baseaddr, // 输入特征图基地址
+	input wire[31:0] ofmap_baseaddr, // 输出特征图基地址
 	input wire[15:0] ifmap_w, // 输入特征图宽度 - 1
 	input wire[23:0] ifmap_size, // 输入特征图大小 - 1
 	input wire[15:0] fmap_chn_n, // 特征图通道数 - 1
@@ -84,6 +85,7 @@ module generic_conv_sim #(
 	input wire[2:0] inner_padding_top_bottom, // 上下内填充数
 	input wire[15:0] ofmap_w, // 输出特征图宽度 - 1
 	input wire[15:0] ofmap_h, // 输出特征图高度 - 1
+	input wire[1:0] ofmap_data_type, // 输出特征图数据大小类型
 	// [卷积核参数]
 	input wire[31:0] kernal_wgt_baseaddr, // 卷积核权重基地址
 	input wire[2:0] kernal_shape, // 卷积核形状
@@ -115,6 +117,10 @@ module generic_conv_sim #(
 	input wire fmap_access_blk_start,
 	output wire fmap_access_blk_idle,
 	output wire fmap_access_blk_done,
+	// [最终结果传输请求生成单元]
+	input wire fnl_res_trans_blk_start,
+	output wire fnl_res_trans_blk_idle,
+	output wire fnl_res_trans_blk_done,
 	
 	// DMA(MM2S方向)命令流#0(AXIS主机)
 	output wire[55:0] m0_dma_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
@@ -141,6 +147,12 @@ module generic_conv_sim #(
 	input wire s1_dma_strm_axis_last,
 	input wire s1_dma_strm_axis_valid,
 	output wire s1_dma_strm_axis_ready,
+	
+	// S2MM方向DMA命令(AXIS主机)
+	output wire[55:0] m_dma_s2mm_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
+	output wire m_dma_s2mm_cmd_axis_user, // 固定(1'b1)/递增(1'b0)传输(1bit)
+	output wire m_dma_s2mm_cmd_axis_valid,
+	input wire m_dma_s2mm_cmd_axis_ready,
 	
 	// 最终结果数据流(AXIS主机)
 	output wire[FNL_RES_DATA_WIDTH-1:0] m_axis_fnl_res_data,
@@ -195,9 +207,15 @@ module generic_conv_sim #(
 	wire[23:0] mul1_op_b; // 操作数B
 	wire mul1_ce; // 计算使能
 	wire[39:0] mul1_res; // 计算结果
+	// [乘法器#2(u16*u24)]
+	wire[15:0] mul2_op_a; // 操作数A
+	wire[23:0] mul2_op_b; // 操作数B
+	wire mul2_ce; // 计算使能
+	wire[39:0] mul2_res; // 计算结果
 	
 	conv_ctrl_sub_system #(
 		.ATOMIC_C(ATOMIC_C),
+		.ATOMIC_K(ATOMIC_K),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_ctrl_sub_system_u(
 		.aclk(aclk),
@@ -210,14 +228,17 @@ module generic_conv_sim #(
 		.group_n(group_n),
 		.n_foreach_group(n_foreach_group),
 		.data_size_foreach_group(data_size_foreach_group),
-		.fmap_baseaddr(fmap_baseaddr),
+		.ifmap_baseaddr(ifmap_baseaddr),
+		.ofmap_baseaddr(ofmap_baseaddr),
 		.ifmap_w(ifmap_w),
 		.ifmap_size(ifmap_size),
 		.fmap_chn_n(fmap_chn_n),
 		.fmap_ext_i_bottom(fmap_ext_i_bottom),
 		.external_padding_top(external_padding_top),
 		.inner_padding_top_bottom(inner_padding_top_bottom),
+		.ofmap_w(ofmap_w),
 		.ofmap_h(ofmap_h),
+		.ofmap_data_type(ofmap_data_type),
 		.kernal_wgt_baseaddr(kernal_wgt_baseaddr),
 		.kernal_shape(kernal_shape),
 		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
@@ -235,6 +256,10 @@ module generic_conv_sim #(
 		.fmap_access_blk_start(fmap_access_blk_start),
 		.fmap_access_blk_idle(fmap_access_blk_idle),
 		.fmap_access_blk_done(fmap_access_blk_done),
+		
+		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
+		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
+		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -254,6 +279,11 @@ module generic_conv_sim #(
 		.m_fm_cake_info_axis_valid(m_fm_cake_info_axis_valid),
 		.m_fm_cake_info_axis_ready(m_fm_cake_info_axis_ready),
 		
+		.m_dma_s2mm_cmd_axis_data(m_dma_s2mm_cmd_axis_data),
+		.m_dma_s2mm_cmd_axis_user(m_dma_s2mm_cmd_axis_user),
+		.m_dma_s2mm_cmd_axis_valid(m_dma_s2mm_cmd_axis_valid),
+		.m_dma_s2mm_cmd_axis_ready(m_dma_s2mm_cmd_axis_ready),
+		
 		.mul0_op_a(mul0_op_a),
 		.mul0_op_b(mul0_op_b),
 		.mul0_ce(mul0_ce),
@@ -261,7 +291,11 @@ module generic_conv_sim #(
 		.mul1_op_a(mul1_op_a),
 		.mul1_op_b(mul1_op_b),
 		.mul1_ce(mul1_ce),
-		.mul1_res(mul1_res)
+		.mul1_res(mul1_res),
+		.mul2_op_a(mul2_op_a),
+		.mul2_op_b(mul2_op_b),
+		.mul2_ce(mul2_ce),
+		.mul2_res(mul2_res)
 	);
 	
 	/** 卷积数据枢纽 **/
@@ -525,7 +559,7 @@ module generic_conv_sim #(
 		.op_b_width(16),
 		.output_width(32),
 		.simulation_delay(SIM_DELAY)
-	)mul_u16_u16_u(
+	)mul_u16_u16_u0(
 		.clk(aclk),
 		
 		.ce_s0_mul(mul0_ce),
@@ -541,7 +575,7 @@ module generic_conv_sim #(
 		.op_b_width(24),
 		.output_width(40),
 		.simulation_delay(SIM_DELAY)
-	)mul_u16_u24_u(
+	)mul_u16_u24_u0(
 		.clk(aclk),
 		
 		.ce_s0_mul(mul1_ce),
@@ -550,6 +584,22 @@ module generic_conv_sim #(
 		.op_b(mul1_op_b),
 		
 		.res(mul1_res)
+	);
+	
+	unsigned_mul #(
+		.op_a_width(16),
+		.op_b_width(24),
+		.output_width(40),
+		.simulation_delay(SIM_DELAY)
+	)mul_u16_u24_u1(
+		.clk(aclk),
+		
+		.ce_s0_mul(mul2_ce),
+		
+		.op_a(mul2_op_a),
+		.op_b(mul2_op_b),
+		
+		.res(mul2_res)
 	);
 	
 	genvar mul_i;

@@ -42,8 +42,10 @@ module tb_generic_conv_sim();
 	
 	panda_blk_ctrl_if fmap_blk_ctrl_if(clk_if.clk_p, rst_if.reset_n);
 	panda_blk_ctrl_if kernal_blk_ctrl_if(clk_if.clk_p, rst_if.reset_n);
+	panda_blk_ctrl_if fnl_res_trans_blk_ctrl_if(clk_if.clk_p, rst_if.reset_n);
 	panda_blk_ctrl_if fmap_blk_ctrl_if_2(clk_if.clk_p, rst_if.reset_n);
 	panda_blk_ctrl_if kernal_blk_ctrl_if_2(clk_if.clk_p, rst_if.reset_n);
+	panda_blk_ctrl_if fnl_res_trans_blk_ctrl_if_2(clk_if.clk_p, rst_if.reset_n);
 	
 	panda_axis_if fmap_rd_req_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if fm_cake_info_axis_if(clk_if.clk_p, rst_if.reset_n);
@@ -55,6 +57,8 @@ module tb_generic_conv_sim();
 	panda_axis_if dma0_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if dma1_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if final_res_axis_if(clk_if.clk_p, rst_if.reset_n);
+	panda_axis_if dma_s2mm_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
+	panda_axis_if dma_s2mm_cmd_axis_if_2(clk_if.clk_p, rst_if.reset_n);
 	
 	panda_axis_if acmlt_in_if[ATOMIC_K-1:0](clk_if.clk_p, rst_if.reset_n);
 	
@@ -67,8 +71,10 @@ module tb_generic_conv_sim();
 		
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "fmap_blk_ctrl_vif", fmap_blk_ctrl_if);
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "kernal_blk_ctrl_vif", kernal_blk_ctrl_if);
+		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "fnl_res_trans_blk_ctrl_vif", fnl_res_trans_blk_ctrl_if);
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "fmap_blk_ctrl_vif_2", fmap_blk_ctrl_if_2);
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "kernal_blk_ctrl_vif_2", kernal_blk_ctrl_if_2);
+		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "fnl_res_trans_blk_ctrl_vif_2", fnl_res_trans_blk_ctrl_if_2);
 		
 		uvm_config_db #(panda_axis_vif)::set(null, "", "fmap_rd_req_axis_vif", fmap_rd_req_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "fm_cake_info_axis_vif", fm_cake_info_axis_if);
@@ -80,6 +86,8 @@ module tb_generic_conv_sim();
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma0_cmd_axis_vif", dma0_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma1_cmd_axis_vif", dma1_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "final_res_axis_vif", final_res_axis_if);
+		uvm_config_db #(panda_axis_vif)::set(null, "", "dma_s2mm_cmd_axis_vif", dma_s2mm_cmd_axis_if);
+		uvm_config_db #(panda_axis_vif)::set(null, "", "dma_s2mm_cmd_axis_vif_2", dma_s2mm_cmd_axis_if_2);
 		
 		run_test();
 	end
@@ -100,7 +108,8 @@ module tb_generic_conv_sim();
 	wire[15:0] n_foreach_group; // 每组的通道数/核数 - 1
 	wire[31:0] data_size_foreach_group; // (特征图)每组的数据量
 	// [特征图参数]
-	wire[31:0] fmap_baseaddr; // 特征图数据基地址
+	wire[31:0] ifmap_baseaddr; // 输入特征图基地址
+	wire[31:0] ofmap_baseaddr; // 输出特征图基地址
 	wire[15:0] ifmap_w; // 输入特征图宽度 - 1
 	wire[23:0] ifmap_size; // 输入特征图大小 - 1
 	wire[15:0] fmap_chn_n; // 特征图通道数 - 1
@@ -111,6 +120,7 @@ module tb_generic_conv_sim();
 	wire[2:0] inner_padding_top_bottom; // 上下内填充数
 	wire[15:0] ofmap_w; // 输出特征图宽度 - 1
 	wire[15:0] ofmap_h; // 输出特征图高度 - 1
+	wire[1:0] ofmap_data_type; // 输出特征图数据大小类型
 	// [卷积核参数]
 	wire[31:0] kernal_wgt_baseaddr; // 卷积核权重基地址
 	wire[2:0] kernal_shape; // 卷积核形状
@@ -141,6 +151,10 @@ module tb_generic_conv_sim();
 	wire fmap_access_blk_start;
 	wire fmap_access_blk_idle;
 	wire fmap_access_blk_done;
+	// [最终结果传输请求生成单元]
+	wire fnl_res_trans_blk_start;
+	wire fnl_res_trans_blk_idle;
+	wire fnl_res_trans_blk_done;
 	// DMA(MM2S方向)命令流#0(AXIS主机)
 	wire[55:0] m0_dma_cmd_axis_data; // {待传输字节数(24bit), 传输首地址(32bit)}
 	wire m0_dma_cmd_axis_user; // {固定(1'b1)/递增(1'b0)传输(1bit)}
@@ -165,6 +179,11 @@ module tb_generic_conv_sim();
 	wire s1_dma_strm_axis_last;
 	wire s1_dma_strm_axis_valid;
 	wire s1_dma_strm_axis_ready;
+	// S2MM方向DMA命令(AXIS主机)
+	wire[55:0] m_dma_s2mm_cmd_axis_data; // {待传输字节数(24bit), 传输首地址(32bit)}
+	wire m_dma_s2mm_cmd_axis_user; // 固定(1'b1)/递增(1'b0)传输(1bit)
+	wire m_dma_s2mm_cmd_axis_valid;
+	wire m_dma_s2mm_cmd_axis_ready;
 	// 最终结果输出(AXIS主机)
 	wire[FNL_RES_DATA_WIDTH-1:0] m_axis_fnl_res_data;
 	wire[FNL_RES_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep;
@@ -184,7 +203,8 @@ module tb_generic_conv_sim();
 	assign group_n = cfg_if.group_n;
 	assign n_foreach_group = cfg_if.n_foreach_group;
 	assign data_size_foreach_group = cfg_if.data_size_foreach_group;
-	assign fmap_baseaddr = cfg_if.fmap_baseaddr;
+	assign ifmap_baseaddr = cfg_if.ifmap_baseaddr;
+	assign ofmap_baseaddr = cfg_if.ofmap_baseaddr;
 	assign ifmap_w = cfg_if.ifmap_w;
 	assign ifmap_size = cfg_if.ifmap_size;
 	assign fmap_chn_n = cfg_if.fmap_chn_n;
@@ -195,6 +215,7 @@ module tb_generic_conv_sim();
 	assign inner_padding_top_bottom = cfg_if.inner_padding_top_bottom;
 	assign ofmap_w = cfg_if.ofmap_w;
 	assign ofmap_h = cfg_if.ofmap_h;
+	assign ofmap_data_type = cfg_if.ofmap_data_type;
 	assign kernal_wgt_baseaddr = cfg_if.kernal_wgt_baseaddr;
 	assign kernal_shape = cfg_if.kernal_shape;
 	assign kernal_dilation_hzt_n = cfg_if.kernal_dilation_hzt_n;
@@ -223,6 +244,10 @@ module tb_generic_conv_sim();
 	assign fmap_blk_ctrl_if_2.idle = fmap_access_blk_idle;
 	assign fmap_blk_ctrl_if_2.done = fmap_access_blk_done;
 	
+	assign fnl_res_trans_blk_start = fnl_res_trans_blk_ctrl_if_2.start;
+	assign fnl_res_trans_blk_ctrl_if_2.idle = fnl_res_trans_blk_idle;
+	assign fnl_res_trans_blk_ctrl_if_2.done = fnl_res_trans_blk_done;
+	
 	assign dma0_cmd_axis_if.data[55:0] = m0_dma_cmd_axis_data;
 	assign dma0_cmd_axis_if.user[0] = m0_dma_cmd_axis_user;
 	assign dma0_cmd_axis_if.last = m0_dma_cmd_axis_last;
@@ -246,6 +271,11 @@ module tb_generic_conv_sim();
 	assign s1_dma_strm_axis_last = dma1_strm_axis_if.last;
 	assign s1_dma_strm_axis_valid = dma1_strm_axis_if.valid;
 	assign dma1_strm_axis_if.ready = s1_dma_strm_axis_ready;
+	
+	assign dma_s2mm_cmd_axis_if.data[55:0] = m_dma_s2mm_cmd_axis_data;
+	assign dma_s2mm_cmd_axis_if.user[0] = m_dma_s2mm_cmd_axis_user;
+	assign dma_s2mm_cmd_axis_if.valid = m_dma_s2mm_cmd_axis_valid;
+	assign m_dma_s2mm_cmd_axis_ready = dma_s2mm_cmd_axis_if.ready;
 	
 	assign final_res_axis_if.data[FNL_RES_DATA_WIDTH-1:0] = m_axis_fnl_res_data;
 	assign final_res_axis_if.keep[FNL_RES_DATA_WIDTH/8-1:0] = m_axis_fnl_res_keep;
@@ -301,6 +331,28 @@ module tb_generic_conv_sim();
 	assign kernal_blk_ctrl_if.start = dut.conv_ctrl_sub_system_u.kernal_access_req_gen_u.blk_start;
 	assign kernal_blk_ctrl_if.idle = dut.conv_ctrl_sub_system_u.kernal_access_req_gen_u.blk_idle;
 	assign kernal_blk_ctrl_if.done = dut.conv_ctrl_sub_system_u.kernal_access_req_gen_u.blk_done;
+	
+	assign fnl_res_trans_blk_ctrl_if.start = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.blk_start;
+	assign fnl_res_trans_blk_ctrl_if.idle = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.blk_idle;
+	assign fnl_res_trans_blk_ctrl_if.done = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.blk_done;
+	
+	assign fnl_res_trans_blk_ctrl_if.params[120:0] = {
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.n_foreach_group,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.group_n,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.is_grp_conv_mode,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.max_wgtblk_w,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.kernal_num_n,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.ofmap_data_type,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.ofmap_h,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.ofmap_w,
+		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.ofmap_baseaddr
+	};
+	
+	assign dma_s2mm_cmd_axis_if_2.data[55:0] = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.m_dma_cmd_axis_data;
+	assign dma_s2mm_cmd_axis_if_2.user[24:0] = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.m_dma_cmd_axis_user;
+	assign dma_s2mm_cmd_axis_if_2.last = 1'b1;
+	assign dma_s2mm_cmd_axis_if_2.valid = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.m_dma_cmd_axis_valid;
+	assign dma_s2mm_cmd_axis_if_2.ready = dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.m_dma_cmd_axis_ready;
 	
 	assign fmap_rd_req_axis_if.data[103:0] = dut.conv_ctrl_sub_system_u.fmap_sfc_row_access_req_gen_u.m_fm_rd_req_axis_data;
 	assign fmap_rd_req_axis_if.last = 1'b1;
@@ -383,7 +435,8 @@ module tb_generic_conv_sim();
 		.group_n(group_n),
 		.n_foreach_group(n_foreach_group),
 		.data_size_foreach_group(data_size_foreach_group),
-		.fmap_baseaddr(fmap_baseaddr),
+		.ifmap_baseaddr(ifmap_baseaddr),
+		.ofmap_baseaddr(ofmap_baseaddr),
 		.ifmap_w(ifmap_w),
 		.ifmap_size(ifmap_size),
 		.fmap_chn_n(fmap_chn_n),
@@ -394,6 +447,7 @@ module tb_generic_conv_sim();
 		.inner_padding_top_bottom(inner_padding_top_bottom),
 		.ofmap_w(ofmap_w),
 		.ofmap_h(ofmap_h),
+		.ofmap_data_type(ofmap_data_type),
 		.kernal_wgt_baseaddr(kernal_wgt_baseaddr),
 		.kernal_shape(kernal_shape),
 		.kernal_dilation_hzt_n(kernal_dilation_hzt_n),
@@ -422,6 +476,10 @@ module tb_generic_conv_sim();
 		.fmap_access_blk_idle(fmap_access_blk_idle),
 		.fmap_access_blk_done(fmap_access_blk_done),
 		
+		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
+		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
+		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
+		
 		.m0_dma_cmd_axis_data(m0_dma_cmd_axis_data),
 		.m0_dma_cmd_axis_user(m0_dma_cmd_axis_user),
 		.m0_dma_cmd_axis_last(m0_dma_cmd_axis_last),
@@ -445,6 +503,11 @@ module tb_generic_conv_sim();
 		.s1_dma_strm_axis_last(s1_dma_strm_axis_last),
 		.s1_dma_strm_axis_valid(s1_dma_strm_axis_valid),
 		.s1_dma_strm_axis_ready(s1_dma_strm_axis_ready),
+		
+		.m_dma_s2mm_cmd_axis_data(m_dma_s2mm_cmd_axis_data),
+		.m_dma_s2mm_cmd_axis_user(m_dma_s2mm_cmd_axis_user),
+		.m_dma_s2mm_cmd_axis_valid(m_dma_s2mm_cmd_axis_valid),
+		.m_dma_s2mm_cmd_axis_ready(m_dma_s2mm_cmd_axis_ready),
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
 		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
