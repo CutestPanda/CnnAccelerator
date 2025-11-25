@@ -196,6 +196,7 @@ module logic_kernal_buffer #(
 	localparam RD_WGTBLK_STS_TRANS = 3'b100;
 	
 	/** 内部参数 **/
+	wire[2:0] sfc_n_each_wgtblk_lshn; // 每个权重块的表面个数导致的左移量
 	wire[31:0] kernal_blk_addr_stride; // 权重块地址跨度
 	wire[4:0] kernal_blk_addr_stride_lshn; // 权重块地址跨度导致的左移量
 	wire[7:0] kbufgrpn_sub1; // 可缓存的通道组数 - 2
@@ -203,10 +204,19 @@ module logic_kernal_buffer #(
 	wire[31:0] sw_rgn0_baseaddr; // 交换区通道组#0基址
 	wire[31:0] sw_rgn1_baseaddr; // 交换区通道组#1基址
 	
+	assign sfc_n_each_wgtblk_lshn = 
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_1)   ? 3'b000:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_2)   ? 3'b001:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_4)   ? 3'b010:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_8)   ? 3'b011:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_16)  ? 3'b100:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_32)  ? 3'b101:
+		(sfc_n_each_wgtblk == WGTBLK_SFC_N_64)  ? 3'b110:
+		                                          3'b111;
 	assign kernal_blk_addr_stride = 
-		(1 << sfc_n_each_wgtblk) * ATOMIC_C * 2;
+		(1 << sfc_n_each_wgtblk_lshn) * ATOMIC_C * 2;
 	assign kernal_blk_addr_stride_lshn = 
-		{2'b00, sfc_n_each_wgtblk} + (
+		{2'b00, sfc_n_each_wgtblk_lshn} + (
 			(ATOMIC_C == 1)  ? 5'd1:
 			(ATOMIC_C == 2)  ? 5'd2:
 			(ATOMIC_C == 4)  ? 5'd3:
