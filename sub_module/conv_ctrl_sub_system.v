@@ -47,7 +47,7 @@ BLK CTRL
 AXIS MASTER
 
 作者: 陈家耀
-日期: 2025/11/25
+日期: 2025/11/26
 ********************************************************************/
 
 
@@ -284,6 +284,7 @@ module conv_ctrl_sub_system #(
 	
 	kernal_access_req_gen #(
 		.ATOMIC_C(ATOMIC_C),
+		.EN_REG_SLICE_IN_RD_REQ("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)kernal_access_req_gen_u(
 		.aclk(aclk),
@@ -409,6 +410,7 @@ module conv_ctrl_sub_system #(
 	
 	fmap_sfc_row_access_req_gen #(
 		.ATOMIC_C(ATOMIC_C),
+		.EN_REG_SLICE_IN_RD_REQ("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)fmap_sfc_row_access_req_gen_u(
 		.aclk(aclk),

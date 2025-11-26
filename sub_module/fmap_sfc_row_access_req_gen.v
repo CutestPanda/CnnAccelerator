@@ -55,6 +55,7 @@ REQ/GRANT
 
 module fmap_sfc_row_access_req_gen #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter EN_REG_SLICE_IN_RD_REQ = "true", // 是否在"特征图表面行读请求"处插入寄存器片
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -177,6 +178,46 @@ module fmap_sfc_row_access_req_gen #(
 	/** 内部配置 **/
 	localparam MUL0_TID_CONST = 4'd1; // (共享)无符号乘法器#0操作ID
 	localparam MUL1_TID_CONST = 4'd2; // (共享)无符号乘法器#1操作ID
+	
+	/** AXIS寄存器片 **/
+	wire[103:0] s_fm_rd_req_reg_axis_data;
+	wire s_fm_rd_req_reg_axis_valid;
+	wire s_fm_rd_req_reg_axis_ready;
+	wire[103:0] m_fm_rd_req_reg_axis_data;
+	wire m_fm_rd_req_reg_axis_valid;
+	wire m_fm_rd_req_reg_axis_ready;
+	
+	assign m_fm_rd_req_axis_data = m_fm_rd_req_reg_axis_data;
+	assign m_fm_rd_req_axis_valid = m_fm_rd_req_reg_axis_valid;
+	assign m_fm_rd_req_reg_axis_ready = m_fm_rd_req_axis_ready;
+	
+	axis_reg_slice #(
+		.data_width(104),
+		.user_width(1),
+		.forward_registered(EN_REG_SLICE_IN_RD_REQ),
+		.back_registered("false"),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)fm_rd_req_reg_slice_u(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_fm_rd_req_reg_axis_data),
+		.s_axis_keep(13'bx_xxxx_xxxx_xxxx),
+		.s_axis_user(1'bx),
+		.s_axis_last(1'bx),
+		.s_axis_valid(s_fm_rd_req_reg_axis_valid),
+		.s_axis_ready(s_fm_rd_req_reg_axis_ready),
+		
+		.m_axis_data(m_fm_rd_req_reg_axis_data),
+		.m_axis_keep(),
+		.m_axis_user(),
+		.m_axis_last(),
+		.m_axis_valid(m_fm_rd_req_reg_axis_valid),
+		.m_axis_ready(m_fm_rd_req_reg_axis_ready)
+	);
 	
 	/** 补充运行时参数 **/
 	reg[2:0] extra_params_init_stage; // 补充运行时参数(初始化阶段码)
@@ -741,17 +782,17 @@ module fmap_sfc_row_access_req_gen #(
 	assign blk_idle = req_gen_sts == REQ_GEN_STS_IDLE;
 	assign blk_done = req_gen_sts == REQ_GEN_STS_DONE;
 	
-	assign m_fm_rd_req_axis_data[4:0] = (sfc_depth_of_cur_fmap_slice - 1) & 6'b011111; // 每个表面的有效数据个数 - 1
-	assign m_fm_rd_req_axis_data[28:5] = row_data_size_of_cur_fmap_slice; // 表面行有效字节数
-	assign m_fm_rd_req_axis_data[60:29] = sfc_row_abs_addr; // 表面行基地址
-	assign m_fm_rd_req_axis_data[72:61] = ifmap_w[11:0]; // 待读取的表面个数 - 1
-	assign m_fm_rd_req_axis_data[84:73] = 12'd0; // 起始表面编号
-	assign m_fm_rd_req_axis_data[96:85] = 
+	assign s_fm_rd_req_reg_axis_data[4:0] = (sfc_depth_of_cur_fmap_slice - 1) & 6'b011111; // 每个表面的有效数据个数 - 1
+	assign s_fm_rd_req_reg_axis_data[28:5] = row_data_size_of_cur_fmap_slice; // 表面行有效字节数
+	assign s_fm_rd_req_reg_axis_data[60:29] = sfc_row_abs_addr; // 表面行基地址
+	assign s_fm_rd_req_reg_axis_data[72:61] = ifmap_w[11:0]; // 待读取的表面个数 - 1
+	assign s_fm_rd_req_reg_axis_data[84:73] = 12'd0; // 起始表面编号
+	assign s_fm_rd_req_reg_axis_data[96:85] = 
 		phy_y_encoding_at_actual_rid_rvs | cgrpn_cnt[11:0]; // 实际表面行号
-	assign m_fm_rd_req_axis_data[97] = req_gen_sts == REQ_GEN_STS_FMBUF_RST; // 是否重置缓存
-	assign m_fm_rd_req_axis_data[103:98] = 6'b000000;
+	assign s_fm_rd_req_reg_axis_data[97] = req_gen_sts == REQ_GEN_STS_FMBUF_RST; // 是否重置缓存
+	assign s_fm_rd_req_reg_axis_data[103:98] = 6'b000000;
 	
-	assign m_fm_rd_req_axis_valid = 
+	assign s_fm_rd_req_reg_axis_valid = 
 		aclken & 
 		((req_gen_sts == REQ_GEN_STS_FMBUF_RST) | (req_gen_sts == REQ_GEN_STS_SEND_REQ));
 	
@@ -798,7 +839,7 @@ module fmap_sfc_row_access_req_gen #(
 			(
 				(
 					(req_gen_sts == REQ_GEN_STS_FMBUF_RST) & 
-					m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready & (~to_fns_req_gen)
+					s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready & (~to_fns_req_gen)
 				) | 
 				(
 					(req_gen_sts == REQ_GEN_STS_UPD_CNT) & 
@@ -834,7 +875,7 @@ module fmap_sfc_row_access_req_gen #(
 					if(blk_start)
 						req_gen_sts <= # SIM_DELAY REQ_GEN_STS_FMBUF_RST;
 				REQ_GEN_STS_FMBUF_RST: // 状态: 重置特征图缓存
-					if(m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready)
+					if(s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready)
 						req_gen_sts <= # SIM_DELAY 
 							({3{to_fns_req_gen}} & REQ_GEN_STS_DONE) | 
 							({3{rst_buf_because_phy_y_reofs}} & REQ_GEN_STS_SEND_INFO) | 
@@ -858,7 +899,7 @@ module fmap_sfc_row_access_req_gen #(
 								REQ_GEN_STS_SEND_REQ:
 								REQ_GEN_STS_UPD_CNT;
 				REQ_GEN_STS_SEND_REQ: // 状态: 发送请求
-					if(m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready)
+					if(s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready)
 						req_gen_sts <= # SIM_DELAY REQ_GEN_STS_UPD_CNT;
 				REQ_GEN_STS_UPD_CNT: // 状态: 更新计数器
 					req_gen_sts <= # SIM_DELAY 
@@ -1018,7 +1059,7 @@ module fmap_sfc_row_access_req_gen #(
 			on_incr_phy_row_traffic_r | 
 			(
 				aclken & 
-				(req_gen_sts == REQ_GEN_STS_SEND_REQ) & m_fm_rd_req_axis_valid & m_fm_rd_req_axis_ready & (row_repeat_cnt == 4'd0)
+				(req_gen_sts == REQ_GEN_STS_SEND_REQ) & s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready & (row_repeat_cnt == 4'd0)
 			)
 		)
 			on_incr_phy_row_traffic_r <= # SIM_DELAY ~on_incr_phy_row_traffic_r;

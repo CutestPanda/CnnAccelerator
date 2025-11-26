@@ -45,12 +45,13 @@ AXIS MASTER
 REQ/GRANT
 
 作者: 陈家耀
-日期: 2025/10/29
+日期: 2025/11/26
 ********************************************************************/
 
 
 module kernal_access_req_gen #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter EN_REG_SLICE_IN_RD_REQ = "true", // 是否在"卷积核权重块读请求"处插入寄存器片
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -166,6 +167,46 @@ module kernal_access_req_gen #(
 		(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
 		(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
 		                                 4'd11;
+	
+	/** AXIS寄存器片 **/
+	wire[103:0] s_kwgtblk_rd_req_reg_axis_data;
+	wire s_kwgtblk_rd_req_reg_axis_valid;
+	wire s_kwgtblk_rd_req_reg_axis_ready;
+	wire[103:0] m_kwgtblk_rd_req_reg_axis_data;
+	wire m_kwgtblk_rd_req_reg_axis_valid;
+	wire m_kwgtblk_rd_req_reg_axis_ready;
+	
+	assign m_kwgtblk_rd_req_axis_data = m_kwgtblk_rd_req_reg_axis_data;
+	assign m_kwgtblk_rd_req_axis_valid = m_kwgtblk_rd_req_reg_axis_valid;
+	assign m_kwgtblk_rd_req_reg_axis_ready = m_kwgtblk_rd_req_axis_ready;
+	
+	axis_reg_slice #(
+		.data_width(104),
+		.user_width(1),
+		.forward_registered(EN_REG_SLICE_IN_RD_REQ),
+		.back_registered("false"),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)kwgtblk_rd_req_reg_slice_u(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_kwgtblk_rd_req_reg_axis_data),
+		.s_axis_keep(13'bx_xxxx_xxxx_xxxx),
+		.s_axis_user(1'bx),
+		.s_axis_last(1'bx),
+		.s_axis_valid(s_kwgtblk_rd_req_reg_axis_valid),
+		.s_axis_ready(s_kwgtblk_rd_req_reg_axis_ready),
+		
+		.m_axis_data(m_kwgtblk_rd_req_reg_axis_data),
+		.m_axis_keep(),
+		.m_axis_user(),
+		.m_axis_last(),
+		.m_axis_valid(m_kwgtblk_rd_req_reg_axis_valid),
+		.m_axis_ready(m_kwgtblk_rd_req_reg_axis_ready)
+	);
 	
 	/** 权重块位置计数器 **/
 	wire on_upd_wgtblk_pos_cnt; // 更新权重块位置计数器(指示)
@@ -417,9 +458,9 @@ module kernal_access_req_gen #(
 	wire[4:0] sfc_depth; // 表面深度 - 1
 	
 	assign blk_idle = req_gen_sts == KWGTBLK_ACCESS_STS_IDLE;
-	assign blk_done = (req_gen_sts == KWGTBLK_ACCESS_STS_BUF_POST_RST) & m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready;
+	assign blk_done = (req_gen_sts == KWGTBLK_ACCESS_STS_BUF_POST_RST) & s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready;
 	
-	assign m_kwgtblk_rd_req_axis_data = 
+	assign s_kwgtblk_rd_req_reg_axis_data = 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) ? 
 			{
 				6'd0,
@@ -440,7 +481,7 @@ module kernal_access_req_gen #(
 				cgrp_id_ofs, // 通道组号偏移(10bit)
 				77'd0
 			};
-	assign m_kwgtblk_rd_req_axis_valid = 
+	assign s_kwgtblk_rd_req_reg_axis_valid = 
 		((req_gen_sts == KWGTBLK_ACCESS_STS_BUF_PRE_RST) & (~on_upd_kernal_set_params)) | 
 		((req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & (~to_skip_cur_req)) | 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_BUF_POST_RST);
@@ -465,7 +506,7 @@ module kernal_access_req_gen #(
 	
 	assign on_upd_wgtblk_pos_cnt = 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-		((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req);
+		((s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready) | to_skip_cur_req);
 	assign on_start_gen_kernal_row_mask = 
 		(req_gen_sts == KWGTBLK_ACCESS_STS_GEN_ROW_MASK) & (~ext_fmap_coordinate_cvt_blk_start);
 	
@@ -495,7 +536,7 @@ module kernal_access_req_gen #(
 					if(blk_start)
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_BUF_PRE_RST;
 				KWGTBLK_ACCESS_STS_BUF_PRE_RST: // 状态: 缓存前复位
-					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
+					if(s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready)
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_GEN_ROW_MASK;
 				KWGTBLK_ACCESS_STS_GEN_ROW_MASK: // 状态: 生成行掩码
 					if(gen_kernal_row_mask_done)
@@ -508,7 +549,7 @@ module kernal_access_req_gen #(
 					))
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT;
 				KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT: // 状态: 等待请求被接受
-					if((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req)
+					if((s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready) | to_skip_cur_req)
 						req_gen_sts <= # SIM_DELAY 
 							(is_last_kernal_wgtblk & is_last_kernal_cgrp) ? 
 								(
@@ -522,7 +563,7 @@ module kernal_access_req_gen #(
 								):
 								KWGTBLK_ACCESS_STS_GEN_REQ;
 				KWGTBLK_ACCESS_STS_BUF_POST_RST: // 状态: 缓存后复位
-					if(m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready)
+					if(s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready)
 						req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_IDLE;
 				default:
 					req_gen_sts <= # SIM_DELAY KWGTBLK_ACCESS_STS_IDLE;
@@ -540,7 +581,7 @@ module kernal_access_req_gen #(
 				((req_gen_sts == KWGTBLK_ACCESS_STS_IDLE) & blk_start) | 
 				(
 					(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-					((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
+					((s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready) | to_skip_cur_req) & 
 					is_last_kernal_wgtblk & is_last_kernal_cgrp & is_last_traverse_now_kernal_set & (~is_last_kernal_set)
 				);
 	end
@@ -598,7 +639,7 @@ module kernal_access_req_gen #(
 				((req_gen_sts == KWGTBLK_ACCESS_STS_IDLE) & blk_start) | 
 				(
 					(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-					((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
+					((s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready) | to_skip_cur_req) & 
 					is_last_kernal_wgtblk & (~(is_last_kernal_cgrp & is_last_traverse_now_kernal_set & is_last_kernal_set))
 				);
 	end
@@ -609,7 +650,7 @@ module kernal_access_req_gen #(
 		if(
 			aclken & 
 			(req_gen_sts == KWGTBLK_ACCESS_STS_WAIT_REQ_ACPT) & 
-			((m_kwgtblk_rd_req_axis_valid & m_kwgtblk_rd_req_axis_ready) | to_skip_cur_req) & 
+			((s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready) | to_skip_cur_req) & 
 			is_last_kernal_wgtblk & (~(is_last_kernal_cgrp & is_last_traverse_now_kernal_set & is_last_kernal_set))
 		)
 			upd_kernal_cgrp_params_for_first_cgrp_flag <= # SIM_DELAY is_last_kernal_cgrp;
