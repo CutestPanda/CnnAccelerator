@@ -733,6 +733,10 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 			`uvm_error(this.get_name(), "req_mb is not empty")
 		else
 			`uvm_info(this.get_name(), "req_mb is empty", UVM_LOW)
+	endfunction
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
 		
 		`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
 	endfunction
@@ -1666,6 +1670,100 @@ class MidResAcmltCalScoreboard extends tue_scoreboard #(
 	
 	`tue_component_default_constructor(MidResAcmltCalScoreboard)
 	`uvm_component_utils(MidResAcmltCalScoreboard)
+	
+endclass
+
+class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy)
+);
+	
+	uvm_analysis_imp_final_res #(panda_axis_trans, DMAS2MMDataLenScoreboard) final_res_port;
+	uvm_analysis_imp_req #(panda_axis_trans, DMAS2MMDataLenScoreboard) req_port;
+	
+	local mailbox #(panda_axis_trans) final_res_mb;
+	local mailbox #(DMAS2MMReqTransAdapter) req_mb;
+	
+	local int req_tr_id;
+	local int match_tr_n;
+	local int mismatch_tr_n;
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+		
+		this.final_res_port = new("final_res_port", this);
+		this.req_port = new("req_port", this);
+		
+		this.final_res_mb = new();
+		this.req_mb = new();
+		
+		this.req_tr_id = 0;
+		this.match_tr_n = 0;
+		this.mismatch_tr_n = 0;
+	endfunction
+	
+	virtual function void write_final_res(panda_axis_trans tr);
+		if(!this.final_res_mb.try_put(tr))
+			`uvm_error(this.get_name(), "cannot put final_res_tr")
+	endfunction
+	
+	virtual function void write_req(panda_axis_trans tr);
+		DMAS2MMReqTransAdapter req_adapter;
+		
+		req_adapter = DMAS2MMReqTransAdapter::type_id::create();
+		req_adapter.convert(tr);
+		req_adapter.tr_id = this.req_tr_id;
+		
+		if(!this.req_mb.try_put(req_adapter))
+			`uvm_error(this.get_name(), "cannot put req_adapter")
+		
+		this.req_tr_id++;
+	endfunction
+	
+	task main_phase(uvm_phase phase);
+		forever
+		begin
+			DMAS2MMReqTransAdapter cmd_req;
+			panda_axis_trans final_res_tr;
+			
+			this.req_mb.get(cmd_req);
+			this.final_res_mb.get(final_res_tr);
+			
+			if(cmd_req.btt == final_res_tr.get_bytes_n())
+			begin
+				`uvm_info(this.get_name(), $sformatf("btt(%0d) match", cmd_req.btt), UVM_LOW)
+				
+				this.match_tr_n++;
+			end
+			else
+			begin
+				`uvm_error(this.get_name(), $sformatf("btt(%0d) res_len(%0d) mismatch", cmd_req.btt, final_res_tr.get_bytes_n()))
+				
+				this.mismatch_tr_n++;
+			end
+		end
+	endtask
+	
+	function void check_phase(uvm_phase phase);
+		if(this.final_res_mb.num())
+			`uvm_error(this.get_name(), "final_res_mb is not empty")
+		else
+			`uvm_info(this.get_name(), "final_res_mb is empty", UVM_LOW)
+		
+		if(this.req_mb.num())
+			`uvm_error(this.get_name(), "req_mb is not empty")
+		else
+			`uvm_info(this.get_name(), "req_mb is empty", UVM_LOW)
+	endfunction
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
+		
+		`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+	endfunction
+	
+	`tue_component_default_constructor(DMAS2MMDataLenScoreboard)
+	`uvm_component_utils(DMAS2MMDataLenScoreboard)
 	
 endclass
 

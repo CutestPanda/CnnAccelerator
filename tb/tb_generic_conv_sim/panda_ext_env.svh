@@ -222,6 +222,8 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 	.STATUS(tue_status_dummy)
 );
 	
+	uvm_analysis_export #(panda_axis_trans) req_export;
+	
 	local int blk_ctrl_tr_mcd = UVM_STDOUT;
 	local int req_tr_mcd = UVM_STDOUT;
 	
@@ -241,6 +243,8 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 	
 	function void build_phase(uvm_phase phase);
 		super.build_phase(phase);
+		
+		this.req_export = new("req_export", this);
 		
 		this.blk_ctrl_tr_mcd = $fopen("fnl_res_s2mm_blk_ctrl_tr_log.txt");
 		this.req_tr_mcd = $fopen("dma_s2mm_req_tr_log.txt");
@@ -294,6 +298,8 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
+		this.req_axis_slv_agt.item_port.connect(this.req_export);
+		
 		this.blk_ctrl_mst_agt.item_port.connect(this.scb.blk_ctrl_port);
 		this.req_axis_slv_agt.item_port.connect(this.scb.req_port);
 		
@@ -537,6 +543,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	typedef bit[2:0] bit3;
 	typedef bit[3:0] bit4;
 	
+	uvm_analysis_export #(panda_axis_trans) final_res_export;
+	
 	local virtual generic_conv_sim_cfg_if cfg_vif;
 	
 	local int final_res_tr_mcd = UVM_STDOUT;
@@ -572,6 +580,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	
 	function void build_phase(uvm_phase phase);
 		super.build_phase(phase);
+		
+		this.final_res_export = new("final_res_export", this);
 		
 		this.final_res_tr_mcd = $fopen("final_res_tr_log.txt");
 	endfunction
@@ -721,6 +731,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
+		this.final_res_slv_agt.item_port.connect(this.final_res_export);
+		
 		this.final_res_slv_agt.item_port.connect(this.final_res_scb.final_res_port);
 		this.final_res_scb.set_final_res_tr_mcd(this.final_res_tr_mcd);
 		

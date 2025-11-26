@@ -50,7 +50,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/10/16
+日期: 2025/11/26
 ********************************************************************/
 
 
@@ -63,6 +63,8 @@ module conv_data_hub #(
 	parameter integer KWGTBLK_RD_REQ_PRE_ACPT_N = 4, // 可提前接受的卷积核权重块读请求个数(1 | 2 | 4 | 8 | 16)
 	parameter integer MAX_FMBUF_ROWN = 512, // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer LG_FMBUF_BUFFER_RID_WIDTH = 9, // 特征图缓存的缓存行号的位宽(3~10, 应为clogb2(MAX_FMBUF_ROWN))
+	parameter EN_REG_SLICE_IN_FM_RD_REQ = "true", // 是否在"特征图表面行读请求"处插入寄存器片
+	parameter EN_REG_SLICE_IN_KWGTBLK_RD_REQ = "true", // 是否在"卷积核权重块读请求"处插入寄存器片
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -294,6 +296,86 @@ module conv_data_hub #(
 	localparam KWGTBLK_RD_STS_BUF_REQ = 3'b011; // 状态: 向逻辑卷积核缓存发起读请求
 	localparam KWGTBLK_RD_STS_OUT_DATA = 3'b100; // 状态: 逻辑卷积核缓存输出数据
 	
+	/** AXIS寄存器片 **/
+	// [寄存器片#0]
+	wire[103:0] s_fm_rd_req_reg_axis_data;
+	wire s_fm_rd_req_reg_axis_valid;
+	wire s_fm_rd_req_reg_axis_ready;
+	wire[103:0] m_fm_rd_req_reg_axis_data;
+	wire m_fm_rd_req_reg_axis_valid;
+	wire m_fm_rd_req_reg_axis_ready;
+	// [寄存器片#1]
+	wire[103:0] s_kwgtblk_rd_req_reg_axis_data;
+	wire s_kwgtblk_rd_req_reg_axis_valid;
+	wire s_kwgtblk_rd_req_reg_axis_ready;
+	wire[103:0] m_kwgtblk_rd_req_reg_axis_data;
+	wire m_kwgtblk_rd_req_reg_axis_valid;
+	wire m_kwgtblk_rd_req_reg_axis_ready;
+	
+	assign s_fm_rd_req_reg_axis_data = s_fm_rd_req_axis_data;
+	assign s_fm_rd_req_reg_axis_valid = s_fm_rd_req_axis_valid;
+	assign s_fm_rd_req_axis_ready = s_fm_rd_req_reg_axis_ready;
+	
+	assign s_kwgtblk_rd_req_reg_axis_data = s_kwgtblk_rd_req_axis_data;
+	assign s_kwgtblk_rd_req_reg_axis_valid = s_kwgtblk_rd_req_axis_valid;
+	assign s_kwgtblk_rd_req_axis_ready = s_kwgtblk_rd_req_reg_axis_ready;
+	
+	axis_reg_slice #(
+		.data_width(104),
+		.user_width(1),
+		.forward_registered("false"),
+		.back_registered(EN_REG_SLICE_IN_FM_RD_REQ),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)fm_rd_req_reg_slice_u(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_fm_rd_req_reg_axis_data),
+		.s_axis_keep(13'bx_xxxx_xxxx_xxxx),
+		.s_axis_user(1'bx),
+		.s_axis_last(1'bx),
+		.s_axis_valid(s_fm_rd_req_reg_axis_valid),
+		.s_axis_ready(s_fm_rd_req_reg_axis_ready),
+		
+		.m_axis_data(m_fm_rd_req_reg_axis_data),
+		.m_axis_keep(),
+		.m_axis_user(),
+		.m_axis_last(),
+		.m_axis_valid(m_fm_rd_req_reg_axis_valid),
+		.m_axis_ready(m_fm_rd_req_reg_axis_ready)
+	);
+	
+	axis_reg_slice #(
+		.data_width(104),
+		.user_width(1),
+		.forward_registered("false"),
+		.back_registered(EN_REG_SLICE_IN_KWGTBLK_RD_REQ),
+		.en_ready("true"),
+		.en_clk_en("true"),
+		.simulation_delay(SIM_DELAY)
+	)kwgtblk_rd_req_reg_slice_u(
+		.clk(aclk),
+		.rst_n(aresetn),
+		.clken(aclken),
+		
+		.s_axis_data(s_kwgtblk_rd_req_reg_axis_data),
+		.s_axis_keep(13'bx_xxxx_xxxx_xxxx),
+		.s_axis_user(1'bx),
+		.s_axis_last(1'bx),
+		.s_axis_valid(s_kwgtblk_rd_req_reg_axis_valid),
+		.s_axis_ready(s_kwgtblk_rd_req_reg_axis_ready),
+		
+		.m_axis_data(m_kwgtblk_rd_req_reg_axis_data),
+		.m_axis_keep(),
+		.m_axis_user(),
+		.m_axis_last(),
+		.m_axis_valid(m_kwgtblk_rd_req_reg_axis_valid),
+		.m_axis_ready(m_kwgtblk_rd_req_reg_axis_ready)
+	);
+	
 	/** 获取特征图数据的DMA(MM2S方向)适配器 **/
 	// [适配器命令流输入(AXIS从机)]
 	wire[55:0] s0_dma_cmd_axis_data; // {待传输字节数(24bit), 传输首地址(32bit)}
@@ -480,19 +562,19 @@ module conv_data_hub #(
 	/*
 	握手条件:
 		aclken & 
-		s_fm_rd_req_axis_valid & 
+		m_fm_rd_req_reg_axis_valid & 
 		(~rst_logic_fmbuf) & 
 		(~fm_rd_req_buf_full) & 
 		(~(|fm_rd_req_buf_sfc_rid_not_ready)) & 
-		((~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | fm_rd_req_buf_empty) & 
+		((~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | fm_rd_req_buf_empty) & 
 		((|fm_rd_req_entry_actual_sfc_rid_matched_vec) | (~sfc_row_search_i_req))
 	*/
-	assign s_fm_rd_req_axis_ready = 
+	assign m_fm_rd_req_reg_axis_ready = 
 		aclken & 
 		(~rst_logic_fmbuf) & // 当前不在"重置逻辑特征图缓存"
 		(~fm_rd_req_buf_full) & // 读请求缓存非满
 		(~(|fm_rd_req_buf_sfc_rid_not_ready)) & // 等待缓存表面行号准备好
-		((~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | fm_rd_req_buf_empty) & // 对于"重置缓存", 需要等待读请求缓存空再处理
+		((~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | fm_rd_req_buf_empty) & // 对于"重置缓存", 需要等待读请求缓存空再处理
 		// 要么是从读请求缓存中找到了与实际表面行号相匹配的条目, 要么表面行检索未被占用
 		((|fm_rd_req_entry_actual_sfc_rid_matched_vec) | (~sfc_row_search_i_req));
 	
@@ -596,8 +678,8 @@ module conv_data_hub #(
 			rst_logic_fmbuf <= 1'b0;
 		else if(aclken)
 			rst_logic_fmbuf <= # SIM_DELAY 
-				s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
-				s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID];
+				m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
+				m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID];
 	end
 	
 	// 表面行检索请求
@@ -610,8 +692,8 @@ module conv_data_hub #(
 					// 提示: 目前是仅检索当前读请求条目的实际表面行号, 实际上还可以检索一下后续几个读请求条目的实际表面行号, 以避免置换掉即将要使用的表面行
 					(~sfc_row_search_i_req) & 
 					(
-						s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
-						(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
+						m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
+						(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
 						(~(|fm_rd_req_entry_actual_sfc_rid_matched_vec)) // 从读请求缓存中找不到与实际表面行号相匹配的条目
 					);
 	end
@@ -621,13 +703,13 @@ module conv_data_hub #(
 	begin
 		if(
 			aclken & 
-			s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
-			(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
+			m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
+			(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
 			(~(|fm_rd_req_entry_actual_sfc_rid_matched_vec)) // 从读请求缓存中找不到与实际表面行号相匹配的条目
 		)
 		begin
 			sfc_row_search_i_rid <= # SIM_DELAY 
-				s_fm_rd_req_axis_data[FM_RD_REQ_ACTUAL_SFC_RID_SID+11:FM_RD_REQ_ACTUAL_SFC_RID_SID];
+				m_fm_rd_req_reg_axis_data[FM_RD_REQ_ACTUAL_SFC_RID_SID+11:FM_RD_REQ_ACTUAL_SFC_RID_SID];
 			sfc_row_search_i_rd_req_eid <= # SIM_DELAY 
 				acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0];
 		end
@@ -649,14 +731,14 @@ module conv_data_hub #(
 			aclken & 
 			(
 				// 接受了"重置缓存"的读请求 -> 清零计数器
-				(s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
+				(m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
 				// 检索表面行时缺失 -> 更新计数器
 				(sfc_row_search_o_vld & (~sfc_row_search_o_found))
 			)
 		)
 			fm_buf_rid_to_rplc <= # SIM_DELAY 
 				{10{~(
-					(s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
+					(m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
 					(fm_buf_rid_to_rplc == fmbufrown)
 				)}} & (fm_buf_rid_to_rplc + 1'b1);
 	end
@@ -670,13 +752,13 @@ module conv_data_hub #(
 			aclken & 
 			(
 				// 接受了"重置缓存"的读请求 -> 置位本标志
-				(s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
+				(m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
 				// 检索表面行时缺失, 且特征图缓存尚未被初次填满 -> 粘滞更新
 				(sfc_row_search_o_vld & (~sfc_row_search_o_found) & fm_buf_first_filled_n)
 			)
 		)
 			fm_buf_first_filled_n <= # SIM_DELAY 
-				(s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
+				(m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) | 
 				(~(fm_buf_rid_to_rplc == fmbufrown));
 	end
 	
@@ -687,7 +769,7 @@ module conv_data_hub #(
 			assign fm_rd_req_entry_actual_sfc_rid_matched_vec[fm_rd_req_i] = 
 				fm_rd_req_entry_vld[fm_rd_req_i] & // 条目有效
 				(fm_rd_req_actual_sfc_rid[fm_rd_req_i] == 
-					s_fm_rd_req_axis_data[FM_RD_REQ_ACTUAL_SFC_RID_SID+11:FM_RD_REQ_ACTUAL_SFC_RID_SID]); // 实际表面行号匹配
+					m_fm_rd_req_reg_axis_data[FM_RD_REQ_ACTUAL_SFC_RID_SID+11:FM_RD_REQ_ACTUAL_SFC_RID_SID]); // 实际表面行号匹配
 			assign fm_rd_req_entry_vld[fm_rd_req_i] = 
 				fm_rd_req_sts[fm_rd_req_i] != FM_RD_STS_EMPTY;
 			assign fm_rd_req_buf_sfc_rid_not_ready[fm_rd_req_i] = 
@@ -728,11 +810,11 @@ module conv_data_hub #(
 					case(fm_rd_req_sts[fm_rd_req_i])
 						FM_RD_STS_EMPTY:
 							if(
-								s_fm_rd_req_axis_valid & 
+								m_fm_rd_req_reg_axis_valid & 
 								(~rst_logic_fmbuf) & // 当前不在"重置逻辑特征图缓存"
 								(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == 
 									fm_rd_req_i) & // 待接受的读请求(写指针)指向当前条目
-								(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
+								(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 不是"重置缓存"的读请求
 								(~(|fm_rd_req_buf_sfc_rid_not_ready)) & // 等待缓存表面行号准备好
 								(
 									(|fm_rd_req_entry_actual_sfc_rid_matched_vec) | 
@@ -794,9 +876,9 @@ module conv_data_hub #(
 				if(
 					aclken & 
 					// 载入新的请求项, 且该请求项不是"重置缓存"
-					s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+					m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 					(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i) & 
-					(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
+					(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
 				)
 				begin
 					{
@@ -806,7 +888,7 @@ module conv_data_hub #(
 						fm_rd_req_sfc_row_baseaddr[fm_rd_req_i], 
 						fm_rd_req_sfc_row_len[fm_rd_req_i], 
 						fm_rd_req_sfc_vld_data_n[fm_rd_req_i]
-					} <= # SIM_DELAY s_fm_rd_req_axis_data[96:0];
+					} <= # SIM_DELAY m_fm_rd_req_reg_axis_data[96:0];
 					
 					fm_rd_req_age_tbit[fm_rd_req_i] <= # SIM_DELAY acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1)+1];
 				end
@@ -820,7 +902,7 @@ module conv_data_hub #(
 					(
 						// 载入新的请求项 -> 置位本标志
 						(
-							s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+							m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 							(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i)
 						) | 
 						// 置换原表面行与发送DMA命令 -> 清零本标志
@@ -842,9 +924,9 @@ module conv_data_hub #(
 						(
 							
 							(fm_rd_req_sts[fm_rd_req_i] == FM_RD_STS_EMPTY) & 
-							s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+							m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 							(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i) & 
-							(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
+							(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
 							(|fm_rd_req_entry_actual_sfc_rid_matched_vec)
 						) | 
 						// 检索表面行完成
@@ -877,9 +959,9 @@ module conv_data_hub #(
 						// 载入新的请求项, 且该请求项不是"重置缓存" -> 初始化本标志
 						(
 							(fm_rd_req_sts[fm_rd_req_i] == FM_RD_STS_EMPTY) & 
-							s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+							m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 							(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i) & 
-							(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
+							(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
 						) | 
 						// 检索表面行完成 -> 置位本标志
 						(
@@ -902,7 +984,7 @@ module conv_data_hub #(
 						// 载入新的请求项 -> 清零本标志
 						(
 							(fm_rd_req_sts[fm_rd_req_i] == FM_RD_STS_EMPTY) & 
-							s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+							m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 							(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i)
 						) | 
 						// 发送DMA命令被许可 -> 置位本标志
@@ -921,9 +1003,9 @@ module conv_data_hub #(
 						// 载入新的请求项, 且该请求项不是"重置缓存" -> 初始化本标志
 						(
 							(fm_rd_req_sts[fm_rd_req_i] == FM_RD_STS_EMPTY) & 
-							s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & 
+							m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & 
 							(acceptable_fm_rd_req_wptr[clogb2(FM_RD_REQ_PRE_ACPT_N-1):0] == fm_rd_req_i) & 
-							(~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
+							(~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
 						) | 
 						// 检索表面行时命中, 直接从缓存获取特征图数据, 不需要置换; 或者特征图缓存尚未被初次填满, 那分配1个无效缓存行即可, 不需要置换 -> 置位本标志
 						(
@@ -953,7 +1035,7 @@ module conv_data_hub #(
 			acceptable_fm_rd_req_wptr <= 0;
 		else if(
 			aclken & 
-			s_fm_rd_req_axis_valid & s_fm_rd_req_axis_ready & (~s_fm_rd_req_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
+			m_fm_rd_req_reg_axis_valid & m_fm_rd_req_reg_axis_ready & (~m_fm_rd_req_reg_axis_data[FM_RD_REQ_TO_RST_BUF_FLAG_SID])
 		)
 			acceptable_fm_rd_req_wptr <= # SIM_DELAY acceptable_fm_rd_req_wptr + 1;
 	end
@@ -1158,12 +1240,12 @@ module conv_data_hub #(
 	wire[4:0] sw_rgn_rplc_op_msg_fifo_dout; // {年龄翻转位(1bit), 执行操作的读请求项索引(4bit)}
 	wire sw_rgn_rplc_op_msg_fifo_empty_n;
 	
-	assign s_kwgtblk_rd_req_axis_ready = 
+	assign m_kwgtblk_rd_req_reg_axis_ready = 
 		aclken & 
 		(~rst_logic_kbuf) & // 当前不在"重置逻辑卷积核缓存"
 		(~kwgtblk_rd_req_buf_full) & // 读请求缓存非满
 		// 对于"重置缓存", 需要等待读请求缓存空再处理
-		((~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) | kwgtblk_rd_req_buf_empty) & 
+		((~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) | kwgtblk_rd_req_buf_empty) & 
 		// 如果缓存未命中, 那么要求没有处于"发送DMA命令"状态的读请求条目或DMA可接受命令
 		(
 			acceptable_kwgtblk_rd_req_hit_in_logic_buf | acceptable_kwgtblk_rd_req_found_cgrp_from_prev | 
@@ -1246,14 +1328,14 @@ module conv_data_hub #(
 	assign acceptable_kwgtblk_rd_req_hit_in_logic_buf = 
 		// 在驻留区命中
 		(
-			s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] < 
+			m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] < 
 				{1'b0, rsv_rgn_vld_grpn}
 		) | 
 		// 在交换区通道组#0命中
 		(
 			sw_rgn_vld[0] & 
 			(
-				s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
+				m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
 					sw_rgn0_grpid
 			)
 		) | 
@@ -1261,7 +1343,7 @@ module conv_data_hub #(
 		(
 			sw_rgn_vld[1] & 
 			(
-				s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
+				m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
 					sw_rgn1_grpid
 			)
 		);
@@ -1287,8 +1369,8 @@ module conv_data_hub #(
 			rst_logic_kbuf <= 1'b0;
 		else if(aclken)
 			rst_logic_kbuf <= # SIM_DELAY 
-				s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-				s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID];
+				m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+				m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID];
 	end
 	// 实际通道组数 - 1
 	always @(posedge aclk)
@@ -1296,10 +1378,10 @@ module conv_data_hub #(
 		if(
 			aclken & 
 			// 载入新的请求项, 且该请求项是"重置缓存"
-			s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-			s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
+			m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+			m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
 		)
-			cgrpn <= # SIM_DELAY s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_CGRPN_SID+9:KWGTBLK_RD_REQ_CGRPN_SID];
+			cgrpn <= # SIM_DELAY m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_CGRPN_SID+9:KWGTBLK_RD_REQ_CGRPN_SID];
 	end
 	
 	// 预热的驻留区通道组数
@@ -1310,8 +1392,8 @@ module conv_data_hub #(
 			(
 				// 载入新的请求项, 且该请求项是"重置缓存"
 				(
-					s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-					s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
+					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+					m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
 				) | 
 				// DMA命令被接受, 预热/准备存入新的通道组
 				(s1_dma_cmd_axis_valid & s1_dma_cmd_axis_ready & en_rsv_rgn_warm_up)
@@ -1319,8 +1401,8 @@ module conv_data_hub #(
 		)
 			warm_rsv_rgn_grpn <= # SIM_DELAY 
 				{9{~(
-					s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-					s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
+					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+					m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
 				)}} & (warm_rsv_rgn_grpn + 1'b1);
 	end
 	
@@ -1335,7 +1417,7 @@ module conv_data_hub #(
 			assign acceptable_kwgtblk_rd_req_cgrpid_match_prev[kwgtblk_rd_req_i] = 
 				kwgtblk_rd_req_entry_vld[kwgtblk_rd_req_i] & // 请求项有效
 				(
-					s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
+					m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID+9:KWGTBLK_RD_REQ_ACTUAL_CGRPID_SID] == 
 						kwgtblk_rd_req_actual_cgrpid[kwgtblk_rd_req_i]
 				); // 通道组号匹配
 			
@@ -1347,9 +1429,9 @@ module conv_data_hub #(
 				if(
 					aclken & 
 					// 载入新的请求项, 且该请求项不是"重置缓存"
-					s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
+					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
 					(acceptable_kwgtblk_rd_req_wptr[clogb2(KWGTBLK_RD_REQ_PRE_ACPT_N-1):0] == kwgtblk_rd_req_i) & 
-					(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID])
+					(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID])
 				)
 				begin
 					{
@@ -1361,7 +1443,7 @@ module conv_data_hub #(
 						kwgtblk_rd_req_trans_btt[kwgtblk_rd_req_i], // 卷积核通道组有效字节数(24bit)
 						kwgtblk_rd_req_wgtblk_vld_sfc_n[kwgtblk_rd_req_i], // 每个权重块的表面个数 - 1(7bit)
 						kwgtblk_rd_req_sfc_vld_data_n[kwgtblk_rd_req_i] // 每个表面的有效数据个数 - 1(5bit)
-					} <= # SIM_DELAY s_kwgtblk_rd_req_axis_data[96:0];
+					} <= # SIM_DELAY m_kwgtblk_rd_req_reg_axis_data[96:0];
 					
 					kwgtblk_rd_req_tbit[kwgtblk_rd_req_i] <= # SIM_DELAY 
 						acceptable_kwgtblk_rd_req_wptr[clogb2(KWGTBLK_RD_REQ_PRE_ACPT_N-1)+1];
@@ -1378,10 +1460,10 @@ module conv_data_hub #(
 					case(kwgtblk_rd_req_sts[kwgtblk_rd_req_i])
 						KWGTBLK_RD_STS_EMPTY:
 							if(
-								s_kwgtblk_rd_req_axis_valid & 
+								m_kwgtblk_rd_req_reg_axis_valid & 
 								(~rst_logic_kbuf) & 
 								(acceptable_kwgtblk_rd_req_wptr[clogb2(KWGTBLK_RD_REQ_PRE_ACPT_N-1):0] == kwgtblk_rd_req_i) & 
-								(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 该请求项不是"重置缓存"
+								(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & // 该请求项不是"重置缓存"
 								(
 									acceptable_kwgtblk_rd_req_hit_in_logic_buf | 
 									acceptable_kwgtblk_rd_req_found_cgrp_from_prev | 
@@ -1446,8 +1528,8 @@ module conv_data_hub #(
 					(
 						// 重置缓存
 						(
-							s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-							s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
+							m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+							m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
 						) | 
 						// 置换通道组
 						sw_rgn_rplc[kernal_sw_rgn_occupied_i]
@@ -1455,8 +1537,8 @@ module conv_data_hub #(
 				)
 					kwgtblk_rd_req_sw_region_pre_loaded_flag[kernal_sw_rgn_occupied_i] <= # SIM_DELAY 
 						(~(
-							s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-							s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
+							m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+							m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
 						)) & sw_rgn_rplc[kernal_sw_rgn_occupied_i];
 			end
 			
@@ -1501,8 +1583,8 @@ module conv_data_hub #(
 		else if(
 			aclken & 
 			// 载入新的请求项, 且该请求项不是"重置缓存"
-			s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-			(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID])
+			m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+			(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID])
 		)
 			acceptable_kwgtblk_rd_req_wptr <= # SIM_DELAY acceptable_kwgtblk_rd_req_wptr + 1;
 	end
@@ -1541,16 +1623,16 @@ module conv_data_hub #(
 			(
 				// 载入新的请求项, 且该请求项不是"重置缓存", 且缓存未命中
 				(
-					s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-					(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
+					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+					(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
 					(~(acceptable_kwgtblk_rd_req_hit_in_logic_buf | acceptable_kwgtblk_rd_req_found_cgrp_from_prev))
 				) | 
 				s1_dma_cmd_axis_ready
 			)
 		)
 			has_sending_dma_cmd_kwgtblk_rd_req_entry <= # SIM_DELAY 
-				s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-				(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
+				m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+				(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
 				(~(acceptable_kwgtblk_rd_req_hit_in_logic_buf | acceptable_kwgtblk_rd_req_found_cgrp_from_prev));
 	end
 	
@@ -1560,8 +1642,8 @@ module conv_data_hub #(
 		if(
 			aclken & 
 			// 载入新的请求项, 且该请求项不是"重置缓存", 且缓存未命中
-			s_kwgtblk_rd_req_axis_valid & s_kwgtblk_rd_req_axis_ready & 
-			(~s_kwgtblk_rd_req_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
+			m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
+			(~m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]) & 
 			(~(acceptable_kwgtblk_rd_req_hit_in_logic_buf | acceptable_kwgtblk_rd_req_found_cgrp_from_prev))
 		)
 			sending_dma_cmd_kwgtblk_rd_req_eid <= # SIM_DELAY acceptable_kwgtblk_rd_req_wptr[clogb2(KWGTBLK_RD_REQ_PRE_ACPT_N-1):0];

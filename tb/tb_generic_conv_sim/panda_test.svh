@@ -152,6 +152,8 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected GenericConvSimTestEnv top_sim_env;
 	protected MidResAcmltCalObsvEnv mid_res_acmlt_cal_obsv_env_arr[];
 	
+	protected DMAS2MMDataLenScoreboard dma_s2mm_data_len_scb;
+	
 	protected FmapCfg fmap_cfg;
 	protected KernalCfg kernal_cfg;
 	protected ConvCalCfg conv_cal_cfg;
@@ -250,6 +252,8 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 				this
 			);
 		
+		this.dma_s2mm_data_len_scb = DMAS2MMDataLenScoreboard::type_id::create("dma_s2mm_data_len_scb", this);
+		
 		this.exp_fmap_cal_proc_listener = ConcreteExpFmapCalProcListener::type_id::create();
 		this.top_sim_env.register_cal_proc_listener(this.exp_fmap_cal_proc_listener);
 		this.exp_fmap_cal_proc_listener.fid = $fopen("exp_fmap_cal_obsv_log.txt");
@@ -257,6 +261,9 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	
 	function void connect_phase(uvm_phase phase);
 		super.connect_phase(phase);
+		
+		this.fnl_res_trans_req_gen_env.req_export.connect(this.dma_s2mm_data_len_scb.req_port);
+		this.top_sim_env.final_res_export.connect(this.dma_s2mm_data_len_scb.final_res_port);
 		
 		this.fmap_out_pt_cal_proc_listener = ConcreteFmapOutPtCalProcListener::type_id::create();
 		this.mid_res_acmlt_cal_obsv_env_arr[3].register_cal_proc_listener(this.fmap_out_pt_cal_proc_listener);

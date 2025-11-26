@@ -358,6 +358,8 @@ module generic_conv_sim #(
 		.KWGTBLK_RD_REQ_PRE_ACPT_N(4),
 		.MAX_FMBUF_ROWN(MAX_FMBUF_ROWN),
 		.LG_FMBUF_BUFFER_RID_WIDTH(LG_FMBUF_BUFFER_RID_WIDTH),
+		.EN_REG_SLICE_IN_FM_RD_REQ("true"),
+		.EN_REG_SLICE_IN_KWGTBLK_RD_REQ("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_data_hub_u(
 		.aclk(aclk),
