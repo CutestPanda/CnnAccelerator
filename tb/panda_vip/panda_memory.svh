@@ -21,6 +21,18 @@ class panda_memory #(
 		this.byte_width = data_width / 8;
 	endfunction
 	
+	virtual function bit output_to_bin(int fid, int baseaddr, int len);
+		for(int i = 0;i < len;i++)
+		begin
+			if(this.memory.exists(baseaddr + i))
+				$fwrite(fid, "%c", this.memory[baseaddr + i]);
+			else
+				return 1'b0;
+		end
+		
+		return 1'b1;
+	endfunction
+	
 	virtual function void put(
 		memory_data data, memory_strobe strobe, int byte_size,
 		memory_address base, int word_index

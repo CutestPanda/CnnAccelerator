@@ -461,6 +461,7 @@ class panda_blk_ctrl_dummy_trans extends panda_blk_ctrl_abstract_trans;
 	
 	`uvm_object_utils_begin(panda_blk_ctrl_dummy_trans)
 		`uvm_field_int(id, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE)
+		`uvm_field_int(process_start_delay, UVM_DEFAULT | UVM_DEC | UVM_NOCOMPARE)
 		`uvm_field_int(process_begin_time, UVM_DEFAULT | UVM_TIME | UVM_NOCOMPARE)
 		`uvm_field_int(process_end_time, UVM_DEFAULT | UVM_TIME | UVM_NOCOMPARE)
 	`uvm_object_utils_end

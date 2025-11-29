@@ -478,4 +478,18 @@ class KernalSetBuilderCfg extends tue_configuration;
 	
 endclass
 
+class ConvSts extends tue_status;
+	
+	panda_memory #(.ADDR_WIDTH(32), .DATA_WIDTH(8)) ofmap_mem;
+	
+	function new(string name = "ConvSts");
+		super.new(name);
+		
+		this.ofmap_mem = new("ofmap_mem");
+	endfunction
+	
+	`uvm_object_utils(ConvSts)
+	
+endclass
+
 `endif

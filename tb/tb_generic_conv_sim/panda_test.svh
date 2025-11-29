@@ -150,7 +150,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected int unsigned STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	protected int unsigned FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	
-	protected bit en_output_mem_bin = 1'b0; // 是否输出特征图和卷积核数据BIN文件
+	protected bit en_output_mem_bin = 1'b0; // 是否生成特征图与卷积核数据BIN文件
 	
 	protected FmapReqGenTestEnv fmap_req_gen_env;
 	protected KernalReqGenTestEnv kernal_req_gen_env;
@@ -165,6 +165,8 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected KernalCfg kernal_cfg;
 	protected ConvCalCfg conv_cal_cfg;
 	protected BufferCfg buf_cfg;
+	
+	protected ConvSts conv_sts;
 	
 	local ConcreteFmapOutPtCalProcListener fmap_out_pt_cal_proc_listener;
 	local ConcreteExpFmapCalProcListener exp_fmap_cal_proc_listener;
@@ -283,6 +285,13 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		
 		this.dma_s2mm_data_len_scb = DMAS2MMDataLenScoreboard::type_id::create("dma_s2mm_data_len_scb", this);
 		
+		if(this.en_output_mem_bin)
+		begin
+			this.conv_sts = ConvSts::type_id::create();
+			this.dma_s2mm_data_len_scb.set_status(this.conv_sts);
+			this.dma_s2mm_data_len_scb.to_upd_ofmap_mem = 1'b1;
+		end
+		
 		this.exp_fmap_cal_proc_listener = ConcreteExpFmapCalProcListener::type_id::create();
 		this.top_sim_env.register_cal_proc_listener(this.exp_fmap_cal_proc_listener);
 		this.exp_fmap_cal_proc_listener.fid = $fopen("exp_fmap_cal_obsv_log.txt");
@@ -305,6 +314,18 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		super.report_phase(phase);
 		
 		$fclose(this.fmap_out_pt_cal_proc_listener.fid);
+		
+		if(this.en_output_mem_bin)
+		begin
+			int mem_bin_fid;
+			
+			mem_bin_fid = $fopen("out_fmap.bin", "wb");
+			
+			if(!this.conv_sts.ofmap_mem.output_to_bin(mem_bin_fid, this.fmap_cfg.ofmap_baseaddr, this.dma_s2mm_data_len_scb.total_bytes_n))
+				`uvm_error(this.get_name(), "cannot output out_fmap.bin")
+			
+			$fclose(mem_bin_fid);
+		end
 	endfunction
 	
 	virtual protected function void build_test_cfg();
@@ -1144,6 +1165,70 @@ class generic_conv_sim_test_12 extends generic_conv_sim_base_test;
 	
 	`tue_component_default_constructor(generic_conv_sim_test_12)
 	`uvm_component_utils(generic_conv_sim_test_12)
+	
+endclass
+
+class generic_conv_sim_test_13 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
+			fmap_w == 25;
+			fmap_h == 25;
+			fmap_c == 13;
+			ofmap_data_type == DATA_4_BYTE;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 9;
+			kernal_chn_n == 13;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == ATOMIC_C;
+			atomic_k == ATOMIC_K;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == STREAM_DATA_WIDTH;
+			fnl_res_data_width == FNL_RES_DATA_WIDTH;
+			fmbufbankn == 2;
+			fmbufcoln == COLN_32;
+			fmbufrown == 32;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_8;
+			kbufgrpn == 99;
+			mid_res_item_n_foreach_row == 25;
+			mid_res_buf_row_n_bufferable == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_13)
+	`uvm_component_utils(generic_conv_sim_test_13)
 	
 endclass
 

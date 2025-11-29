@@ -1678,11 +1678,13 @@ endclass
 
 class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
 	.CONFIGURATION(tue_configuration_dummy),
-	.STATUS(tue_status_dummy)
+	.STATUS(ConvSts)
 );
 	
 	uvm_analysis_imp_final_res #(panda_axis_trans, DMAS2MMDataLenScoreboard) final_res_port;
 	uvm_analysis_imp_req #(panda_axis_trans, DMAS2MMDataLenScoreboard) req_port;
+	
+	bit to_upd_ofmap_mem = 1'b0;
 	
 	local mailbox #(panda_axis_trans) final_res_mb;
 	local mailbox #(DMAS2MMReqTransAdapter) req_mb;
@@ -1690,6 +1692,7 @@ class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
 	local int req_tr_id;
 	local int match_tr_n;
 	local int mismatch_tr_n;
+	int total_bytes_n;
 	
 	function void build_phase(uvm_phase phase);
 		super.build_phase(phase);
@@ -1703,6 +1706,7 @@ class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
 		this.req_tr_id = 0;
 		this.match_tr_n = 0;
 		this.mismatch_tr_n = 0;
+		this.total_bytes_n = 0;
 	endfunction
 	
 	virtual function void write_final_res(panda_axis_trans tr);
@@ -1735,6 +1739,25 @@ class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
 			if(cmd_req.btt == final_res_tr.get_bytes_n())
 			begin
 				`uvm_info(this.get_name(), $sformatf("btt(%0d) match", cmd_req.btt), UVM_LOW)
+				
+				this.total_bytes_n += cmd_req.btt;
+				
+				if(this.to_upd_ofmap_mem)
+				begin
+					for(int i = 0;i < final_res_tr.get_len();i++)
+					begin
+						for(int j = 0;j < (final_res_tr.get_configuration().data_width / 8);j++)
+						begin
+							if(final_res_tr.keep[i][j])
+							begin
+								this.get_status().ofmap_mem.put(
+									final_res_tr.data[i][8*j+:8], 1'b1, 1,
+									cmd_req.baseaddr, i * (final_res_tr.get_configuration().data_width / 8) + j
+								);
+							end
+						end
+					end
+				end
 				
 				this.match_tr_n++;
 			end

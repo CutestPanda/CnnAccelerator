@@ -54,6 +54,7 @@ module axi_generic_conv #(
 	parameter integer EXT_PADDING_SUPPORTED = 1, // 是否支持外填充
 	parameter integer INNER_PADDING_SUPPORTED = 0, // 是否支持内填充
 	parameter integer KERNAL_DILATION_SUPPORTED = 0, // 是否支持卷积核膨胀
+	parameter integer EN_PERF_MON = 1, // 是否支持性能监测
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer ATOMIC_K = 4, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -229,6 +230,7 @@ module axi_generic_conv #(
 		.EXT_PADDING_SUPPORTED(EXT_PADDING_SUPPORTED ? 1'b1:1'b0),
 		.INNER_PADDING_SUPPORTED(INNER_PADDING_SUPPORTED ? 1'b1:1'b0),
 		.KERNAL_DILATION_SUPPORTED(KERNAL_DILATION_SUPPORTED ? 1'b1:1'b0),
+		.EN_PERF_MON(EN_PERF_MON ? 1'b1:1'b0),
 		.ACCELERATOR_ID(ACCELERATOR_ID),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
