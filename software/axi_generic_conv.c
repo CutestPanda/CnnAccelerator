@@ -4,6 +4,7 @@
 @date   2025/11/29
 @author 陈家耀
 @eidt   2025.11.29 1.00 创建了第1个正式版本
+        2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -381,8 +382,8 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	case CONV_COLN_4096: fmbufrown >>= 12;break;
 	}
 
-	if(fmbufrown > 1024){
-		fmbufrown = 1024;
+	if(fmbufrown > handler->property.max_fmbuf_row_n){
+		fmbufrown = handler->property.max_fmbuf_row_n;
 	}
 
 	uint32_t kbufgrpn =
