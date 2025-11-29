@@ -605,8 +605,8 @@ class GenericConvSimTestEnv extends panda_env #(
 			start_delay.mid_delay[1] == 40;
 			start_delay.max_delay == 60;
 			start_delay.weight_zero_delay == 1;
-			start_delay.weight_short_delay == 3;
-			start_delay.weight_long_delay == 2;
+			start_delay.weight_short_delay == 0;
+			start_delay.weight_long_delay == 0;
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize fmap_blk_ctrl_mst_cfg!")
 		this.fmap_blk_ctrl_mst_cfg.tr_factory = 
@@ -619,11 +619,11 @@ class GenericConvSimTestEnv extends panda_env #(
 			
 			start_delay.min_delay == 0;
 			start_delay.mid_delay[0] == 25;
-			start_delay.mid_delay[1] == 40;
-			start_delay.max_delay == 60;
-			start_delay.weight_zero_delay == 1;
-			start_delay.weight_short_delay == 3;
-			start_delay.weight_long_delay == 2;
+			start_delay.mid_delay[1] == 256;
+			start_delay.max_delay == 300;
+			start_delay.weight_zero_delay == 0;
+			start_delay.weight_short_delay == 0;
+			start_delay.weight_long_delay == 1;
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize kernal_blk_ctrl_mst_cfg!")
 		this.kernal_blk_ctrl_mst_cfg.tr_factory = 
@@ -636,11 +636,11 @@ class GenericConvSimTestEnv extends panda_env #(
 			
 			start_delay.min_delay == 0;
 			start_delay.mid_delay[0] == 25;
-			start_delay.mid_delay[1] == 40;
-			start_delay.max_delay == 60;
-			start_delay.weight_zero_delay == 1;
-			start_delay.weight_short_delay == 3;
-			start_delay.weight_long_delay == 2;
+			start_delay.mid_delay[1] == 512;
+			start_delay.max_delay == 550;
+			start_delay.weight_zero_delay == 0;
+			start_delay.weight_short_delay == 0;
+			start_delay.weight_long_delay == 1;
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize fnl_res_trans_blk_ctrl_mst_cfg!")
 		this.fnl_res_trans_blk_ctrl_mst_cfg.tr_factory = 
@@ -830,7 +830,6 @@ class GenericConvSimTestEnv extends panda_env #(
 		this.cfg_vif.master_cb.fmbufbankn <= this.buf_cfg.fmbufbankn;
 		this.cfg_vif.master_cb.fmbufcoln <= bit4'(this.buf_cfg.fmbufcoln);
 		this.cfg_vif.master_cb.fmbufrown <= this.buf_cfg.fmbufrown - 1;
-		this.cfg_vif.master_cb.kbufgrpsz <= bit3'(this.kernal_cfg.kernal_shape);
 		this.cfg_vif.master_cb.sfc_n_each_wgtblk <= bit3'(this.buf_cfg.sfc_n_each_wgtblk);
 		this.cfg_vif.master_cb.kbufgrpn <= this.buf_cfg.kbufgrpn - 1;
 		this.cfg_vif.master_cb.mid_res_item_n_foreach_row <= this.buf_cfg.mid_res_item_n_foreach_row - 1;

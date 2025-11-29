@@ -41,7 +41,7 @@ ATOMIC_K个卷积乘加单元
 
  运算数据格式  |     计算时延
 --------------------------------
-     INT16     | 1 + log2(ATOMIC_C)
+     INT16     | 2 + log2(ATOMIC_C)
      FP16      | 4 + log2(ATOMIC_C)
      INT8      |      暂不支持
 
@@ -54,7 +54,7 @@ FP16模式时, 尾数偏移为-50
 无
 
 作者: 陈家耀
-日期: 2025/11/04
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -133,7 +133,7 @@ module conv_mac_array #(
 	assign array_i_kernal_buf_full_n = kernal_buf_full_n;
 	
 	assign kernal_buf_empty_n = (~rst_mac_array) & (kernal_buf_stored[0] | kernal_buf_stored[1]);
-	assign kernal_buf_full_n = rst_mac_array | (~(kernal_buf_stored[0] & kernal_buf_stored[1]));
+	assign kernal_buf_full_n = (~rst_mac_array) & (~(kernal_buf_stored[0] & kernal_buf_stored[1]));
 	
 	assign kernal_buf_loaded_sfc_vec_new = 
 		kernal_buf_loaded_sfc_vec | 
@@ -269,14 +269,22 @@ module conv_mac_array #(
 					kernal_region_vld[kernal_region_vld_i/MAX_CAL_ROUND][kernal_region_vld_i%MAX_CAL_ROUND] <= 1'b0;
 				else if(
 					aclken & 
-					array_i_kernal_sfc_vld & array_i_kernal_sfc_last & kernal_buf_full_n & 
-					(kernal_buf_wsel == (kernal_region_vld_i/MAX_CAL_ROUND))
+					(
+						rst_mac_array | 
+						(
+							array_i_kernal_sfc_vld & array_i_kernal_sfc_last & kernal_buf_full_n & 
+							(kernal_buf_wsel == (kernal_region_vld_i/MAX_CAL_ROUND))
+						)
+					)
 				)
 					kernal_region_vld[kernal_region_vld_i/MAX_CAL_ROUND][kernal_region_vld_i%MAX_CAL_ROUND] <= # SIM_DELAY 
-						|kernal_buf_loaded_sfc_vec_new[
-							((kernal_region_vld_i%MAX_CAL_ROUND)+1)*ATOMIC_K-1:
-							(kernal_region_vld_i%MAX_CAL_ROUND)*ATOMIC_K
-						];
+						(~rst_mac_array) & 
+						(
+							|kernal_buf_loaded_sfc_vec_new[
+								((kernal_region_vld_i%MAX_CAL_ROUND)+1)*ATOMIC_K-1:
+								(kernal_region_vld_i%MAX_CAL_ROUND)*ATOMIC_K
+							]
+						);
 			end
 		end
 	endgenerate

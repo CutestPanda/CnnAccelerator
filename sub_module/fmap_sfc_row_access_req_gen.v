@@ -49,7 +49,7 @@ AXIS MASTER
 REQ/GRANT
 
 作者: 陈家耀
-日期: 2025/11/05
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -778,9 +778,12 @@ module fmap_sfc_row_access_req_gen #(
 	wire[11:0] phy_y_encoding_at_actual_rid_rvs; // 当前表面行实际表面行号中物理y坐标的倒转编码
 	reg[11:0] phy_y_encoding_ofs_at_actual_rid; // 实际表面行号中物理y坐标的编码偏移
 	wire phy_y_encoding_at_actual_rid_exceeded; // 当前表面行实际表面行号中物理y坐标的编码超过范围(标志)
+	reg to_send_fm_cake_info; // 正在发送特征图切块信息(标志)
+	reg blk_idle_r; // 块级空闲(标志)
+	reg blk_done_r; // 块级完成(指示)
 	
-	assign blk_idle = req_gen_sts == REQ_GEN_STS_IDLE;
-	assign blk_done = req_gen_sts == REQ_GEN_STS_DONE;
+	assign blk_idle = blk_idle_r;
+	assign blk_done = blk_done_r;
 	
 	assign s_fm_rd_req_reg_axis_data[4:0] = (sfc_depth_of_cur_fmap_slice - 1) & 6'b011111; // 每个表面的有效数据个数 - 1
 	assign s_fm_rd_req_reg_axis_data[28:5] = row_data_size_of_cur_fmap_slice; // 表面行有效字节数
@@ -799,9 +802,7 @@ module fmap_sfc_row_access_req_gen #(
 	assign m_fm_cake_info_axis_data[7:4] = 4'b0000;
 	assign m_fm_cake_info_axis_data[3:0] = vld_phy_row_n;
 	
-	assign m_fm_cake_info_axis_valid = 
-		aclken & 
-		(req_gen_sts == REQ_GEN_STS_SEND_INFO);
+	assign m_fm_cake_info_axis_valid = aclken & to_send_fm_cake_info;
 	
 	// 计算: 表面行偏移地址 = 物理y坐标(u16) * 当前特征图切片的行数据量(u24)
 	assign mul1_op_a = cur_sfc_row_phy_y;
@@ -1041,6 +1042,58 @@ module fmap_sfc_row_access_req_gen #(
 				(req_gen_sts == REQ_GEN_STS_FMBUF_RST) ? 
 					12'd0:
 					min_vld_row_phy_y;
+	end
+	
+	// 正在发送特征图切块信息(标志)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			to_send_fm_cake_info <= 1'b0;
+		else if(
+			aclken & 
+			(
+				to_send_fm_cake_info ? 
+					m_fm_cake_info_axis_ready:
+					(
+						(
+							(req_gen_sts == REQ_GEN_STS_FMBUF_RST) & 
+							s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready & rst_buf_because_phy_y_reofs
+						) | 
+						(
+							(req_gen_sts == REQ_GEN_STS_CRDNT_CVT) & 
+							on_done_coordinate_cvt_in_cake & (~phy_y_encoding_at_actual_rid_exceeded)
+						)
+					)
+			)
+		)
+			to_send_fm_cake_info <= # SIM_DELAY ~to_send_fm_cake_info;
+	end
+	
+	// 块级空闲(标志)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			blk_idle_r <= 1'b1;
+		else if(
+			aclken & 
+			(blk_idle_r ? blk_start:blk_done)
+		)
+			blk_idle_r <= # SIM_DELAY ~blk_idle_r;
+	end
+	
+	// 块级完成(指示)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			blk_done_r <= 1'b0;
+		else if(
+			aclken & 
+			(
+				blk_done_r | 
+				((req_gen_sts == REQ_GEN_STS_FMBUF_RST) & s_fm_rd_req_reg_axis_valid & s_fm_rd_req_reg_axis_ready & to_fns_req_gen)
+			)
+		)
+			blk_done_r <= # SIM_DELAY ~blk_done_r;
 	end
 	
 	/** 后级计算单元控制 **/

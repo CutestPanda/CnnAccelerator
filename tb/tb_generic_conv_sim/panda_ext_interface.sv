@@ -51,7 +51,6 @@ interface generic_conv_sim_cfg_if(
 	logic[7:0] fmbufbankn; // 分配给特征图缓存的Bank数
 	logic[3:0] fmbufcoln; // 每个表面行的表面个数类型
 	logic[9:0] fmbufrown; // 可缓存的表面行数 - 1
-	logic[2:0] kbufgrpsz; // 每个通道组的权重块个数的类型
 	logic[2:0] sfc_n_each_wgtblk; // 每个权重块的表面个数的类型
 	logic[7:0] kbufgrpn; // 可缓存的通道组数 - 1
 	logic[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
@@ -96,7 +95,6 @@ interface generic_conv_sim_cfg_if(
 		output fmbufbankn;
 		output fmbufcoln;
 		output fmbufrown;
-		output kbufgrpsz;
 		output sfc_n_each_wgtblk;
 		output kbufgrpn;
 		output mid_res_item_n_foreach_row;

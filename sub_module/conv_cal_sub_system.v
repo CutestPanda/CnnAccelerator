@@ -46,7 +46,7 @@ SOFTWARE.
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/12
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -102,7 +102,7 @@ module conv_cal_sub_system #(
 	// 特征图切块信息(AXIS从机)
 	input wire[7:0] s_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	input wire s_fm_cake_info_axis_valid,
-	output wire s_fm_cake_info_axis_ready,
+	output wire s_fm_cake_info_axis_ready, // combinational logic out
 	
 	// 物理特征图表面行数据(AXIS从机)
 	input wire[ATOMIC_C*2*8-1:0] s_fmap_row_axis_data,
@@ -114,7 +114,7 @@ module conv_cal_sub_system #(
 	input wire[ATOMIC_C*2*8-1:0] s_kwgtblk_axis_data,
 	input wire s_kwgtblk_axis_last, // 标志卷积核权重块的最后1个表面
 	input wire s_kwgtblk_axis_valid,
-	output wire s_kwgtblk_axis_ready,
+	output wire s_kwgtblk_axis_ready, // combinational logic out
 	
 	// 最终结果数据流(AXIS主机)
 	output wire[STREAM_DATA_WIDTH-1:0] m_axis_fnl_res_data,
@@ -126,18 +126,21 @@ module conv_cal_sub_system #(
 	
 	// 外部有符号乘法器
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_a, // 操作数A
+	                                                // combinational logic out
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_b, // 操作数B
+	                                                // combinational logic out
 	output wire[ATOMIC_K-1:0] mul_ce, // 计算使能
+	                                  // combinational logic out
 	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_res, // 计算结果
 	
 	// 中间结果缓存MEM主接口
 	output wire mem_clk_a,
-	output wire[RBUF_BANK_N-1:0] mem_wen_a,
+	output wire[RBUF_BANK_N-1:0] mem_wen_a, // combinational logic out
 	output wire[RBUF_BANK_N*16-1:0] mem_addr_a,
 	output wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_din_a,
 	output wire mem_clk_b,
-	output wire[RBUF_BANK_N-1:0] mem_ren_b,
-	output wire[RBUF_BANK_N*16-1:0] mem_addr_b,
+	output wire[RBUF_BANK_N-1:0] mem_ren_b, // combinational logic out
+	output wire[RBUF_BANK_N*16-1:0] mem_addr_b, // combinational logic out
 	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b
 );
 	

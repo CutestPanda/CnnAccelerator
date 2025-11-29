@@ -194,6 +194,28 @@ class panda_axis_trans extends tue_sequence_item #(
 		return this.len;
 	endfunction
 	
+	function int get_bytes_n();
+		int bytes_n;
+		
+		bytes_n = 0;
+		
+		if(this.configuration.has_keep)
+		begin
+			for(int i = 0;i < this.get_len();i++)
+			begin
+				for(int j = 0;j < (this.configuration.data_width / 8);j++)
+				begin
+					if(this.keep[i][j])
+						bytes_n++;
+				end
+			end
+		end
+		else
+			bytes_n = this.get_len() * (this.configuration.data_width / 8);
+		
+		return bytes_n;
+	endfunction
+	
 	function void init_req(panda_axis_data data, panda_axis_mask keep, panda_axis_mask strb, panda_axis_user user);
 		this.len = 1;
 		

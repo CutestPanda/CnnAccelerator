@@ -23,6 +23,7 @@ import panda_pkg::*;
 module tb_generic_conv_sim();
 	
 	/** 配置参数 **/
+	/*
 	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
@@ -33,6 +34,28 @@ module tb_generic_conv_sim();
 	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
+	
+	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
+	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 1024; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 8; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
+	*/
+	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
+	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 1024; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 8; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -137,7 +160,6 @@ module tb_generic_conv_sim();
 	wire[7:0] fmbufbankn; // 分配给特征图缓存的Bank数
 	wire[3:0] fmbufcoln; // 每个表面行的表面个数类型
 	wire[9:0] fmbufrown; // 可缓存的表面行数 - 1
-	wire[2:0] kbufgrpsz; // 每个通道组的权重块个数的类型
 	wire[2:0] sfc_n_each_wgtblk; // 每个权重块的表面个数的类型
 	wire[7:0] kbufgrpn; // 可缓存的通道组数 - 1
 	wire[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
@@ -230,7 +252,6 @@ module tb_generic_conv_sim();
 	assign fmbufbankn = cfg_if.fmbufbankn;
 	assign fmbufcoln = cfg_if.fmbufcoln;
 	assign fmbufrown = cfg_if.fmbufrown;
-	assign kbufgrpsz = cfg_if.kbufgrpsz;
 	assign sfc_n_each_wgtblk = cfg_if.sfc_n_each_wgtblk;
 	assign kbufgrpn = cfg_if.kbufgrpn;
 	assign mid_res_item_n_foreach_row = cfg_if.mid_res_item_n_foreach_row;
@@ -462,7 +483,6 @@ module tb_generic_conv_sim();
 		.fmbufbankn(fmbufbankn),
 		.fmbufcoln(fmbufcoln),
 		.fmbufrown(fmbufrown),
-		.kbufgrpsz(kbufgrpsz),
 		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
 		.kbufgrpn(kbufgrpn),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),

@@ -116,11 +116,19 @@ module conv_final_data_collector #(
 		
 		.fifo_wen(user_sgn_fifo_wen),
 		.fifo_din(user_sgn_fifo_din),
+		.fifo_full(),
 		.fifo_full_n(user_sgn_fifo_full_n),
+		.fifo_almost_full(),
+		.fifo_almost_full_n(),
 		
 		.fifo_ren(user_sgn_fifo_ren),
 		.fifo_dout(user_sgn_fifo_dout),
-		.fifo_empty_n(user_sgn_fifo_empty_n)
+		.fifo_empty(),
+		.fifo_empty_n(user_sgn_fifo_empty_n),
+		.fifo_almost_empty(),
+		.fifo_almost_empty_n(),
+		
+		.data_cnt()
 	);
 	
 	/** 收集器输入 **/

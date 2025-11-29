@@ -53,7 +53,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/11/09
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -162,16 +162,24 @@ module conv_middle_res_acmlt_buf #(
 		
 		.fifo_wen(ofm_row_extra_msg_fifo_wen),
 		.fifo_din(ofm_row_extra_msg_fifo_din),
+		.fifo_full(),
 		.fifo_full_n(ofm_row_extra_msg_fifo_full_n),
+		.fifo_almost_full(),
+		.fifo_almost_full_n(),
 		
 		.fifo_ren(ofm_row_extra_msg_fifo_ren),
 		.fifo_dout(ofm_row_extra_msg_fifo_dout),
-		.fifo_empty_n(ofm_row_extra_msg_fifo_empty_n)
+		.fifo_empty(),
+		.fifo_empty_n(ofm_row_extra_msg_fifo_empty_n),
+		.fifo_almost_empty(),
+		.fifo_almost_empty_n(),
+		
+		.data_cnt()
 	);
 	
 	/** 中间结果累加读数据流水线 **/
 	// 第0级流水线
-	wire[clogb2(RBUF_BANK_N-1):0] mid_res_sel_s0; // 缓存MEM读数据选择
+	reg[clogb2(RBUF_BANK_N-1):0] mid_res_sel_s0; // 缓存MEM读数据选择
 	wire mid_res_first_item_s0; // 是否第1项(标志)
 	wire[ATOMIC_K*48-1:0] mid_res_new_item_s0; // 新的待累加项
 	wire[ATOMIC_K-1:0] mid_res_mask_s0; // 项掩码
@@ -245,7 +253,7 @@ module conv_middle_res_acmlt_buf #(
 	
 	/** 最终结果输出读数据流水线 **/
 	// 第0级流水线
-	wire[clogb2(RBUF_BANK_N-1):0] fnl_res_sel_s0; // 缓存MEM读数据选择
+	reg[clogb2(RBUF_BANK_N-1):0] fnl_res_sel_s0; // 缓存MEM读数据选择
 	wire fnl_res_is_last_sub_row_s0; // 是否最后1个子行(标志)
 	wire[3:0] fnl_res_sub_rid_s0; // 子行号
 	wire fnl_res_last_s0; // 本行最后1个最终结果(标志)
@@ -336,6 +344,7 @@ module conv_middle_res_acmlt_buf #(
 	reg[RBUF_BANK_N-1:0] mid_res_line_buf_filled;
 	// 虚拟行缓存写端口
 	reg[15:0] col_cnt_at_wr; // 列计数器
+	wire[15:0] col_cnt_at_wr_nxt; // 新的列计数器
 	reg[3:0] cal_round_n_cnt_at_wr; // 计算轮次计数器
 	reg cal_round_n_cnt_at_wr_locked; // 计算轮次计数器(锁定标志)
 	wire mid_res_line_buf_wen_at_wr; // 写使能
@@ -349,6 +358,7 @@ module conv_middle_res_acmlt_buf #(
 	reg[3:0] sub_row_cnt; // 子行计数器
 	wire[3:0] sub_row_cnt_nxt; // 下一子行计数器
 	reg[15:0] col_cnt_at_rd; // 列计数器
+	wire[15:0] col_cnt_at_rd_nxt; // 新的列计数器
 	wire mid_res_line_buf_wen_at_rd; // 写使能
 	wire mid_res_line_buf_ren_at_rd; // 读使能
 	wire mid_res_line_buf_empty_n; // 空标志
@@ -403,6 +413,15 @@ module conv_middle_res_acmlt_buf #(
 		aclken & 
 		mid_res_line_buf_empty_n & ofm_row_final_res_extra_msg_vld;
 	
+	assign col_cnt_at_wr_nxt = 
+		(s_axis_mid_res_valid & s_axis_mid_res_ready) ? 
+			(
+				s_axis_mid_res_last ? 
+					16'd0:
+					(col_cnt_at_wr + 1'b1)
+			):
+			col_cnt_at_wr;
+	
 	assign mid_res_line_buf_wen_at_wr = 
 		aclken & s_axis_mid_res_valid & s_axis_mid_res_ready & 
 		s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
@@ -418,6 +437,14 @@ module conv_middle_res_acmlt_buf #(
 		(sub_row_cnt == ofm_row_final_res_cal_round_n) ? 
 			4'd0:
 			(sub_row_cnt + 1'b1);
+	assign col_cnt_at_rd_nxt = 
+		(fnl_res_valid_s0 & fnl_res_ready_s0) ? 
+			(
+				fnl_res_last_s0 ? 
+					(sub_row_cnt_nxt | 16'd0):
+					(col_cnt_at_rd + ofm_row_final_res_cal_round_n + 1'b1)
+			):
+			col_cnt_at_rd;
 	
 	assign mid_res_line_buf_wen_at_rd = 
 		aclken & (
@@ -488,10 +515,7 @@ module conv_middle_res_acmlt_buf #(
 		if(~aresetn)
 			col_cnt_at_wr <= 16'd0;
 		else if(s_axis_mid_res_valid & s_axis_mid_res_ready)
-			col_cnt_at_wr <= # SIM_DELAY 
-				s_axis_mid_res_last ? 
-					16'd0:
-					(col_cnt_at_wr + 1'b1);
+			col_cnt_at_wr <= # SIM_DELAY col_cnt_at_wr_nxt;
 	end
 	
 	// 位于写端口的计算轮次计数器
@@ -581,10 +605,7 @@ module conv_middle_res_acmlt_buf #(
 		if(~aresetn)
 			col_cnt_at_rd <= 16'd0;
 		else if(fnl_res_valid_s0 & fnl_res_ready_s0)
-			col_cnt_at_rd <= # SIM_DELAY 
-				fnl_res_last_s0 ? 
-					(sub_row_cnt_nxt | 16'd0):
-					(col_cnt_at_rd + ofm_row_final_res_cal_round_n + 1'b1);
+			col_cnt_at_rd <= # SIM_DELAY col_cnt_at_rd_nxt;
 	end
 	
 	// 位于读端口的写指针
@@ -714,12 +735,24 @@ module conv_middle_res_acmlt_buf #(
 	/** 缓存MEM接口 **/
 	wire mem_wlast; // 缓存MEM更新当前行最后1个表面(标志)
 	reg[15:0] mem_waddr; // 缓存MEM写地址
+	wire[15:0] mem_waddr_nxt; // 新的缓存MEM写地址
+	// [更新行缓存时写选择]
 	reg[7:0] upd_row_buffer_wsel_bid_base; // 更新行缓存时写选择(BANK编号基准)
+	wire[7:0] upd_row_buffer_wsel_bid_base_nxt; // 下一更新行缓存时写选择(BANK编号基准)
 	wire[3:0] row_buffer_wsel_bid_ofs; // 更新行缓存时写选择(BANK编号偏移)
+	wire[3:0] row_buffer_wsel_bid_ofs_nxt; // 下一更新行缓存时写选择(BANK编号偏移)
+	reg[clogb2(RBUF_BANK_N-1):0] upd_row_buffer_wsel; // 更新行缓存时写选择
+	// [更新行缓存时读选择]
 	reg[7:0] upd_row_buffer_rsel_bid_base; // 更新行缓存时读选择(BANK编号基准)
+	wire[7:0] upd_row_buffer_rsel_bid_base_nxt; // 下一更新行缓存时读选择(BANK编号基准)
 	wire[3:0] upd_row_buffer_rsel_bid_ofs; // 更新行缓存时读选择(BANK编号偏移)
+	wire[3:0] upd_row_buffer_rsel_bid_ofs_nxt; // 下一更新行缓存时读选择(BANK编号偏移)
+	// [提取行缓存时读选择]
 	reg[7:0] extract_row_buffer_rsel_bid_base; // 提取行缓存时读选择(BANK编号基准)
+	wire[7:0] extract_row_buffer_rsel_bid_base_nxt; // 下一提取行缓存时读选择(BANK编号基准)
 	wire[3:0] extract_row_buffer_rsel_bid_ofs; // 提取行缓存时读选择(BANK编号偏移)
+	wire[3:0] extract_row_buffer_rsel_bid_ofs_nxt; // 下一提取行缓存时读选择(BANK编号偏移)
+	// [提取行缓存时写选择]
 	reg[7:0] extract_row_buffer_wsel_bid_base; // 提取行缓存时写选择(BANK编号基准)
 	
 	assign mem_clk_a = aclk;
@@ -732,23 +765,18 @@ module conv_middle_res_acmlt_buf #(
 			assign mem_wen_a[mem_i] = 
 				aclken & 
 				(~mid_res_line_buf_filled[mem_i]) & 
-				((upd_row_buffer_wsel_bid_base + row_buffer_wsel_bid_ofs) == mem_i) & 
-				acmlt_out_valid[0];
-			assign mem_addr_a[(mem_i+1)*16-1:mem_i*16] = mem_waddr | 16'h0000;
+				acmlt_out_valid[0] & (upd_row_buffer_wsel == mem_i);
+			assign mem_addr_a[(mem_i+1)*16-1:mem_i*16] = 
+				mem_waddr | 16'h0000;
 			assign mem_din_a[(mem_i+1)*(32*ATOMIC_K+ATOMIC_K)-1:mem_i*(32*ATOMIC_K+ATOMIC_K)] = 
 				{acmlt_out_data_mask, acmlt_out_data_flattened};
 			
 			assign mem_ren_b[mem_i] = 
-				aclken & (
+				aclken & 
+				(
 					mid_res_line_buf_filled[mem_i] ? 
-						(
-							fnl_res_valid_s0 & fnl_res_ready_s0 & 
-							((extract_row_buffer_rsel_bid_base + extract_row_buffer_rsel_bid_ofs) == mem_i)
-						):
-						(
-							s_axis_mid_res_valid & s_axis_mid_res_ready & 
-							((upd_row_buffer_rsel_bid_base + upd_row_buffer_rsel_bid_ofs) == mem_i)
-						)
+						(fnl_res_valid_s0 & fnl_res_ready_s0 & (fnl_res_sel_s0 == mem_i)):
+						(s_axis_mid_res_valid & s_axis_mid_res_ready & (mid_res_sel_s0 == mem_i))
 				);
 			assign mem_addr_b[(mem_i+1)*16-1:mem_i*16] = 
 				(
@@ -759,14 +787,66 @@ module conv_middle_res_acmlt_buf #(
 		end
 	endgenerate
 	
-	assign mid_res_sel_s0 = upd_row_buffer_rsel_bid_base + upd_row_buffer_rsel_bid_ofs;
-	assign fnl_res_sel_s0 = extract_row_buffer_rsel_bid_base + extract_row_buffer_rsel_bid_ofs;
-	
 	assign mem_wlast = acmlt_out_info_along[0][ATOMIC_K];
+	assign mem_waddr_nxt = 
+		acmlt_out_valid[0] ? 
+			(
+				mem_wlast ? 
+					16'd0:
+					(mem_waddr + 1'b1)
+			):
+			mem_waddr;
 	
+	assign upd_row_buffer_wsel_bid_base_nxt = 
+		mid_res_line_buf_wen_at_rd ? 
+			(
+				(mid_res_line_buf_wptr_at_rd[3:0] == row_n_bufferable) ? 
+					8'd0:
+					(upd_row_buffer_wsel_bid_base + bank_n_foreach_ofmap_row)
+			):
+			upd_row_buffer_wsel_bid_base;
 	assign row_buffer_wsel_bid_ofs = mem_waddr[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	assign row_buffer_wsel_bid_ofs_nxt = mem_waddr_nxt[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	
+	assign upd_row_buffer_rsel_bid_base_nxt = 
+		mid_res_line_buf_wen_at_wr ? 
+			(
+				(mid_res_line_buf_wptr_at_wr[3:0] == row_n_bufferable) ? 
+					8'd0:
+					(upd_row_buffer_rsel_bid_base + bank_n_foreach_ofmap_row)
+			):
+			upd_row_buffer_rsel_bid_base;
 	assign upd_row_buffer_rsel_bid_ofs = col_cnt_at_wr[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	assign upd_row_buffer_rsel_bid_ofs_nxt = col_cnt_at_wr_nxt[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	
+	assign extract_row_buffer_rsel_bid_base_nxt = 
+		mid_res_line_buf_ren_at_rd ? 
+			(
+				(mid_res_line_buf_rptr_at_rd[3:0] == row_n_bufferable) ? 
+					8'd0:
+					(extract_row_buffer_rsel_bid_base + bank_n_foreach_ofmap_row)
+			):
+			extract_row_buffer_rsel_bid_base;
 	assign extract_row_buffer_rsel_bid_ofs = col_cnt_at_rd[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	assign extract_row_buffer_rsel_bid_ofs_nxt = col_cnt_at_rd_nxt[15:clogb2(RBUF_DEPTH)] | 4'd0;
+	
+	// 缓存MEM读数据选择
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mid_res_sel_s0 <= 0;
+		else if(mid_res_line_buf_wen_at_wr | (s_axis_mid_res_valid & s_axis_mid_res_ready))
+			mid_res_sel_s0 <= # SIM_DELAY upd_row_buffer_rsel_bid_base_nxt + upd_row_buffer_rsel_bid_ofs_nxt;
+	end
+	
+	// 缓存MEM读数据选择
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			fnl_res_sel_s0 <= 0;
+		else if(mid_res_line_buf_ren_at_rd | (fnl_res_valid_s0 & fnl_res_ready_s0))
+			fnl_res_sel_s0 <= # SIM_DELAY extract_row_buffer_rsel_bid_base_nxt + extract_row_buffer_rsel_bid_ofs_nxt;
+	end
 	
 	// 虚拟行缓存填充向量
 	genvar mid_res_line_buf_filled_i;
@@ -804,10 +884,7 @@ module conv_middle_res_acmlt_buf #(
 		if(~aresetn)
 			mem_waddr <= 16'd0;
 		else if(acmlt_out_valid[0])
-			mem_waddr <= # SIM_DELAY 
-				mem_wlast ? 
-					16'd0:
-					(mem_waddr + 1'b1);
+			mem_waddr <= # SIM_DELAY mem_waddr_nxt;
 	end
 	
 	// 更新行缓存时写选择(BANK编号基准)
@@ -817,11 +894,17 @@ module conv_middle_res_acmlt_buf #(
 			upd_row_buffer_wsel_bid_base <= 8'd0;
 		else if(mid_res_line_buf_wen_at_rd)
 		begin
-			upd_row_buffer_wsel_bid_base <= # SIM_DELAY 
-				(mid_res_line_buf_wptr_at_rd[3:0] == row_n_bufferable) ? 
-					8'd0:
-					(upd_row_buffer_wsel_bid_base + bank_n_foreach_ofmap_row);
+			upd_row_buffer_wsel_bid_base <= # SIM_DELAY upd_row_buffer_wsel_bid_base_nxt;
 		end
+	end
+	
+	// 更新行缓存时写选择
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			upd_row_buffer_wsel <= 0;
+		else if(mid_res_line_buf_wen_at_rd | acmlt_out_valid[0])
+			upd_row_buffer_wsel <= # SIM_DELAY upd_row_buffer_wsel_bid_base_nxt + row_buffer_wsel_bid_ofs_nxt;
 	end
 	
 	// 更新行缓存时读选择(BANK编号基准)
@@ -830,10 +913,7 @@ module conv_middle_res_acmlt_buf #(
 		if(~aresetn)
 			upd_row_buffer_rsel_bid_base <= 8'd0;
 		else if(mid_res_line_buf_wen_at_wr)
-			upd_row_buffer_rsel_bid_base <= # SIM_DELAY 
-				(mid_res_line_buf_wptr_at_wr[3:0] == row_n_bufferable) ? 
-					8'd0:
-					(upd_row_buffer_rsel_bid_base + bank_n_foreach_ofmap_row);
+			upd_row_buffer_rsel_bid_base <= # SIM_DELAY upd_row_buffer_rsel_bid_base_nxt;
 	end
 	
 	// 提取行缓存时读选择(BANK编号基准)

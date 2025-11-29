@@ -47,7 +47,7 @@ BLK CTRL
 AXIS MASTER
 
 作者: 陈家耀
-日期: 2025/11/26
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -101,7 +101,7 @@ module conv_ctrl_sub_system #(
 	// [特征图表面行访问请求生成单元]
 	input wire fmap_access_blk_start,
 	output wire fmap_access_blk_idle,
-	output wire fmap_access_blk_done,
+	output wire fmap_access_blk_done, // combinational logic out
 	// [最终结果传输请求生成单元]
 	input wire fnl_res_trans_blk_start,
 	output wire fnl_res_trans_blk_idle,
@@ -111,10 +111,7 @@ module conv_ctrl_sub_system #(
 	// [物理特征图表面行适配器控制]
 	output wire rst_adapter, // 重置适配器(标志)
 	output wire on_incr_phy_row_traffic, // 增加1个物理特征图表面行流量(指示)
-	// [卷积乘加阵列]
-	output wire en_mac_array, // 使能乘加阵列
 	// [卷积中间结果表面行信息打包单元控制]
-	output wire en_packer, // 使能打包器
 	output wire[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel, // 核组所选定特征图域的通道组数 - 1
 	
 	// 卷积核权重块读请求(AXIS主机)
@@ -223,10 +220,6 @@ module conv_ctrl_sub_system #(
 			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
 											 4'd11
 	    ) - 1;
-	
-	/** 后级计算单元控制 **/
-	assign en_mac_array = 1'b1;
-	assign en_packer = 1'b1;
 	
 	/** 卷积核权重访问请求生成单元 **/
 	// 共享无符号乘法器

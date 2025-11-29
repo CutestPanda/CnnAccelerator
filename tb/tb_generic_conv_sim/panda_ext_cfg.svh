@@ -161,6 +161,7 @@ class ConvCalCfg extends tue_configuration;
 	
 	`uvm_object_utils_begin(ConvCalCfg)
 		`uvm_field_int(atomic_c, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_int(atomic_k, UVM_DEFAULT | UVM_DEC)
 		
 		`uvm_field_enum(calfmt_t, calfmt, UVM_DEFAULT)
 		`uvm_field_int(conv_vertical_stride, UVM_DEFAULT | UVM_DEC)
@@ -213,6 +214,7 @@ class BufferCfg extends tue_configuration;
 	
 	`uvm_object_utils_begin(BufferCfg)
 		`uvm_field_int(stream_data_width, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_int(fnl_res_data_width, UVM_DEFAULT | UVM_DEC)
 		
 		`uvm_field_int(fmbufbankn, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_enum(fmbuf_coln_t, fmbufcoln, UVM_DEFAULT)

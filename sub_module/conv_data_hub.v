@@ -50,7 +50,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/11/26
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -135,48 +135,52 @@ module conv_data_hub #(
 	// 特征图表面行数据输出(AXIS主机)
 	output wire[ATOMIC_C*2*8-1:0] m_fm_fout_axis_data,
 	output wire m_fm_fout_axis_last, // 标志本次读请求的最后1个表面
-	output wire m_fm_fout_axis_valid,
+	                                 // combinational logic out
+	output wire m_fm_fout_axis_valid, // combinational logic out
 	input wire m_fm_fout_axis_ready,
 	
 	// 卷积核权重块数据输出(AXIS主机)
 	output wire[ATOMIC_C*2*8-1:0] m_kout_wgtblk_axis_data,
 	output wire m_kout_wgtblk_axis_last, // 标志本次读请求的最后1个表面
-	output wire m_kout_wgtblk_axis_valid,
+	                                     // combinational logic out
+	output wire m_kout_wgtblk_axis_valid, // combinational logic out
 	input wire m_kout_wgtblk_axis_ready,
 	
 	// DMA(MM2S方向)命令流#0(AXIS主机)
 	output wire[55:0] m0_dma_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
+	                                        // combinational logic out
 	output wire m0_dma_cmd_axis_user, // {固定(1'b1)/递增(1'b0)传输(1bit)}
 	output wire m0_dma_cmd_axis_last, // 帧尾标志
-	output wire m0_dma_cmd_axis_valid,
+	output wire m0_dma_cmd_axis_valid, // combinational logic out
 	input wire m0_dma_cmd_axis_ready,
 	// DMA(MM2S方向)数据流#0(AXIS从机)
 	input wire[STREAM_DATA_WIDTH-1:0] s0_dma_strm_axis_data,
 	input wire[STREAM_DATA_WIDTH/8-1:0] s0_dma_strm_axis_keep,
 	input wire s0_dma_strm_axis_last,
 	input wire s0_dma_strm_axis_valid,
-	output wire s0_dma_strm_axis_ready,
+	output wire s0_dma_strm_axis_ready, // combinational logic out
 	
 	// DMA(MM2S方向)命令流#1(AXIS主机)
 	output wire[55:0] m1_dma_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
+	                                        // combinational logic out
 	output wire m1_dma_cmd_axis_user, // {固定(1'b1)/递增(1'b0)传输(1bit)}
 	output wire m1_dma_cmd_axis_last, // 帧尾标志
-	output wire m1_dma_cmd_axis_valid,
+	output wire m1_dma_cmd_axis_valid, // combinational logic out
 	input wire m1_dma_cmd_axis_ready,
 	// DMA(MM2S方向)数据流#1(AXIS从机)
 	input wire[STREAM_DATA_WIDTH-1:0] s1_dma_strm_axis_data,
 	input wire[STREAM_DATA_WIDTH/8-1:0] s1_dma_strm_axis_keep,
 	input wire s1_dma_strm_axis_last,
 	input wire s1_dma_strm_axis_valid,
-	output wire s1_dma_strm_axis_ready,
+	output wire s1_dma_strm_axis_ready, // combinational logic out
 	
 	// 实际表面行号映射表MEM主接口
 	// 说明: 实际表面行号 ----映射----> 缓存行号
 	output wire actual_rid_mp_tb_mem_clk,
 	// [写端口]
-	output wire actual_rid_mp_tb_mem_wen_a,
-	output wire[11:0] actual_rid_mp_tb_mem_addr_a,
-	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] actual_rid_mp_tb_mem_din_a,
+	output wire actual_rid_mp_tb_mem_wen_a, // combinational logic out
+	output wire[11:0] actual_rid_mp_tb_mem_addr_a, // combinational logic out
+	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] actual_rid_mp_tb_mem_din_a, // combinational logic out
 	// [读端口]
 	output wire actual_rid_mp_tb_mem_ren_b,
 	output wire[11:0] actual_rid_mp_tb_mem_addr_b,
@@ -186,20 +190,20 @@ module conv_data_hub #(
 	// 说明: 缓存行号 ----映射----> 实际表面行号
 	output wire buffer_rid_mp_tb_mem_clk,
 	// [写端口]
-	output wire buffer_rid_mp_tb_mem_wen_a,
-	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_a,
-	output wire[11:0] buffer_rid_mp_tb_mem_din_a,
+	output wire buffer_rid_mp_tb_mem_wen_a, // combinational logic out
+	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_a, // combinational logic out
+	output wire[11:0] buffer_rid_mp_tb_mem_din_a, // combinational logic out
 	// [读端口]
 	output wire buffer_rid_mp_tb_mem_ren_b,
-	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_b,
+	output wire[LG_FMBUF_BUFFER_RID_WIDTH-1:0] buffer_rid_mp_tb_mem_addr_b, // sram-dout out
 	input wire[11:0] buffer_rid_mp_tb_mem_dout_b,
 	
 	// 物理缓存的MEM主接口
 	output wire phy_conv_buf_mem_clk_a,
-	output wire[CBUF_BANK_N-1:0] phy_conv_buf_mem_en_a,
-	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_a,
-	output wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_a,
-	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a,
+	output wire[CBUF_BANK_N-1:0] phy_conv_buf_mem_en_a, // combinational logic out
+	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_a, // combinational logic out
+	output wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_a, // combinational logic out
+	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a, // combinational logic out
 	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a
 );
 	
@@ -1978,7 +1982,7 @@ module conv_data_hub #(
 		.ATOMIC_C(ATOMIC_C),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
-		.EN_EXCEED_BD_PROTECT("true"),
+		.EN_EXCEED_BD_PROTECT("false"),
 		.EN_HP_ICB("true"),
 		.EN_ICB0_FMBUF_REG_SLICE("true"),
 		.EN_ICB1_FMBUF_REG_SLICE("true"),

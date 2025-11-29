@@ -207,11 +207,19 @@ module conv_middle_res_info_packer #(
 		
 		.fifo_wen(fm_cake_info_fifo_wen),
 		.fifo_din(fm_cake_info_fifo_din),
+		.fifo_full(),
 		.fifo_full_n(fm_cake_info_fifo_full_n),
+		.fifo_almost_full(),
+		.fifo_almost_full_n(),
 		
 		.fifo_ren(fm_cake_info_fifo_ren),
 		.fifo_dout(fm_cake_info_fifo_dout),
-		.fifo_empty_n(fm_cake_info_fifo_empty_n)
+		.fifo_empty(),
+		.fifo_empty_n(fm_cake_info_fifo_empty_n),
+		.fifo_almost_empty(),
+		.fifo_almost_empty_n(),
+		
+		.data_cnt()
 	);
 	
 	/** 特征图切块内计数器组 **/

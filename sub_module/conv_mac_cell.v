@@ -35,7 +35,7 @@ ATOMIC_C输入加法器实现通道累加
 带有全局时钟使能
 
 时延 = 
-	计算INT16时 -> 1 + log2(ATOMIC_C)
+	计算INT16时 -> 2 + log2(ATOMIC_C)
 	计算FP16时  -> 4 + log2(ATOMIC_C)
 
 FP16模式时, 尾数偏移为-50
@@ -48,7 +48,7 @@ FP16模式时, 尾数偏移为-50
 无
 
 作者: 陈家耀
-日期: 2025/03/24
+日期: 2025/11/27
 ********************************************************************/
 
 
@@ -242,6 +242,9 @@ module conv_mac_cell #(
 	end
 	
 	/** INT16计算 **/
+	// 延迟1clk的特征图数据和卷积核权重
+	reg signed[15:0] ftm_d1_int16[0:ATOMIC_C-1];
+	reg signed[15:0] wgt_d1_int16[0:ATOMIC_C-1];
 	// 外部有符号乘法器
 	wire signed[15:0] mul_op_a_int16_arr[0:ATOMIC_C-1]; // 操作数A
 	wire signed[15:0] mul_op_b_int16_arr[0:ATOMIC_C-1]; // 操作数B
@@ -255,9 +258,9 @@ module conv_mac_cell #(
 	wire mac_out_int16_mask;
 	wire mac_out_int16_valid;
 	
-	assign mul_ce_int16 = mac_in_valid & (~mac_in_ftm_masked);
-	assign add_tree_in_int16_mask = mac_in_ftm_masked_d1;
-	assign add_tree_in_int16_valid = mac_in_valid_d1;
+	assign mul_ce_int16 = mac_in_valid_d1 & (~mac_in_ftm_masked_d1);
+	assign add_tree_in_int16_mask = mac_in_ftm_masked_d2;
+	assign add_tree_in_int16_valid = mac_in_valid_d2;
 	
 	assign mac_out_frac_int16 = {{3{add_tree_out[36]}}, add_tree_out};
 	assign mac_out_int16_mask = add_tree_out_mask;
@@ -267,10 +270,20 @@ module conv_mac_cell #(
 	generate
 		for(cal_int16_i = 0;cal_int16_i < ATOMIC_C;cal_int16_i = cal_int16_i + 1)
 		begin:cal_int16_blk
-			assign mul_op_a_int16_arr[cal_int16_i] = $signed(mac_in_ftm_arr[cal_int16_i]);
-			assign mul_op_b_int16_arr[cal_int16_i] = $signed(mac_in_wgt_arr[cal_int16_i]);
+			assign mul_op_a_int16_arr[cal_int16_i] = ftm_d1_int16[cal_int16_i];
+			assign mul_op_b_int16_arr[cal_int16_i] = wgt_d1_int16[cal_int16_i];
 			
 			assign add_tree_in_int16_arr[cal_int16_i] = mul_res_arr[cal_int16_i];
+			
+			// 延迟1clk的特征图数据和卷积核权重
+			always @(posedge aclk)
+			begin
+				if(aclken & (calfmt == CAL_FMT_INT16) & mac_in_valid & (~mac_in_ftm_masked))
+				begin
+					ftm_d1_int16[cal_int16_i] <= # SIM_DELAY $signed(mac_in_ftm_arr[cal_int16_i]);
+					wgt_d1_int16[cal_int16_i] <= # SIM_DELAY $signed(mac_in_wgt_arr[cal_int16_i]);
+				end
+			end
 		end
 	endgenerate
 	

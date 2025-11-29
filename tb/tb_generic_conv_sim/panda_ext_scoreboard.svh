@@ -738,7 +738,10 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 	function void report_phase(uvm_phase phase);
 		super.report_phase(phase);
 		
-		`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+		if(this.match_tr_n == this.req_tr_id)
+			`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+		else
+			`uvm_error(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n))
 	endfunction
 	
 	`tue_component_default_constructor(FnlResTransReqGenScoreboard)
@@ -1759,7 +1762,10 @@ class DMAS2MMDataLenScoreboard extends tue_scoreboard #(
 	function void report_phase(uvm_phase phase);
 		super.report_phase(phase);
 		
-		`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+		if(this.match_tr_n == this.req_tr_id)
+			`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+		else
+			`uvm_error(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n))
 	endfunction
 	
 	`tue_component_default_constructor(DMAS2MMDataLenScoreboard)

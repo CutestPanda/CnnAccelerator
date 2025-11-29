@@ -124,11 +124,14 @@ class ReqGenBlkCtrlDefaultSeq extends tue_sequence #(
 	task body();
 		panda_blk_ctrl_dummy_trans tr;
 		
-		`uvm_do_with(tr, {
-			if(is_zero_delay){
-				process_start_delay == 0;
-			}
-		})
+		if(this.starting_phase != null)
+			`uvm_do_with(tr, {})
+		else
+			`uvm_do_with(tr, {
+				if(is_zero_delay){
+					process_start_delay == 0;
+				}
+			})
 	endtask
 	
 	`uvm_object_utils(ReqGenBlkCtrlDefaultSeq)

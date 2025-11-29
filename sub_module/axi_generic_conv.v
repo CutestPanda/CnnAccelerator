@@ -24,30 +24,44 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: 请填写
+本模块: AXI-通用卷积处理单元
 
 描述:
-请填写
+AXI-通用卷积处理单元(顶层模块)
+包括寄存器配置接口、控制子系统、数据枢纽、计算子系统
 
 注意：
-请填写
+需要外接2个DMA(MM2S)通道和1个DMA(S2MM)通道
+
+可将SRAM和乘法器的接口引出, 在SOC层面再连接, 以实现SRAM和乘法器的共享
 
 协议:
-请填写
+AXI-Lite SLAVE
+AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/25
+日期: 2025/11/29
 ********************************************************************/
 
 
-module generic_conv_sim #(
-	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+module axi_generic_conv #(
+	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
+	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
+	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
+	parameter integer LARGE_V_STRD_SUPPORTED = 1, // 是否支持>1的卷积垂直步长
+	parameter integer LARGE_H_STRD_SUPPORTED = 1, // 是否支持>1的卷积水平步长
+	parameter integer GRP_CONV_SUPPORTED = 0, // 是否支持组卷积
+	parameter integer EXT_PADDING_SUPPORTED = 1, // 是否支持外填充
+	parameter integer INNER_PADDING_SUPPORTED = 0, // 是否支持内填充
+	parameter integer KERNAL_DILATION_SUPPORTED = 0, // 是否支持卷积核膨胀
+	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
+	parameter integer ATOMIC_K = 4, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
-	parameter integer STREAM_DATA_WIDTH = 32, // DMA数据流的位宽(32 | 64 | 128 | 256)
-	parameter integer FNL_RES_DATA_WIDTH = 64, // 最终结果数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer MAX_CAL_ROUND = 2, // 最大的计算轮次(1~16)
+	parameter integer MM2S_STREAM_DATA_WIDTH = 64, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer S2MM_STREAM_DATA_WIDTH = 64, // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16, // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
-	parameter integer CBUF_DEPTH_FOREACH_BANK = 4096, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 1024, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512, // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
@@ -57,69 +71,33 @@ module generic_conv_sim #(
 	input wire aclk,
 	input wire aresetn,
 	
-	// 使能信号
-	input wire en_mac_array, // 使能乘加阵列
-	input wire en_packer, // 使能打包器
+	// 寄存器配置接口(AXI-Lite从机)
+    // 读地址通道
+    input wire[31:0] s_axi_lite_araddr,
+    input wire s_axi_lite_arvalid,
+    output wire s_axi_lite_arready,
+    // 写地址通道
+    input wire[31:0] s_axi_lite_awaddr,
+    input wire s_axi_lite_awvalid,
+    output wire s_axi_lite_awready,
+    // 写响应通道
+    output wire[1:0] s_axi_lite_bresp, // const -> 2'b00(OKAY)
+    output wire s_axi_lite_bvalid,
+    input wire s_axi_lite_bready,
+    // 读数据通道
+    output wire[31:0] s_axi_lite_rdata,
+    output wire[1:0] s_axi_lite_rresp, // const -> 2'b00(OKAY)
+    output wire s_axi_lite_rvalid,
+    input wire s_axi_lite_rready,
+    // 写数据通道
+    input wire[31:0] s_axi_lite_wdata,
+    input wire s_axi_lite_wvalid,
+    output wire s_axi_lite_wready,
 	
-	// 运行时参数
-	// [计算参数]
-	input wire[1:0] calfmt, // 运算数据格式
-	input wire[2:0] conv_vertical_stride, // 卷积垂直步长 - 1
-	input wire[2:0] conv_horizontal_stride, // 卷积水平步长 - 1
-	input wire[3:0] cal_round, // 计算轮次 - 1
-	// [组卷积模式]
-	input wire is_grp_conv_mode, // 是否处于组卷积模式
-	input wire[15:0] group_n, // 分组数 - 1
-	input wire[15:0] n_foreach_group, // 每组的通道数/核数 - 1
-	input wire[31:0] data_size_foreach_group, // (特征图)每组的数据量
-	// [特征图参数]
-	input wire[31:0] ifmap_baseaddr, // 输入特征图基地址
-	input wire[31:0] ofmap_baseaddr, // 输出特征图基地址
-	input wire[15:0] ifmap_w, // 输入特征图宽度 - 1
-	input wire[23:0] ifmap_size, // 输入特征图大小 - 1
-	input wire[15:0] fmap_chn_n, // 特征图通道数 - 1
-	input wire[15:0] fmap_ext_i_bottom, // 扩展后特征图的垂直边界
-	input wire[2:0] external_padding_left, // 左部外填充数
-	input wire[2:0] external_padding_top, // 上部外填充数
-	input wire[2:0] inner_padding_left_right, // 左右内填充数
-	input wire[2:0] inner_padding_top_bottom, // 上下内填充数
-	input wire[15:0] ofmap_w, // 输出特征图宽度 - 1
-	input wire[15:0] ofmap_h, // 输出特征图高度 - 1
-	input wire[1:0] ofmap_data_type, // 输出特征图数据大小类型
-	// [卷积核参数]
-	input wire[31:0] kernal_wgt_baseaddr, // 卷积核权重基地址
-	input wire[2:0] kernal_shape, // 卷积核形状
-	input wire[3:0] kernal_dilation_hzt_n, // 水平膨胀量
-	input wire[4:0] kernal_w_dilated, // (膨胀后)卷积核宽度 - 1
-	input wire[3:0] kernal_dilation_vtc_n, // 垂直膨胀量
-	input wire[4:0] kernal_h_dilated, // (膨胀后)卷积核高度 - 1
-	input wire[15:0] kernal_chn_n, // 通道数 - 1
-	input wire[15:0] cgrpn_foreach_kernal_set, // 每个核组的通道组数 - 1
-	input wire[15:0] kernal_num_n, // 核数 - 1
-	input wire[15:0] kernal_set_n, // 核组个数 - 1
-	input wire[5:0] max_wgtblk_w, // 权重块最大宽度
-	// [缓存参数]
-	input wire[7:0] fmbufbankn, // 分配给特征图缓存的Bank数
-	input wire[3:0] fmbufcoln, // 每个表面行的表面个数类型
-	input wire[9:0] fmbufrown, // 可缓存的表面行数 - 1
-	input wire[2:0] sfc_n_each_wgtblk, // 每个权重块的表面个数的类型
-	input wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
-	input wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
-	input wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
-	
-	// 块级控制
-	// [卷积核权重访问请求生成单元]
-	input wire kernal_access_blk_start,
-	output wire kernal_access_blk_idle,
-	output wire kernal_access_blk_done,
-	// [特征图表面行访问请求生成单元]
-	input wire fmap_access_blk_start,
-	output wire fmap_access_blk_idle,
-	output wire fmap_access_blk_done,
-	// [最终结果传输请求生成单元]
-	input wire fnl_res_trans_blk_start,
-	output wire fnl_res_trans_blk_idle,
-	output wire fnl_res_trans_blk_done,
+	// DMA命令完成指示
+	input wire mm2s_0_cmd_done, // 0号MM2S通道命令完成(指示)
+	input wire mm2s_1_cmd_done, // 1号MM2S通道命令完成(指示)
+	input wire s2mm_cmd_done, // S2MM通道命令完成(指示)
 	
 	// DMA(MM2S方向)命令流#0(AXIS主机)
 	output wire[55:0] m0_dma_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
@@ -128,8 +106,8 @@ module generic_conv_sim #(
 	output wire m0_dma_cmd_axis_valid,
 	input wire m0_dma_cmd_axis_ready,
 	// DMA(MM2S方向)数据流#0(AXIS从机)
-	input wire[STREAM_DATA_WIDTH-1:0] s0_dma_strm_axis_data,
-	input wire[STREAM_DATA_WIDTH/8-1:0] s0_dma_strm_axis_keep,
+	input wire[MM2S_STREAM_DATA_WIDTH-1:0] s0_dma_strm_axis_data,
+	input wire[MM2S_STREAM_DATA_WIDTH/8-1:0] s0_dma_strm_axis_keep,
 	input wire s0_dma_strm_axis_last,
 	input wire s0_dma_strm_axis_valid,
 	output wire s0_dma_strm_axis_ready,
@@ -141,21 +119,21 @@ module generic_conv_sim #(
 	output wire m1_dma_cmd_axis_valid,
 	input wire m1_dma_cmd_axis_ready,
 	// DMA(MM2S方向)数据流#1(AXIS从机)
-	input wire[STREAM_DATA_WIDTH-1:0] s1_dma_strm_axis_data,
-	input wire[STREAM_DATA_WIDTH/8-1:0] s1_dma_strm_axis_keep,
+	input wire[MM2S_STREAM_DATA_WIDTH-1:0] s1_dma_strm_axis_data,
+	input wire[MM2S_STREAM_DATA_WIDTH/8-1:0] s1_dma_strm_axis_keep,
 	input wire s1_dma_strm_axis_last,
 	input wire s1_dma_strm_axis_valid,
 	output wire s1_dma_strm_axis_ready,
 	
-	// S2MM方向DMA命令(AXIS主机)
+	// DMA(S2MM方向)命令流(AXIS主机)
 	output wire[55:0] m_dma_s2mm_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
 	output wire m_dma_s2mm_cmd_axis_user, // 固定(1'b1)/递增(1'b0)传输(1bit)
 	output wire m_dma_s2mm_cmd_axis_valid,
 	input wire m_dma_s2mm_cmd_axis_ready,
 	
 	// 最终结果数据流(AXIS主机)
-	output wire[FNL_RES_DATA_WIDTH-1:0] m_axis_fnl_res_data,
-	output wire[FNL_RES_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep,
+	output wire[S2MM_STREAM_DATA_WIDTH-1:0] m_axis_fnl_res_data,
+	output wire[S2MM_STREAM_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep,
 	output wire[4:0] m_axis_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
@@ -178,7 +156,173 @@ module generic_conv_sim #(
 	/** 内部参数 **/
 	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN); // 特征图缓存的缓存行号的位宽
 	
-	/** 通用卷积单元控制子系统 **/
+	/** 寄存器配置接口 **/
+	// 使能信号
+	wire en_mac_array; // 使能乘加阵列
+	wire en_packer; // 使能打包器
+	// 运行时参数
+	// [计算参数]
+	wire[1:0] calfmt; // 运算数据格式
+	wire[2:0] conv_vertical_stride; // 卷积垂直步长 - 1
+	wire[2:0] conv_horizontal_stride; // 卷积水平步长 - 1
+	wire[3:0] cal_round; // 计算轮次 - 1
+	// [组卷积模式]
+	wire is_grp_conv_mode; // 是否处于组卷积模式
+	wire[15:0] group_n; // 分组数 - 1
+	wire[15:0] n_foreach_group; // 每组的通道数/核数 - 1
+	wire[31:0] data_size_foreach_group; // (特征图)每组的数据量
+	// [特征图参数]
+	wire[31:0] ifmap_baseaddr; // 输入特征图基地址
+	wire[31:0] ofmap_baseaddr; // 输出特征图基地址
+	wire[15:0] ifmap_w; // 输入特征图宽度 - 1
+	wire[23:0] ifmap_size; // 输入特征图大小 - 1
+	wire[15:0] fmap_chn_n; // 特征图通道数 - 1
+	wire[15:0] fmap_ext_i_bottom; // 扩展后特征图的垂直边界
+	wire[2:0] external_padding_left; // 左部外填充数
+	wire[2:0] external_padding_top; // 上部外填充数
+	wire[2:0] inner_padding_left_right; // 左右内填充数
+	wire[2:0] inner_padding_top_bottom; // 上下内填充数
+	wire[15:0] ofmap_w; // 输出特征图宽度 - 1
+	wire[15:0] ofmap_h; // 输出特征图高度 - 1
+	wire[1:0] ofmap_data_type; // 输出特征图数据大小类型
+	// [卷积核参数]
+	wire[31:0] kernal_wgt_baseaddr; // 卷积核权重基地址
+	wire[2:0] kernal_shape; // 卷积核形状
+	wire[3:0] kernal_dilation_hzt_n; // 水平膨胀量
+	wire[4:0] kernal_w_dilated; // (膨胀后)卷积核宽度 - 1
+	wire[3:0] kernal_dilation_vtc_n; // 垂直膨胀量
+	wire[4:0] kernal_h_dilated; // (膨胀后)卷积核高度 - 1
+	wire[15:0] kernal_chn_n; // 通道数 - 1
+	wire[15:0] cgrpn_foreach_kernal_set; // 每个核组的通道组数 - 1
+	wire[15:0] kernal_num_n; // 核数 - 1
+	wire[15:0] kernal_set_n; // 核组个数 - 1
+	wire[5:0] max_wgtblk_w; // 权重块最大宽度
+	// [缓存参数]
+	wire[7:0] fmbufbankn; // 分配给特征图缓存的Bank数
+	wire[3:0] fmbufcoln; // 每个表面行的表面个数类型
+	wire[9:0] fmbufrown; // 可缓存的表面行数 - 1
+	wire[2:0] sfc_n_each_wgtblk; // 每个权重块的表面个数的类型
+	wire[7:0] kbufgrpn; // 可缓存的通道组数 - 1
+	wire[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
+	wire[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
+	// 块级控制
+	// [卷积核权重访问请求生成单元]
+	wire kernal_access_blk_start;
+	wire kernal_access_blk_idle;
+	wire kernal_access_blk_done;
+	// [特征图表面行访问请求生成单元]
+	wire fmap_access_blk_start;
+	wire fmap_access_blk_idle;
+	wire fmap_access_blk_done;
+	// [最终结果传输请求生成单元]
+	wire fnl_res_trans_blk_start;
+	wire fnl_res_trans_blk_idle;
+	wire fnl_res_trans_blk_done;
+	
+	reg_if_for_generic_conv #(
+		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
+		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
+		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
+		.LARGE_V_STRD_SUPPORTED(LARGE_V_STRD_SUPPORTED ? 1'b1:1'b0),
+		.LARGE_H_STRD_SUPPORTED(LARGE_H_STRD_SUPPORTED ? 1'b1:1'b0),
+		.GRP_CONV_SUPPORTED(GRP_CONV_SUPPORTED ? 1'b1:1'b0),
+		.EXT_PADDING_SUPPORTED(EXT_PADDING_SUPPORTED ? 1'b1:1'b0),
+		.INNER_PADDING_SUPPORTED(INNER_PADDING_SUPPORTED ? 1'b1:1'b0),
+		.KERNAL_DILATION_SUPPORTED(KERNAL_DILATION_SUPPORTED ? 1'b1:1'b0),
+		.ACCELERATOR_ID(ACCELERATOR_ID),
+		.ATOMIC_K(ATOMIC_K),
+		.ATOMIC_C(ATOMIC_C),
+		.MAX_CAL_ROUND(MAX_CAL_ROUND),
+		.MM2S_STREAM_DATA_WIDTH(MM2S_STREAM_DATA_WIDTH),
+		.S2MM_STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
+		.CBUF_BANK_N(CBUF_BANK_N),
+		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
+		.MAX_FMBUF_ROWN(MAX_FMBUF_ROWN),
+		.RBUF_BANK_N(RBUF_BANK_N),
+		.RBUF_DEPTH(RBUF_DEPTH),
+		.SIM_DELAY(SIM_DELAY)
+	)reg_if_for_generic_conv_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		
+		.s_axi_lite_araddr(s_axi_lite_araddr),
+		.s_axi_lite_arvalid(s_axi_lite_arvalid),
+		.s_axi_lite_arready(s_axi_lite_arready),
+		.s_axi_lite_awaddr(s_axi_lite_awaddr),
+		.s_axi_lite_awvalid(s_axi_lite_awvalid),
+		.s_axi_lite_awready(s_axi_lite_awready),
+		.s_axi_lite_bresp(s_axi_lite_bresp),
+		.s_axi_lite_bvalid(s_axi_lite_bvalid),
+		.s_axi_lite_bready(s_axi_lite_bready),
+		.s_axi_lite_rdata(s_axi_lite_rdata),
+		.s_axi_lite_rresp(s_axi_lite_rresp),
+		.s_axi_lite_rvalid(s_axi_lite_rvalid),
+		.s_axi_lite_rready(s_axi_lite_rready),
+		.s_axi_lite_wdata(s_axi_lite_wdata),
+		.s_axi_lite_wvalid(s_axi_lite_wvalid),
+		.s_axi_lite_wready(s_axi_lite_wready),
+		
+		.en_mac_array(en_mac_array),
+		.en_packer(en_packer),
+		
+		.calfmt(calfmt),
+		.conv_vertical_stride(conv_vertical_stride),
+		.conv_horizontal_stride(conv_horizontal_stride),
+		.cal_round(cal_round),
+		.is_grp_conv_mode(is_grp_conv_mode),
+		.group_n(group_n),
+		.n_foreach_group(n_foreach_group),
+		.data_size_foreach_group(data_size_foreach_group),
+		.ifmap_baseaddr(ifmap_baseaddr),
+		.ofmap_baseaddr(ofmap_baseaddr),
+		.ifmap_w(ifmap_w),
+		.ifmap_size(ifmap_size),
+		.fmap_chn_n(fmap_chn_n),
+		.fmap_ext_i_bottom(fmap_ext_i_bottom),
+		.external_padding_left(external_padding_left),
+		.external_padding_top(external_padding_top),
+		.inner_padding_left_right(inner_padding_left_right),
+		.inner_padding_top_bottom(inner_padding_top_bottom),
+		.ofmap_w(ofmap_w),
+		.ofmap_h(ofmap_h),
+		.ofmap_data_type(ofmap_data_type),
+		.kernal_wgt_baseaddr(kernal_wgt_baseaddr),
+		.kernal_shape(kernal_shape),
+		.kernal_dilation_hzt_n(kernal_dilation_hzt_n),
+		.kernal_w_dilated(kernal_w_dilated),
+		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
+		.kernal_h_dilated(kernal_h_dilated),
+		.kernal_chn_n(kernal_chn_n),
+		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
+		.kernal_num_n(kernal_num_n),
+		.kernal_set_n(kernal_set_n),
+		.max_wgtblk_w(max_wgtblk_w),
+		.fmbufbankn(fmbufbankn),
+		.fmbufcoln(fmbufcoln),
+		.fmbufrown(fmbufrown),
+		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
+		.kbufgrpn(kbufgrpn),
+		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
+		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		
+		.kernal_access_blk_start(kernal_access_blk_start),
+		.kernal_access_blk_idle(kernal_access_blk_idle),
+		.kernal_access_blk_done(kernal_access_blk_done),
+		
+		.fmap_access_blk_start(fmap_access_blk_start),
+		.fmap_access_blk_idle(fmap_access_blk_idle),
+		.fmap_access_blk_done(fmap_access_blk_done),
+		
+		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
+		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
+		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
+		
+		.mm2s_0_cmd_done(mm2s_0_cmd_done),
+		.mm2s_1_cmd_done(mm2s_1_cmd_done),
+		.s2mm_cmd_done(s2mm_cmd_done)
+	);
+	
+	/** 控制子系统 **/
 	// 后级计算单元控制
 	wire rst_adapter; // 重置适配器(标志)
 	wire on_incr_phy_row_traffic; // 增加1个物理特征图表面行流量(指示)
@@ -347,7 +491,7 @@ module generic_conv_sim #(
 	assign m_kwgtblk_rd_req_axis_ready = s_kwgtblk_rd_req_axis_ready;
 	
 	conv_data_hub #(
-		.STREAM_DATA_WIDTH(STREAM_DATA_WIDTH),
+		.STREAM_DATA_WIDTH(MM2S_STREAM_DATA_WIDTH),
 		.ATOMIC_C(ATOMIC_C),
 		.CBUF_BANK_N(CBUF_BANK_N),
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
@@ -437,7 +581,7 @@ module generic_conv_sim #(
 		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a)
 	);
 	
-	/** 通用卷积单元计算子系统 **/
+	/** 计算子系统 **/
 	// 特征图切块信息(AXIS从机)
 	wire[7:0] s_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	wire s_fm_cake_info_axis_valid;
@@ -484,7 +628,7 @@ module generic_conv_sim #(
 	conv_cal_sub_system #(
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
-		.STREAM_DATA_WIDTH(FNL_RES_DATA_WIDTH),
+		.STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),

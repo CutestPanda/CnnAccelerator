@@ -456,8 +456,10 @@ module kernal_access_req_gen #(
 	wire[4:0] sfc_n_to_rd; // 待读取的表面个数 - 1
 	wire[6:0] sfc_n_foreach_wgtblk; // 每个权重块的表面个数 - 1
 	wire[4:0] sfc_depth; // 表面深度 - 1
+	// [块级控制]
+	reg blk_idle_r; // 块级空闲(标志)
 	
-	assign blk_idle = req_gen_sts == KWGTBLK_ACCESS_STS_IDLE;
+	assign blk_idle = blk_idle_r;
 	assign blk_done = (req_gen_sts == KWGTBLK_ACCESS_STS_BUF_POST_RST) & s_kwgtblk_rd_req_reg_axis_valid & s_kwgtblk_rd_req_reg_axis_ready;
 	
 	assign s_kwgtblk_rd_req_reg_axis_data = 
@@ -733,6 +735,18 @@ module kernal_access_req_gen #(
 				(blk_idle | is_last_kernal_cgrp) ? 
 					10'd0:
 					(actual_cgrp_id + 1'b1);
+	end
+	
+	// 块级空闲(标志)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			blk_idle_r <= 1'b1;
+		else if(
+			aclken & 
+			(blk_idle_r ? blk_start:blk_done)
+		)
+			blk_idle_r <= # SIM_DELAY ~blk_idle_r;
 	end
 	
 endmodule
