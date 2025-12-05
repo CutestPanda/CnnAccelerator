@@ -9,6 +9,7 @@ interface generic_conv_sim_cfg_if(
 	// 使能信号
 	logic en_mac_array; // 使能乘加阵列
 	logic en_packer; // 使能打包器
+	logic en_bn_act_proc; // 使能批归一化与激活处理单元
 	
 	// 运行时参数
 	// [计算参数]
@@ -55,10 +56,20 @@ interface generic_conv_sim_cfg_if(
 	logic[7:0] kbufgrpn; // 可缓存的通道组数 - 1
 	logic[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
 	logic[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
+	// [批归一化参数]
+	logic[4:0] bn_fixed_point_quat_accrc; // 定点数量化精度
+	logic bn_is_a_eq_1; // 参数A的实际值为1(标志)
+	logic bn_is_b_eq_0; // 参数B的实际值为0(标志)
+	
+	// BN参数MEM(写端口)
+	logic bn_mem_wen_a;
+	logic[15:0] bn_mem_addr_a;
+	logic[63:0] bn_mem_din_a; // {参数B(32bit), 参数A(32bit)}
 	
 	clocking master_cb @(posedge clk);
 		output en_mac_array;
 		output en_packer;
+		output en_bn_act_proc;
 		
 		output calfmt;
 		output conv_vertical_stride;
@@ -99,6 +110,13 @@ interface generic_conv_sim_cfg_if(
 		output kbufgrpn;
 		output mid_res_item_n_foreach_row;
 		output mid_res_buf_row_n_bufferable;
+		output bn_fixed_point_quat_accrc;
+		output bn_is_a_eq_1;
+		output bn_is_b_eq_0;
+		
+		output bn_mem_wen_a;
+		output bn_mem_addr_a;
+		output bn_mem_din_a;
 	endclocking
 	
 endinterface

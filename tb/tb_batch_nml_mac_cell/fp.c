@@ -30,22 +30,43 @@ unsigned int encode_fp16(double d) {
 	}
 	fp16 |= (exp << 10);
 	
-	uint8_t to_add_1;
-	
-	if(frac != 0x007FFFFF){
-		to_add_1 = (frac & (1 << 12)) ? 0x01:0x00;
-	}else{
-		to_add_1 = 0;
-	}
-	
 	frac >>= 13;
-	if(to_add_1){
-		frac++;
-	}
-	
 	fp16 |= frac;
 	
 	return (unsigned int)fp16;
+}
+
+unsigned int encode_fp32(double d) {
+	float f = (float)d;
+	
+	uint32_t* f_ptr = (uint32_t*)(&f);
+	uint32_t f_int = *f_ptr;
+	
+	return f_int;
+}
+
+unsigned int fp32_mac(unsigned int a, unsigned int x, unsigned int b) {
+	float f_a;
+	float f_x;
+	float f_b;
+	float f_res;
+	
+	uint32_t* f_ptr;
+	
+	f_ptr = (uint32_t*)(&f_a);
+	*f_ptr = a;
+	
+	f_ptr = (uint32_t*)(&f_x);
+	*f_ptr = x;
+	
+	f_ptr = (uint32_t*)(&f_b);
+	*f_ptr = b;
+	
+	f_res = (f_a * f_x) + f_b;
+	
+	f_ptr = (uint32_t*)(&f_res);
+	
+	return *f_ptr;
 }
 
 double decode_fp16(int unsigned fp16) {
@@ -68,15 +89,6 @@ double decode_fp16(int unsigned fp16) {
 	*f_ptr = f_int;
 	
 	return (double)f;
-}
-
-unsigned int encode_fp32(double d) {
-	float f = (float)d;
-	
-	uint32_t* f_ptr = (uint32_t*)(&f);
-	uint32_t f_int = *f_ptr;
-	
-	return f_int;
 }
 
 double decode_fp32(int unsigned fp32) {

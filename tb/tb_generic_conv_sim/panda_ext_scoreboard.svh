@@ -1049,8 +1049,11 @@ class FinalResScoreboard extends tue_scoreboard #(
 	local FmapCfg fmap_cfg;
 	local KernalCfg kernal_cfg;
 	local ConvCalCfg cal_cfg;
+	local BNCfg bn_cfg;
+	
 	local PandaMemoryAdapter fmap_mem;
 	local PandaMemoryAdapter kernal_mem;
+	local BNParamTable bm_params;
 	
 	local AbstractFinalResAdapter exp_res_adpt;
 	
@@ -1092,11 +1095,15 @@ class FinalResScoreboard extends tue_scoreboard #(
 			`uvm_fatal(this.get_name(), "cannot get kernal_cfg!!!")
 		if(!uvm_config_db #(ConvCalCfg)::get(null, "", "cal_cfg", this.cal_cfg))
 			`uvm_fatal(this.get_name(), "cannot get cal_cfg!!!")
+		if(!uvm_config_db #(BNCfg)::get(null, "", "bn_cfg", this.bn_cfg))
+			`uvm_fatal(this.get_name(), "cannot get bn_cfg!!!")
 		
 		if(!uvm_config_db #(PandaMemoryAdapter)::get(null, "", "fmap_mem", this.fmap_mem))
 			`uvm_fatal(this.get_name(), "cannot get fmap_mem!!!")
 		if(!uvm_config_db #(PandaMemoryAdapter)::get(null, "", "kernal_mem", this.kernal_mem))
 			`uvm_fatal(this.get_name(), "cannot get kernal_mem!!!")
+		if(!uvm_config_db #(BNParamTable)::get(null, "", "bm_params", this.bm_params))
+			`uvm_fatal(this.get_name(), "cannot get bm_params!!!")
 		
 		this.exp_res_tr_mcd = $fopen("exp_res_tr_log.txt");
 		this.create_exp_res_adpt();
@@ -1211,6 +1218,7 @@ class FinalResScoreboard extends tue_scoreboard #(
 		int unsigned kernal_x_dilated; // (膨胀后)卷积核宽度或高度
 		
 		int unsigned kernal_set_cgrp_id_base; // 核组起始通道组号
+		int unsigned kernal_set_ochn_id_base; // 核组起始输出通道号
 		
 		Fmap fmap_this;
 		
@@ -1233,6 +1241,7 @@ class FinalResScoreboard extends tue_scoreboard #(
 		this.ofmap_h = ((ext_fmap_h - kernal_x_dilated) / this.cal_cfg.conv_vertical_stride) + 1;
 		
 		kernal_set_cgrp_id_base = 0;
+		kernal_set_ochn_id_base = 0;
 		
 		// 得到整个特征图
 		if(!$cast(fmap_this, this.fmap_mem.data_blk))
@@ -1448,13 +1457,24 @@ class FinalResScoreboard extends tue_scoreboard #(
 						logic_y_ofs += (this.cal_cfg.kernal_dilation_n + 1);
 					end
 					
+					// 批归一化处理
+					for(int unsigned _i = 0;_i < kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s];_i++)
+					begin
+						if(!this.bn_cfg.bn_is_a_eq_1)
+							ofmap_sfc[_i].mul_assign(bm_params.get_param_a(kernal_set_ochn_id_base + _i));
+						if(!this.bn_cfg.bn_is_b_eq_0)
+							ofmap_sfc[_i].add_assign(bm_params.get_param_b(kernal_set_ochn_id_base + _i));
+					end
+					
 					// 添加输出表面数据
 					this.exp_res_adpt.put_data(ofmap_sfc);
 					
 					// 添加打印信息
 					for(int unsigned _i = 0;_i < kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s];_i++)
 					begin
-						this.exp_res_adpt.print_context.push_back($sformatf("kset%0d, oy%0d, ox%0d, sfc_i%0d", s, oy, ox, _i));
+						this.exp_res_adpt.print_context.push_back(
+							$sformatf("kset%0d, k%0d, oy%0d, ox%0d, sfc_i%0d", s, kernal_set_ochn_id_base + _i, oy, ox, _i)
+						);
 					end
 					
 					logic_x_base += this.cal_cfg.conv_horizontal_stride;
@@ -1464,6 +1484,7 @@ class FinalResScoreboard extends tue_scoreboard #(
 			end
 			
 			kernal_set_cgrp_id_base += kernal_set_builder_cfg.cgrpn_foreach_kernal_set[s];
+			kernal_set_ochn_id_base += kernal_set_builder_cfg.wgtblk_w_foreach_kernal_set[s];
 		end
 	endfunction
 	

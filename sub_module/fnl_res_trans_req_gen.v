@@ -42,7 +42,7 @@ BLK CTRL
 AXIS MASTER
 
 作者: 陈家耀
-日期: 2025/11/23
+日期: 2025/12/03
 ********************************************************************/
 
 
@@ -70,6 +70,12 @@ module fnl_res_trans_req_gen #(
 	input wire blk_start,
 	output wire blk_idle,
 	output wire blk_done,
+	
+	// 子表面行信息(AXIS主机)
+	output wire[15:0] m_sub_row_msg_axis_data, // {输出通道号(16bit)}
+	output wire m_sub_row_msg_axis_last, // 整个输出特征图的最后1个子表面行(标志)
+	output wire m_sub_row_msg_axis_valid,
+	input wire m_sub_row_msg_axis_ready,
 	
 	// DMA命令(AXIS主机)
 	output wire[55:0] m_dma_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
@@ -128,9 +134,10 @@ module fnl_res_trans_req_gen #(
 	localparam integer DMA_CMD_GEN_STS_ONEHOT_UPD_SFC_DEPTH = 3; // 状态: 更新表面深度
 	localparam integer DMA_CMD_GEN_STS_ONEHOT_CAL_SUB_SFC_ROW_OFSADDR = 4; // 状态: 计算组内子表面行偏移地址
 	localparam integer DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR = 5; // 状态: 计算表面行地址
-	localparam integer DMA_CMD_GEN_STS_ONEHOT_SEND_CMD = 6; // 状态: 发送DMA命令
-	localparam integer DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW = 7; // 状态: 移动到下一个子表面行
-	localparam integer DMA_CMD_GEN_STS_ONEHOT_DONE = 8; // 状态: 完成
+	localparam integer DMA_CMD_GEN_STS_ONEHOT_SEND_MSG = 6; // 状态: 发送子表面行信息
+	localparam integer DMA_CMD_GEN_STS_ONEHOT_SEND_CMD = 7; // 状态: 发送DMA命令
+	localparam integer DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW = 8; // 状态: 移动到下一个子表面行
+	localparam integer DMA_CMD_GEN_STS_ONEHOT_DONE = 9; // 状态: 完成
 	
 	/** 内部配置 **/
 	localparam EN_FAST_CAL_SFC_ROW_LEN = "false"; // 是否使能尽快计算"表面行字节数"
@@ -142,7 +149,6 @@ module fnl_res_trans_req_gen #(
 		"输出特征图宽度 - 1" + 1
 		"输出特征图高度 - 1" + 1
 		"每组的通道数/核数 - 1" + 1
-		"输出组号基准(计数器)" + 1
 	**/
 	wire[15:0] shared_incr0_op;
 	wire[15:0] shared_incr0_res;
@@ -203,6 +209,11 @@ module fnl_res_trans_req_gen #(
 			ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_MUL0_REQ] | 
 			ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_MUL0_REQ_2]
 		);
+	
+	assign shared_incr0_op = 
+		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_W]}} & ofmap_w) | 
+		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_H]}} & ofmap_h) | 
+		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_MUL0_REQ] & is_grp_conv_mode}} & n_foreach_group);
 	
 	assign ofmap_data_size_lshn = 
 		(ofmap_data_type == OFMAP_DATA_1_BYTE) ? 2'b00:
@@ -324,7 +335,7 @@ module fnl_res_trans_req_gen #(
 	end
 	
 	/** 输出通道范围计数器组 **/
-	reg[15:0] ochn_or_grp_id_base; // 输出通道号或组号基准(计数器)
+	reg[15:0] ochn_id_base; // 输出通道号基准(计数器)
 	reg[5:0] ochn_id_ofs; // 输出通道号偏移(计数器)
 	reg[15:0] ochn_id; // 输出通道号(计数器)
 	reg[15:0] sfc_row_y; // 表面行y坐标(计数器)
@@ -336,17 +347,12 @@ module fnl_res_trans_req_gen #(
 	reg is_last_ochn_rgn; // 最后1个输出通道域(标志)
 	reg is_last_sub_sfc_row; // 最后1个子表面行(标志)
 	reg is_arrive_oh_end; // 抵达输出特征图高度方向末尾(标志)
+	reg last_sub_sfc_row_in_entire_fmap; // 整个输出特征图的最后1个子表面行(标志)
 	reg is_touch_ochn_end; // 触及输出特征图组内通道方向末尾(标志)
 	wire on_upd_ofmap_pos_last_flag; // 更新输出特征图行位置标志组(指示)
 	wire on_move_to_nxt_ochn_rgn; // 移动到下一个输出通道域(指示)
 	wire on_move_to_nxt_sub_sfc_row; // 移动到下一个子表面行(指示)
 	wire on_move_in_oh; // 在输出特征图高度方向移动1行(指示)
-	
-	assign shared_incr0_op = 
-		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_W]}} & ofmap_w) | 
-		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_H]}} & ofmap_h) | 
-		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_MUL0_REQ]}} & n_foreach_group) | 
-		({16{ofmap_extra_params_cal_sts[OFMAP_EXTRA_PARS_CAL_STS_ONEHOT_FNS]}} & ochn_or_grp_id_base);
 	
 	assign shared_gth_cmp0_op1 = 
 		is_grp_conv_mode ? 
@@ -357,25 +363,21 @@ module fnl_res_trans_req_gen #(
 			n_foreach_group:
 			kernal_num_n;
 	
-	assign ochn_id_base_nxt = ochn_or_grp_id_base + max_wgtblk_w;
+	assign ochn_id_base_nxt = ochn_id_base + ogrp_chn_n;
 	assign ochn_id_ofs_nxt = ochn_id_ofs + ATOMIC_K;
 	assign ochn_id_nxt = ochn_id + ATOMIC_K;
 	
 	assign on_move_to_nxt_ochn_rgn = on_move_to_nxt_sub_sfc_row & is_last_sub_sfc_row & is_arrive_oh_end;
 	assign on_move_in_oh = on_move_to_nxt_sub_sfc_row & is_last_sub_sfc_row;
 	
-	// 输出通道号或组号基准(计数器)
+	// 输出通道号基准(计数器)
 	always @(posedge aclk)
 	begin
 		if(aclken & (blk_idle | on_move_to_nxt_ochn_rgn))
-			ochn_or_grp_id_base <= # SIM_DELAY 
+			ochn_id_base <= # SIM_DELAY 
 				blk_idle ? 
 					16'h0000:
-					(
-						is_grp_conv_mode ? 
-							shared_incr0_res:
-							ochn_id_base_nxt
-					);
+					ochn_id_base_nxt;
 	end
 	
 	// 输出通道号偏移(计数器)
@@ -393,7 +395,7 @@ module fnl_res_trans_req_gen #(
 	begin
 		if(
 			aclken & 
-			(blk_idle | ((~is_grp_conv_mode) & on_move_to_nxt_sub_sfc_row))
+			(blk_idle | on_move_to_nxt_sub_sfc_row)
 		)
 			ochn_id <= # SIM_DELAY 
 				blk_idle ? 
@@ -403,7 +405,7 @@ module fnl_res_trans_req_gen #(
 							(
 								is_arrive_oh_end ? 
 									ochn_id_base_nxt:
-									ochn_or_grp_id_base
+									ochn_id_base
 							):
 							ochn_id_nxt
 					);
@@ -439,15 +441,13 @@ module fnl_res_trans_req_gen #(
 					(sub_sfc_row_baseaddr_in_grp + (({2'b00, ofmap_size} << ofmap_data_size_lshn) * ATOMIC_K));
 	end
 	
-	// 最后1个输出通道域(标志), 最后1个子表面行(标志), 抵达输出特征图高度方向末尾(标志)
+	// 最后1个输出通道域(标志), 最后1个子表面行(标志), 抵达输出特征图高度方向末尾(标志), 整个输出特征图的最后1个子表面行(标志)
 	always @(posedge aclk)
 	begin
 		if(aclken & on_upd_ofmap_pos_last_flag)
 		begin
 			is_last_ochn_rgn <= # SIM_DELAY 
-				is_grp_conv_mode ? 
-					(ochn_or_grp_id_base == group_n):
-					(ochn_id_base_nxt > kernal_num_n);
+				ochn_id_base_nxt > kernal_num_n;
 			
 			/*
 			is_grp_conv_mode ? 
@@ -463,6 +463,14 @@ module fnl_res_trans_req_gen #(
 			
 			is_arrive_oh_end <= # SIM_DELAY 
 				sfc_row_y == ofmap_h;
+			
+			last_sub_sfc_row_in_entire_fmap <= # SIM_DELAY 
+				(ochn_id_base_nxt > kernal_num_n) & 
+				(sfc_row_y == ofmap_h) & 
+				(
+					((~is_grp_conv_mode) & (ochn_id_ofs_nxt >= max_wgtblk_w)) | 
+					shared_gth_cmp0_res
+				);
 		end
 	end
 	
@@ -470,7 +478,14 @@ module fnl_res_trans_req_gen #(
 	always @(posedge aclk)
 	begin
 		if(aclken & on_upd_ofmap_pos_last_flag)
+		begin
+			/*
+			is_grp_conv_mode ? 
+				(ochn_id_ofs_nxt > n_foreach_group):
+				(ochn_id_nxt > kernal_num_n)
+			*/
 			is_touch_ochn_end <= # SIM_DELAY shared_gth_cmp0_res;
+		end
 	end
 	
 	/** 当前输出表面行参数 **/
@@ -668,10 +683,16 @@ module fnl_res_trans_req_gen #(
 	
 	/** DMA命令生成 **/
 	reg[23:0] dma_cmd_id; // DMA命令ID
-	reg[8:0] dma_cmd_gen_sts; // DMA命令生成(状态)
+	reg[9:0] dma_cmd_gen_sts; // DMA命令生成(状态)
 	
 	assign blk_idle = dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_IDLE];
 	assign blk_done = dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_DONE];
+	
+	assign m_sub_row_msg_axis_data = {
+		ochn_id // 输出通道号(16bit)
+	};
+	assign m_sub_row_msg_axis_last = last_sub_sfc_row_in_entire_fmap;
+	assign m_sub_row_msg_axis_valid = aclken & dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_MSG];
 	
 	assign m_dma_cmd_axis_data = 
 		{
@@ -716,6 +737,7 @@ module fnl_res_trans_req_gen #(
 				dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_UPD_SFC_DEPTH] | 
 				(dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SUB_SFC_ROW_OFSADDR] & sub_sfc_row_ofsaddr_available) | 
 				(dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR] & sfc_row_addr_available) | 
+				(dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_MSG] & m_sub_row_msg_axis_ready) | 
 				(dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_CMD] & m_dma_cmd_axis_ready) | 
 				dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW] | 
 				dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_DONE]
@@ -723,35 +745,39 @@ module fnl_res_trans_req_gen #(
 		)
 			dma_cmd_gen_sts <= # SIM_DELAY 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_IDLE]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_IDLE]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_CAL_OFMAP_EXTRA_PARS)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_OFMAP_EXTRA_PARS]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_OFMAP_EXTRA_PARS]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_UPD_OFMAP_POS_FLAG)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_UPD_OFMAP_POS_FLAG]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_UPD_OFMAP_POS_FLAG]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_UPD_SFC_DEPTH)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_UPD_SFC_DEPTH]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_UPD_SFC_DEPTH]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_CAL_SUB_SFC_ROW_OFSADDR)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SUB_SFC_ROW_OFSADDR]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SUB_SFC_ROW_OFSADDR]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR]}} & 
+					(1 << DMA_CMD_GEN_STS_ONEHOT_SEND_MSG)
+				) | 
+				(
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_MSG]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_SEND_CMD)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_CMD]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_CMD]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_MOV_TO_NXT_SUB_SFC_ROW]}} & 
 					(
 						(is_last_sub_sfc_row & is_arrive_oh_end & is_last_ochn_rgn) ? 
 							(1 << DMA_CMD_GEN_STS_ONEHOT_DONE):
@@ -759,7 +785,7 @@ module fnl_res_trans_req_gen #(
 					)
 				) | 
 				(
-					{9{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_DONE]}} & 
+					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_DONE]}} & 
 					(1 << DMA_CMD_GEN_STS_ONEHOT_IDLE)
 				);
 	end

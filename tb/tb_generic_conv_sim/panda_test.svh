@@ -62,6 +62,37 @@ class KernalCst0PackedReal extends PackedReal;
 	
 endclass
 
+class BNParamCst0PackedReal extends PackedReal;
+	
+	virtual function bit do_rand(uvm_object rand_context);
+		BNParamRandContext rand_context_this;
+		
+		if(!$cast(rand_context_this, rand_context))
+			return 1'b0;
+		
+		if(rand_context_this.is_param_a)
+		begin
+			if(!this.randomize() with{
+				data >= 0.8 && data <= 1.2;
+			})
+				return 1'b0;
+		end
+		else
+		begin
+			if(!this.randomize() with{
+				(data >= -0.2 && data <= -0.05) || (data >= 0.05 && data <= 0.2) || (data == 0.0);
+			})
+				return 1'b0;
+		end
+		
+		return 1'b1;
+	endfunction
+	
+	`tue_object_default_constructor(BNParamCst0PackedReal)
+	`uvm_object_utils(BNParamCst0PackedReal)
+	
+endclass
+
 class ConcreteFmapOutPtCalProcListener extends FmapOutPtCalProcListener;
 	
 	int fid;
@@ -73,7 +104,7 @@ class ConcreteFmapOutPtCalProcListener extends FmapOutPtCalProcListener;
 		int unsigned cal_rid
 	);
 		/*
-		if((kset_id == 0) && (oy == 2) && (ox == 1) && (cal_rid == 0))
+		if((kset_id == 0) && (oy == 3) && (ox == 0) && (cal_rid == 0))
 		begin
 			panda_axis_trans axis_tr;
 			FpMidResAccumInTr accum_in_tr;
@@ -114,7 +145,7 @@ class ConcreteExpFmapCalProcListener extends FmapOutPtCalProcListener;
 		int unsigned sfc_id
 	);
 		/*
-		if((kset_id == 0) && (oy == 2) && (ox == 1) && (sfc_id == 3))
+		if((kset_id == 0) && (oy == 3) && (ox == 0) && (sfc_id == 0))
 		begin
 			AbstractData data;
 			
@@ -145,12 +176,12 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	.STATUS(tue_status_dummy)
 );
 	
-	protected int unsigned ATOMIC_C = 4; // 通道并行数
-	protected int unsigned ATOMIC_K = 4; // 核并行数
+	protected int unsigned ATOMIC_C = 8; // 通道并行数
+	protected int unsigned ATOMIC_K = 8; // 核并行数
 	protected int unsigned STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	protected int unsigned FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	
-	protected bit en_output_mem_bin = 1'b0; // 是否生成特征图与卷积核数据BIN文件
+	protected bit en_output_mem_bin = 1'b1; // 是否生成特征图与卷积核数据BIN文件
 	
 	protected FmapReqGenTestEnv fmap_req_gen_env;
 	protected KernalReqGenTestEnv kernal_req_gen_env;
@@ -165,6 +196,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected KernalCfg kernal_cfg;
 	protected ConvCalCfg conv_cal_cfg;
 	protected BufferCfg buf_cfg;
+	protected BNCfg bn_cfg;
 	
 	protected ConvSts conv_sts;
 	
@@ -185,7 +217,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	
 	protected function void build_configuration();
 		int cfg_log_fid;
-		int mem_bin_fid[2];
+		int mem_bin_fid[3];
 		
 		FmapBuilderCfg fmap_builder_cfg;
 		KernalSetBuilderCfg kernal_builder_cfg;
@@ -195,9 +227,11 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		KernalSet kernal_set;
 		PandaMemoryAdapter fmap_mem_adpt;
 		PandaMemoryAdapter kernal_mem_adpt;
+		BNParamTable bm_params;
 		
 		FmapCst0PackedReal fmap_data_gen;
 		KernalCst0PackedReal kernal_data_gen;
+		BNParamCst0PackedReal bn_param_data_gen;
 		
 		cfg_log_fid = $fopen("cfg_log.txt");
 		
@@ -205,10 +239,12 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		begin
 			mem_bin_fid[0] = $fopen("in_fmap.bin", "wb");
 			mem_bin_fid[1] = $fopen("kernal.bin", "wb");
+			mem_bin_fid[2] = $fopen("bn.bin", "wb");
 		end
 		
 		fmap_data_gen = FmapCst0PackedReal::type_id::create();
 		kernal_data_gen = KernalCst0PackedReal::type_id::create();
+		bn_param_data_gen = BNParamCst0PackedReal::type_id::create();
 		
 		this.build_test_cfg();
 		
@@ -231,6 +267,11 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		fmap_mem_adpt = new(fmap, "FmapPandaMemoryAdapter", 16);
 		kernal_mem_adpt = new(kernal_set, "KernalPandaMemoryAdapter", 16);
 		
+		bm_params = BNParamTable::type_id::create();
+		bm_params.set_data_gen(bn_param_data_gen);
+		if(!bm_params.set_table_len(this.kernal_cfg.kernal_num_n).randomize_table())
+			`uvm_error(this.get_name(), "cannot randomize bm_params!")
+		
 		if(this.en_output_mem_bin)
 		begin
 			if(!fmap_mem_adpt.output_to_bin(mem_bin_fid[0], fmap_mem_adpt.data_blk.get_baseaddr(), fmap_mem_adpt.data_blk.get_len_in_byte()))
@@ -238,23 +279,30 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 			
 			if(!kernal_mem_adpt.output_to_bin(mem_bin_fid[1], kernal_mem_adpt.data_blk.get_baseaddr(), kernal_mem_adpt.data_blk.get_len_in_byte()))
 				`uvm_error(this.get_name(), "cannot output kernal.bin")
+			
+			if(!bm_params.output_to_bin(mem_bin_fid[2]))
+				`uvm_error(this.get_name(), "cannot output bn.bin")
 		end
 		
 		uvm_config_db #(FmapCfg)::set(null, "", "fmap_cfg", this.fmap_cfg);
 		uvm_config_db #(KernalCfg)::set(null, "", "kernal_cfg", this.kernal_cfg);
 		uvm_config_db #(ConvCalCfg)::set(null, "", "cal_cfg", this.conv_cal_cfg);
 		uvm_config_db #(BufferCfg)::set(null, "", "buf_cfg", this.buf_cfg);
+		uvm_config_db #(BNCfg)::set(null, "", "bn_cfg", this.bn_cfg);
 		uvm_config_db #(PandaMemoryAdapter)::set(null, "", "fmap_mem", fmap_mem_adpt);
 		uvm_config_db #(PandaMemoryAdapter)::set(null, "", "kernal_mem", kernal_mem_adpt);
+		uvm_config_db #(BNParamTable)::set(null, "", "bm_params", bm_params);
 		
 		`panda_print_with(this.fmap_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(this.kernal_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(this.conv_cal_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(this.buf_cfg, cfg_log_fid, Util::get_object_printer())
+		`panda_print_with(this.bn_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(fmap_builder_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(kernal_builder_cfg, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(fmap, cfg_log_fid, Util::get_object_printer())
 		`panda_print_with(kernal_set, cfg_log_fid, Util::get_object_printer())
+		`panda_print_with(bm_params, cfg_log_fid, Util::get_object_printer())
 		
 		$fclose(cfg_log_fid);
 		
@@ -262,6 +310,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		begin
 			$fclose(mem_bin_fid[0]);
 			$fclose(mem_bin_fid[1]);
+			$fclose(mem_bin_fid[2]);
 		end
 	endfunction
 	
@@ -304,7 +353,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		this.top_sim_env.final_res_export.connect(this.dma_s2mm_data_len_scb.final_res_port);
 		
 		this.fmap_out_pt_cal_proc_listener = ConcreteFmapOutPtCalProcListener::type_id::create();
-		this.mid_res_acmlt_cal_obsv_env_arr[3].register_cal_proc_listener(this.fmap_out_pt_cal_proc_listener);
+		this.mid_res_acmlt_cal_obsv_env_arr[0].register_cal_proc_listener(this.fmap_out_pt_cal_proc_listener);
 		this.fmap_out_pt_cal_proc_listener.fid = $fopen("mid_res_acmlt_cal_obsv_log.txt");
 		
 		$fclose(this.exp_fmap_cal_proc_listener.fid);
@@ -393,6 +442,13 @@ class generic_conv_sim_test_0 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_0)
@@ -457,6 +513,13 @@ class generic_conv_sim_test_1 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_1)
@@ -521,6 +584,13 @@ class generic_conv_sim_test_2 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_2)
@@ -585,6 +655,13 @@ class generic_conv_sim_test_3 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_3)
@@ -649,6 +726,13 @@ class generic_conv_sim_test_4 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_4)
@@ -713,6 +797,13 @@ class generic_conv_sim_test_5 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 4;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_5)
@@ -777,6 +868,13 @@ class generic_conv_sim_test_6 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_6)
@@ -841,6 +939,13 @@ class generic_conv_sim_test_7 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 8;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_7)
@@ -905,6 +1010,13 @@ class generic_conv_sim_test_8 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_8)
@@ -969,6 +1081,13 @@ class generic_conv_sim_test_9 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 4;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_9)
@@ -1033,6 +1152,13 @@ class generic_conv_sim_test_10 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 4;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_10)
@@ -1097,6 +1223,13 @@ class generic_conv_sim_test_11 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 16;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_11)
@@ -1161,6 +1294,13 @@ class generic_conv_sim_test_12 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 8;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_12)
@@ -1225,10 +1365,88 @@ class generic_conv_sim_test_13 extends generic_conv_sim_base_test;
 			mid_res_buf_row_n_bufferable == 4;
 		})
 			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
 	endfunction
 	
 	`tue_component_default_constructor(generic_conv_sim_test_13)
 	`uvm_component_utils(generic_conv_sim_test_13)
+	
+endclass
+
+class generic_conv_sim_test_14 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
+			fmap_w == 25;
+			fmap_h == 25;
+			fmap_c == 13;
+			ofmap_data_type == DATA_4_BYTE;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 9;
+			kernal_chn_n == 13;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == ATOMIC_C;
+			atomic_k == ATOMIC_K;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 2;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == STREAM_DATA_WIDTH;
+			fnl_res_data_width == FNL_RES_DATA_WIDTH;
+			fmbufbankn == 2;
+			fmbufcoln == COLN_32;
+			fmbufrown == 32;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_16;
+			kbufgrpn == 49;
+			mid_res_item_n_foreach_row == 50;
+			mid_res_buf_row_n_bufferable == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_14)
+	`uvm_component_utils(generic_conv_sim_test_14)
 	
 endclass
 

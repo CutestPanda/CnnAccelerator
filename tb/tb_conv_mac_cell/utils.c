@@ -29,7 +29,19 @@ unsigned int get_fp16(int log_fid, double d) {
 	}
 	fp16 |= (exp << 10);
 	
+	int8_t to_add_1;
+	
+	if(frac != 0x007FFFFF){
+		to_add_1 = (frac & (1 << 12)) ? 0x01:0x00;
+	}else{
+		to_add_1 = 0;
+	}
+	
 	frac >>= 13;
+	if(to_add_1){
+		frac++;
+	}
+	
 	fp16 |= frac;
 	
 	return (unsigned int)fp16;

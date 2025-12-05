@@ -50,12 +50,14 @@ endclass
 virtual class AbstractData extends uvm_object;
 	
 	pure virtual function bit[15:0] encode_to_int16();
+	pure virtual function bit[31:0] encode_to_int32();
 	pure virtual function void set_by_int16(bit[15:0] int16);
 	pure virtual function void set_by_int32(bit[31:0] int32);
 	
 	pure virtual function AbstractData add(AbstractData rhs);
 	pure virtual function AbstractData mul(AbstractData rhs);
 	pure virtual function void add_assign(AbstractData rhs);
+	pure virtual function void mul_assign(AbstractData rhs);
 	pure virtual function void set_to_zero();
 	
 	pure virtual function ErrorValue cmp_err(AbstractData rhs);
@@ -78,6 +80,10 @@ class PackedReal extends AbstractData;
 		cvt_res = encode_fp16(this.data);
 		
 		return cvt_res[15:0];
+	endfunction
+	
+	virtual function bit[31:0] encode_to_int32();
+		return encode_fp32(this.data);
 	endfunction
 	
 	virtual function void set_by_int16(bit[15:0] int16);
@@ -147,6 +153,15 @@ class PackedReal extends AbstractData;
 		this.data += rhs_this.data;
 	endfunction
 	
+	virtual function void mul_assign(AbstractData rhs);
+		PackedReal rhs_this;
+		
+		if(!$cast(rhs_this, rhs))
+			`uvm_fatal(this.get_name(), "For op *=, if lhs is PackedReal, then rhs mush be PackedReal!")
+		
+		this.data *= rhs_this.data;
+	endfunction
+	
 	virtual function bit do_rand(uvm_object rand_context);
 		return this.randomize();
 	endfunction
@@ -175,6 +190,10 @@ class PackedShortInt extends AbstractData;
 		return this.data[15:0];
 	endfunction
 	
+	virtual function bit[31:0] encode_to_int32();
+		return {{16{this.data[15]}}, this.data[15:0]};
+	endfunction
+	
 	virtual function void set_by_int16(bit[15:0] int16);
 		this.data[15:0] = int16;
 	endfunction
@@ -200,6 +219,10 @@ class PackedShortInt extends AbstractData;
 	endfunction
 	
 	virtual function void add_assign(AbstractData rhs);
+		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt += ?")
+	endfunction
+	
+	virtual function void mul_assign(AbstractData rhs);
 		`uvm_fatal(this.get_name(), "Not Support: PackedShortInt *= ?")
 	endfunction
 	
@@ -386,7 +409,7 @@ class Surface extends tue_object_base #(
 	`uvm_object_utils_begin(Surface)
 		`uvm_field_int(baseaddr, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_int(bytes_n, UVM_DEFAULT | UVM_DEC)
-		`uvm_field_array_object(data, UVM_DEFAULT | UVM_NOPRINT | UVM_HEX)
+		`uvm_field_array_object(data, UVM_DEFAULT | UVM_NOPRINT)
 	`uvm_object_utils_end
 	
 endclass
@@ -637,6 +660,18 @@ class KernalSetBuilderContext extends uvm_object;
 	
 endclass
 
+class BNParamRandContext extends uvm_object;
+	
+	bit is_param_a;
+	
+	`tue_object_default_constructor(BNParamRandContext)
+	
+	`uvm_object_utils_begin(BNParamRandContext)
+		`uvm_field_int(is_param_a, UVM_DEFAULT | UVM_BIN)
+	`uvm_object_utils_end
+	
+endclass
+
 virtual class AbstractDataBuilder extends uvm_object;
 	
 	local AbstractData data_gen;
@@ -649,6 +684,10 @@ virtual class AbstractDataBuilder extends uvm_object;
 		this.default_data_gen = PackedShortInt::type_id::create();
 	endfunction
 	
+	function void set_data_gen(AbstractData data_gen);
+		this.data_gen = data_gen;
+	endfunction
+	
 	protected function AbstractData get_cur_data_gen();
 		if(this.data_gen == null)
 			return this.default_data_gen;
@@ -656,8 +695,16 @@ virtual class AbstractDataBuilder extends uvm_object;
 			return this.data_gen;
 	endfunction
 	
-	function void set_data_gen(AbstractData data_gen);
-		this.data_gen = data_gen;
+	protected function AbstractData create_data();
+		AbstractData cur_data_gen;
+		AbstractData new_data;
+		
+		cur_data_gen = this.get_cur_data_gen();
+		
+		if(!$cast(new_data, cur_data_gen.clone()))
+			return null;
+		
+		return new_data;
 	endfunction
 	
 endclass
@@ -674,10 +721,8 @@ class FmapBuilder extends AbstractDataBuilder;
 	
 	function void build_default_feature_map(const ref FmapBuilderCfg cfg);
 		int unsigned now_fmap_row_baseaddr;
-		AbstractData cur_data_gen;
 		
 		now_fmap_row_baseaddr = 0;
-		cur_data_gen = this.get_cur_data_gen();
 		
 		for(int unsigned i = 0;i < cfg.total_fmrow_n;i++)
 		begin
@@ -713,21 +758,26 @@ class FmapBuilder extends AbstractDataBuilder;
 				for(int unsigned k = 0;k < sfc_cfg.len_foreach_sfc;k++)
 				begin
 					AbstractData new_data;
-					FmapBuilderContext rand_context;
 					
-					rand_context = FmapBuilderContext::type_id::create();
+					new_data = this.create_data();
 					
-					rand_context.row_id = i;
-					rand_context.sfc_id = j;
-					rand_context.data_id = k;
-					
-					if(!$cast(new_data, cur_data_gen.clone()))
-						`uvm_error(this.get_name(), "cannot cast to new_data!")
-					
-					if(!new_data.do_rand(rand_context))
-						`uvm_error(this.get_name(), "cannot randomize new_data!")
-					
-					void'(sfc.set_pt(k, new_data));
+					if(new_data != null)
+					begin
+						FmapBuilderContext rand_context;
+						
+						rand_context = FmapBuilderContext::type_id::create();
+						
+						rand_context.row_id = i;
+						rand_context.sfc_id = j;
+						rand_context.data_id = k;
+						
+						if(!new_data.do_rand(rand_context))
+							`uvm_error(this.get_name(), "cannot randomize new_data!")
+						
+						void'(sfc.set_pt(k, new_data));
+					end
+					else
+						`uvm_error(this.get_name(), "create_data failed!")
 				end
 				
 				void'(row.set_sfc(j, sfc));
@@ -771,11 +821,9 @@ class KernalSetBuilder extends AbstractDataBuilder;
 	function void build_default_kernal_set(const ref KernalSetBuilderCfg cfg);
 		int unsigned now_cgrpid;
 		int unsigned now_cgrp_baseaddr;
-		AbstractData cur_data_gen;
 		
 		now_cgrpid = 0;
 		now_cgrp_baseaddr = 0;
-		cur_data_gen = this.get_cur_data_gen();
 		
 		for(int unsigned k = 0;k < cfg.total_kernal_set_n;k++)
 		begin
@@ -833,23 +881,28 @@ class KernalSetBuilder extends AbstractDataBuilder;
 						for(int unsigned i = 0;i < now_sfc_depth;i++)
 						begin
 							AbstractData new_data;
-							KernalSetBuilderContext rand_context;
 							
-							rand_context = KernalSetBuilderContext::type_id::create();
+							new_data = this.create_data();
 							
-							rand_context.set_id = k;
-							rand_context.cgrp_id = c;
-							rand_context.wgt_blk_id = w;
-							rand_context.sfc_id = s;
-							rand_context.data_id = i;
-							
-							if(!$cast(new_data, cur_data_gen.clone()))
-								`uvm_error(this.get_name(), "cannot cast to new_data!")
-							
-							if(!new_data.do_rand(rand_context))
-								`uvm_error(this.get_name(), "cannot randomize new_data!")
-							
-							void'(kernal_sfc.set_pt(i, new_data));
+							if(new_data != null)
+							begin
+								KernalSetBuilderContext rand_context;
+								
+								rand_context = KernalSetBuilderContext::type_id::create();
+								
+								rand_context.set_id = k;
+								rand_context.cgrp_id = c;
+								rand_context.wgt_blk_id = w;
+								rand_context.sfc_id = s;
+								rand_context.data_id = i;
+								
+								if(!new_data.do_rand(rand_context))
+									`uvm_error(this.get_name(), "cannot randomize new_data!")
+								
+								void'(kernal_sfc.set_pt(i, new_data));
+							end
+							else
+								`uvm_error(this.get_name(), "create_data failed!")
 						end
 						
 						void'(kernal_wgt_blk.set_sfc(s, kernal_sfc));
@@ -914,6 +967,102 @@ class PandaMemoryAdapter extends panda_memory #(
 		`uvm_field_int(default_data, UVM_DEFAULT | UVM_HEX)
 		`uvm_field_int(byte_width, UVM_DEFAULT | UVM_DEC)
 		`uvm_field_aa_int_int(memory, UVM_DEFAULT | UVM_HEX)
+	`uvm_object_utils_end
+	
+endclass
+
+class BNParamTable extends AbstractDataBuilder;
+	
+	local AbstractData param_a_table[];
+	local AbstractData param_b_table[];
+	
+	function bit output_to_bin(int fid);
+		for(int i = 0;i < this.param_a_table.size();i++)
+		begin
+			bit[31:0] p_a;
+			bit[31:0] p_b;
+			
+			p_a = this.param_a_table[i].encode_to_int32();
+			p_b = this.param_b_table[i].encode_to_int32();
+			
+			$fwrite(fid, "%c", p_a[7:0]);
+			$fwrite(fid, "%c", p_a[15:8]);
+			$fwrite(fid, "%c", p_a[23:16]);
+			$fwrite(fid, "%c", p_a[31:24]);
+			$fwrite(fid, "%c", p_b[7:0]);
+			$fwrite(fid, "%c", p_b[15:8]);
+			$fwrite(fid, "%c", p_b[23:16]);
+			$fwrite(fid, "%c", p_b[31:24]);
+		end
+		
+		return 1'b1;
+	endfunction
+	
+	function BNParamTable set_table_len(int unsigned len);
+		this.param_a_table = new[len];
+		this.param_b_table = new[len];
+		
+		return this;
+	endfunction
+	
+	function bit randomize_table();
+		BNParamRandContext rand_context;
+		AbstractData new_data;
+		
+		foreach(this.param_a_table[_i])
+		begin
+			new_data = this.create_data();
+			
+			if(new_data != null)
+			begin
+				rand_context = BNParamRandContext::type_id::create();
+				
+				rand_context.is_param_a = 1'b1;
+				
+				if(!new_data.do_rand(rand_context))
+					return 1'b0;
+				
+				this.param_a_table[_i] = new_data;
+			end
+			else
+				`uvm_error(this.get_name(), "create_data failed!")
+		end
+		
+		foreach(this.param_b_table[_i])
+		begin
+			new_data = this.create_data();
+			
+			if(new_data != null)
+			begin
+				rand_context = BNParamRandContext::type_id::create();
+				
+				rand_context.is_param_a = 1'b0;
+				
+				if(!new_data.do_rand(rand_context))
+					return 1'b0;
+				
+				this.param_b_table[_i] = new_data;
+			end
+			else
+				`uvm_error(this.get_name(), "create_data failed!")
+		end
+		
+		return 1'b1;
+	endfunction
+	
+	function AbstractData get_param_a(int unsigned id);
+		return this.param_a_table[id];
+	endfunction
+	
+	function AbstractData get_param_b(int unsigned id);
+		return this.param_b_table[id];
+	endfunction
+	
+	`tue_object_default_constructor(BNParamTable)
+	
+	`uvm_object_utils_begin(BNParamTable)
+		`uvm_field_array_object(param_a_table, UVM_DEFAULT)
+		`uvm_field_array_object(param_b_table, UVM_DEFAULT)
 	`uvm_object_utils_end
 	
 endclass

@@ -40,7 +40,7 @@ SOFTWARE.
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/21
+日期: 2025/12/04
 ********************************************************************/
 
 
@@ -154,9 +154,10 @@ module conv_final_data_collector #(
 		end
 	endgenerate
 	
-	assign collector_in_mask_ext = collector_in_mask | {BUF_ITEM_N{1'b0}};
+	assign collector_in_mask_ext = 
+		collector_in_mask | {BUF_ITEM_N{1'b0}};
 	assign collector_in_mask_ext_highest = 
-		(collector_in_mask & {1'b1, ~collector_in_mask[IN_ITEM_WIDTH-1:1]}) | {BUF_ITEM_N{1'b0}};
+		(collector_in_mask & (~(collector_in_mask >> 1))) | {BUF_ITEM_N{1'b0}};
 	
 	/** 数据缓存 **/
 	// [存储实体]

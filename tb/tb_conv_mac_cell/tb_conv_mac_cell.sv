@@ -14,7 +14,7 @@ module tb_conv_mac_cell();
 	
 	/** 配置参数 **/
 	// 待测模块配置
-	localparam integer ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	localparam integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	localparam integer EN_SMALL_FP16 = "true"; // 是否处理极小FP16
 	// 运行时参数
 	localparam bit[1:0] CALFMT = CAL_FMT_FP16; // 运算数据格式
@@ -73,7 +73,7 @@ module tb_conv_mac_cell();
 				
 				@(posedge clk iff rst_n);
 				
-				repeat(TEST_N)
+				for(int m = 0;m < TEST_N;m++)
 				begin
 					automatic int unsigned wait_n = $urandom_range(0, 6);
 					ref_v = 0.0;
@@ -249,6 +249,7 @@ module tb_conv_mac_cell();
 	conv_mac_cell #(
 		.ATOMIC_C(ATOMIC_C),
 		.EN_SMALL_FP16(EN_SMALL_FP16),
+		.INFO_ALONG_WIDTH(2),
 		.SIM_DELAY(simulation_delay)
 	)dut(
 		.aclk(clk),
@@ -259,10 +260,13 @@ module tb_conv_mac_cell();
 		
 		.mac_in_ftm(mac_in_ftm),
 		.mac_in_wgt(mac_in_wgt),
+		.mac_in_ftm_masked(1'b0),
+		.mac_in_info_along(1'b01),
 		.mac_in_valid(mac_in_valid),
 		
 		.mac_out_exp(mac_out_exp),
 		.mac_out_frac(mac_out_frac),
+		.mac_out_info_along(),
 		.mac_out_valid(mac_out_valid),
 		
 		.mul_op_a(mul_op_a),

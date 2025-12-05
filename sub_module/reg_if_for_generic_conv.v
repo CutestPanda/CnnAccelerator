@@ -56,6 +56,7 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	|  ctrl0   | 0x40/16 | 0: 使能计算子系统             |      RW      |                                  |
 	|          |         | 1: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
+	|          |         | 2: 使能批归一化与激活处理单元 |      RW      |                                  |
 	|          |         | 8: 启动卷积核权重             |      WO      | 向该位写1会向卷积核权重          |
 	|          |         |    访问请求生成单元           |              | 访问请求生成单元发送start信号    |
 	|          |         | 9: 启动特征图表面行           |      WO      | 向该位写1会向特征图表面行        |
@@ -147,6 +148,12 @@ SOFTWARE.
 	|          |         |      中间结果项数 - 1         |              |                                  |
 	|          |         |23~16: 可缓存的中间结果行数 - 1|      RW      |                                  |
 	--------------------------------------------------------------------------------------------------------
+	********************************************************************************************************
+	--------------------------------------------------------------------------------------------------------
+	| bn_act   |0x180/96 |4~0: 定点数量化精度            |      RW      |                                  |
+	| _cfg0    |         |  8: 参数A的实际值是否为1      |      RW      |                                  |
+	|          |         |  9: 参数B的实际值是否为0      |      RW      |                                  |
+	--------------------------------------------------------------------------------------------------------
 
 注意：
 无
@@ -156,7 +163,7 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/11/29
+日期: 2025/12/05
 ********************************************************************/
 
 
@@ -214,6 +221,7 @@ module reg_if_for_generic_conv #(
 	// 使能信号
 	output wire en_mac_array, // 使能乘加阵列
 	output wire en_packer, // 使能打包器
+	output wire en_bn_act_proc, // 使能批归一化与激活处理单元
 	
 	// 运行时参数
 	// [计算参数]
@@ -260,6 +268,10 @@ module reg_if_for_generic_conv #(
 	output wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
 	output wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
 	output wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
+	// [批归一化参数]
+	output wire[4:0] bn_fixed_point_quat_accrc, // 定点数量化精度
+	output wire bn_is_a_eq_1, // 参数A的实际值为1(标志)
+	output wire bn_is_b_eq_0, // 参数B的实际值为0(标志)
 	
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
@@ -306,6 +318,7 @@ module reg_if_for_generic_conv #(
 	localparam CAL_FMT_INT8 = 2'b00;
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
+	localparam CAL_FMT_NONE = 2'b11;
 	
 	/** 寄存器配置控制 **/
 	reg[2:0] reg_cfg_sts; // 寄存器配置状态
@@ -443,7 +456,7 @@ module reg_if_for_generic_conv #(
 	wire[15:0] mid_res_buf_bank_n_r; // 中间结果缓存BANK数 - 1
 	wire[15:0] mid_res_buf_bank_depth_r; // 中间结果缓存BANK深度 - 1
 	
-	assign version_r = {4'd7, 4'd2, 4'd1, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.11.27
+	assign version_r = {4'd2, 4'd0, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.02
 	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv"
 	assign accelerator_id_r = ACCELERATOR_ID;
 	assign atomic_k_r = ATOMIC_K - 1;
@@ -463,6 +476,7 @@ module reg_if_for_generic_conv #(
 	--------------------------------------------------------------------------------------------------------
 	|  ctrl0   | 0x40/16 | 0: 使能计算子系统             |      RW      |                                  |
 	|          |         | 1: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
+	|          |         | 2: 使能批归一化与激活处理单元 |      RW      |                                  |
 	|          |         | 8: 启动卷积核权重             |      WO      | 向该位写1会向卷积核权重          |
 	|          |         |    访问请求生成单元           |              | 访问请求生成单元发送start信号    |
 	|          |         | 9: 启动特征图表面行           |      WO      | 向该位写1会向特征图表面行        |
@@ -473,12 +487,14 @@ module reg_if_for_generic_conv #(
 	**/
 	reg en_cal_sub_sys_r; // 使能计算子系统
 	reg en_pm_cnt_r; // 使能性能监测计数器
+	reg en_bn_act_proc_r; // 使能批归一化与激活处理单元
 	reg kernal_access_blk_start_r; // 启动卷积核权重访问请求生成单元(指示)
 	reg fmap_access_blk_start_r; // 启动特征图表面行访问请求生成单元(指示)
 	reg fnl_res_trans_blk_start_r; // 启动最终结果传输请求生成单元(指示)
 	
 	assign en_mac_array = en_cal_sub_sys_r;
 	assign en_packer = en_cal_sub_sys_r;
+	assign en_bn_act_proc = en_bn_act_proc_r;
 	
 	assign kernal_access_blk_start = kernal_access_blk_start_r;
 	assign fmap_access_blk_start = fmap_access_blk_start_r;
@@ -500,6 +516,15 @@ module reg_if_for_generic_conv #(
 			en_pm_cnt_r <= 1'b0;
 		else if(regs_en & regs_wen & (regs_addr == 16) & ((~regs_din[1]) | EN_PERF_MON))
 			en_pm_cnt_r <= # SIM_DELAY regs_din[1];
+	end
+	
+	// 使能批归一化与激活处理单元
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			en_bn_act_proc_r <= 1'b0;
+		else if(regs_en & regs_wen & (regs_addr == 16))
+			en_bn_act_proc_r <= # SIM_DELAY regs_din[2];
 	end
 	
 	// 启动卷积核权重访问请求生成单元(指示), 启动特征图表面行访问请求生成单元(指示), 启动最终结果传输请求生成单元(指示)
@@ -626,9 +651,10 @@ module reg_if_for_generic_conv #(
 	reg[3:0] cal_round_r; // 计算轮次 - 1
 	
 	assign calfmt = 
-		({2{INT8_SUPPORTED & (calfmt_r[1:0] == CAL_FMT_INT8)}} & CAL_FMT_INT8) | 
-		({2{INT16_SUPPORTED & (calfmt_r[1:0] == CAL_FMT_INT16)}} & CAL_FMT_INT16) | 
-		({2{FP16_SUPPORTED & (calfmt_r[1:0] == CAL_FMT_FP16)}} & CAL_FMT_FP16);
+		(INT8_SUPPORTED  & (calfmt_r[1:0] == CAL_FMT_INT8))  ? CAL_FMT_INT8:
+		(INT16_SUPPORTED & (calfmt_r[1:0] == CAL_FMT_INT16)) ? CAL_FMT_INT16:
+		(FP16_SUPPORTED  & (calfmt_r[1:0] == CAL_FMT_FP16))  ? CAL_FMT_FP16:
+		                                                       CAL_FMT_NONE;
 	assign conv_vertical_stride = 
 		LARGE_V_STRD_SUPPORTED ? 
 			conv_vertical_stride_r:
@@ -1102,6 +1128,44 @@ module reg_if_for_generic_conv #(
 			mid_res_buf_row_n_bufferable_r <= # SIM_DELAY regs_din[23:16];
 	end
 	
+	/**
+	寄存器(bn_act_cfg0)
+	
+	--------------------------------------------------------------------------------------------------------
+	| bn_act   |0x180/96 |4~0: 定点数量化精度            |      RW      |                                  |
+	| _cfg0    |         |  8: 参数A的实际值是否为1      |      RW      |                                  |
+	|          |         |  9: 参数B的实际值是否为0      |      RW      |                                  |
+	--------------------------------------------------------------------------------------------------------
+	**/
+	reg[4:0] bn_fixed_point_quat_accrc_r; // 定点数量化精度
+	reg bn_is_a_eq_1_r; // 参数A的实际值为1(标志)
+	reg bn_is_b_eq_0_r; // 参数B的实际值为0(标志)
+	
+	assign bn_fixed_point_quat_accrc = bn_fixed_point_quat_accrc_r;
+	assign bn_is_a_eq_1 = bn_is_a_eq_1_r;
+	assign bn_is_b_eq_0 = bn_is_b_eq_0_r;
+	
+	// 定点数量化精度
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 96))
+			bn_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[4:0];
+	end
+	
+	// 参数A的实际值为1(标志)
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 96))
+			bn_is_a_eq_1_r <= # SIM_DELAY regs_din[8];
+	end
+	
+	// 参数B的实际值为0(标志)
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 96))
+			bn_is_b_eq_0_r <= # SIM_DELAY regs_din[9];
+	end
+	
 	/** 寄存器读结果 **/
 	always @(posedge aclk)
 	begin
@@ -1115,7 +1179,7 @@ module reg_if_for_generic_conv #(
 				4: regs_dout <= # SIM_DELAY {max_fmbuf_rown_r[15:0], phy_buf_bank_depth_r[15:0]};
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
 				
-				16: regs_dout <= # SIM_DELAY {30'd0, en_pm_cnt_r, en_cal_sub_sys_r};
+				16: regs_dout <= # SIM_DELAY {29'd0, en_bn_act_proc_r, en_pm_cnt_r, en_cal_sub_sys_r};
 				
 				24: regs_dout <= # SIM_DELAY {29'd0, fnl_res_trans_blk_idle_r, fmap_access_blk_idle_r, kernal_access_blk_idle_r};
 				25: regs_dout <= # SIM_DELAY {dma_mm2s_0_fns_cmd_n_r[31:0]};
@@ -1153,6 +1217,8 @@ module reg_if_for_generic_conv #(
 				81: regs_dout <= # SIM_DELAY {fmbufrown_r[15:0], 12'h000, fmbufcoln_r[3:0]};
 				82: regs_dout <= # SIM_DELAY {8'h00, kbufgrpn_r[15:0], 4'h0, sfc_n_each_wgtblk_r[3:0]};
 				83: regs_dout <= # SIM_DELAY {8'h00, mid_res_buf_row_n_bufferable_r[7:0], mid_res_item_n_foreach_row_r[15:0]};
+				
+				96: regs_dout <= # SIM_DELAY {16'h0000, 6'd0, bn_is_b_eq_0_r, bn_is_a_eq_1_r, 3'b000, bn_fixed_point_quat_accrc_r[4:0]};
 				
 				default: regs_dout <= # SIM_DELAY 32'h0000_0000;
 			endcase

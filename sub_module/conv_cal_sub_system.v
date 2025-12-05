@@ -30,17 +30,22 @@ SOFTWARE.
 包括物理特征图表面行适配器、卷积乘加阵列、卷积中间结果表面行信息打包单元、卷积中间结果累加与缓存
 
 使用ATOMIC_K*ATOMIC_C个s16*s16乘法器, 时延 = 1clk
+使用BN_ACT_PRL_N*4个s18*s18乘法器或BN_ACT_PRL_N个s32*s32乘法器或BN_ACT_PRL_N个s25*s25乘法器, 时延 = 1或3clk
 
 使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH), 读时延 = 1clk
+使用1个真双口SRAM(位宽 = 64, 深度 = 最大的卷积核个数), 读时延 = 1clk
+使用1个简单双口SRAM(位宽 = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5, 深度 = 512), 读时延 = 1clk
 
 注意：
 当参数calfmt(运算数据格式)或cal_round(计算轮次 - 1)无效时, 需要除能乘加阵列(en_mac_array拉低)
-
 卷积乘加阵列仅提供简单反压(阵列输出ready拉低时暂停整个计算流水线), 当参数ofmap_w(输出特征图宽度 - 1)或kernal_w((膨胀前)卷积核宽度 - 1)
 无效时, 需要除能打包器(en_packer拉低)
+当(BN参数MEM里的)BN参数未准备好时, 需要除能BN与激活处理单元(en_bn_act_proc拉低)
 
 计算1层多通道卷积前, 必须先重置适配器(拉高rst_adapter)
 增加物理特征图表面行流量(给出on_incr_phy_row_traffic脉冲)以许可(kernal_w+1)个表面行的计算
+
+BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 
 协议:
 AXIS MASTER/SLAVE
@@ -54,11 +59,15 @@ module conv_cal_sub_system #(
 	// [子系统配置参数]
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer STREAM_DATA_WIDTH = 32, // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
-	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
-	parameter EN_SMALL_FP32 = "true", // 是否处理极小FP32
+	parameter EN_SMALL_FP16 = "true", // 乘加阵列是否处理极小FP16
+	parameter EN_SMALL_FP32 = "true", // 中间结果累加是否处理极小FP32
+	parameter BN_ACT_INT16_SUPPORTED = 1'b0, // BN与激活是否支持INT16运算数据格式
+	parameter BN_ACT_INT32_SUPPORTED = 1'b1, // BN与激活是否支持INT32运算数据格式
+	parameter BN_ACT_FP32_SUPPORTED = 1'b1, // BN与激活是否支持FP32运算数据格式
 	// [中间结果缓存配置参数]
 	parameter integer RBUF_BANK_N = 8, // 缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 缓存MEM深度(16 | ...)
@@ -79,6 +88,8 @@ module conv_cal_sub_system #(
 	input wire en_mac_array, // 使能乘加阵列
 	// [卷积中间结果表面行信息打包单元]
 	input wire en_packer, // 使能打包器
+	// [批归一化与激活处理单元]
+	input wire en_bn_act_proc, // 使能处理单元
 	
 	// 运行时参数
 	// [计算参数]
@@ -98,11 +109,21 @@ module conv_cal_sub_system #(
 	// [中间结果缓存参数]
 	input wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
 	input wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
+	// [批归一化参数]
+	input wire[4:0] bn_fixed_point_quat_accrc, // 定点数量化精度
+	input wire bn_is_a_eq_1, // 参数A的实际值为1(标志)
+	input wire bn_is_b_eq_0, // 参数B的实际值为0(标志)
 	
 	// 特征图切块信息(AXIS从机)
 	input wire[7:0] s_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	input wire s_fm_cake_info_axis_valid,
 	output wire s_fm_cake_info_axis_ready, // combinational logic out
+	
+	// 子表面行信息(AXIS从机)
+	input wire[15:0] s_sub_row_msg_axis_data, // {输出通道号(16bit)}
+	input wire s_sub_row_msg_axis_last, // 整个输出特征图的最后1个子表面行(标志)
+	input wire s_sub_row_msg_axis_valid,
+	output wire s_sub_row_msg_axis_ready, // combinational logic out
 	
 	// 物理特征图表面行数据(AXIS从机)
 	input wire[ATOMIC_C*2*8-1:0] s_fmap_row_axis_data,
@@ -124,24 +145,43 @@ module conv_cal_sub_system #(
 	output wire m_axis_fnl_res_valid,
 	input wire m_axis_fnl_res_ready,
 	
-	// 外部有符号乘法器
-	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_a, // 操作数A
-	                                                // combinational logic out
-	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_b, // 操作数B
-	                                                // combinational logic out
-	output wire[ATOMIC_K-1:0] mul_ce, // 计算使能
-	                                  // combinational logic out
-	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_res, // 计算结果
+	// 外部有符号乘法器#0
+	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul0_op_a, // 操作数A
+	                                                 // combinational logic out
+	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul0_op_b, // 操作数B
+	                                                 // combinational logic out
+	output wire[ATOMIC_K-1:0] mul0_ce, // 计算使能
+	                                   // combinational logic out
+	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul0_res, // 计算结果
+	// 外部有符号乘法器#1
+	output wire[(BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul1_op_a, // 操作数A
+	output wire[(BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul1_op_b, // 操作数B
+	output wire[(BN_ACT_INT16_SUPPORTED ? 4:3)*BN_ACT_PRL_N-1:0] mul1_ce, // 计算使能
+	                                                                      // combinational logic out
+	input wire[(BN_ACT_INT16_SUPPORTED ? 4*36:(BN_ACT_INT32_SUPPORTED ? 64:50))*BN_ACT_PRL_N-1:0] mul1_res, // 计算结果
 	
 	// 中间结果缓存MEM主接口
-	output wire mem_clk_a,
-	output wire[RBUF_BANK_N-1:0] mem_wen_a, // combinational logic out
-	output wire[RBUF_BANK_N*16-1:0] mem_addr_a,
-	output wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_din_a,
-	output wire mem_clk_b,
-	output wire[RBUF_BANK_N-1:0] mem_ren_b, // combinational logic out
-	output wire[RBUF_BANK_N*16-1:0] mem_addr_b, // combinational logic out
-	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b
+	output wire mid_res_mem_clk_a,
+	output wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a, // combinational logic out
+	output wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_a,
+	output wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_din_a,
+	output wire mid_res_mem_clk_b,
+	output wire[RBUF_BANK_N-1:0] mid_res_mem_ren_b, // combinational logic out
+	output wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b, // combinational logic out
+	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b,
+	// BN参数MEM主接口
+	output wire bn_mem_clk_b,
+	output wire bn_mem_ren_b,
+	output wire[15:0] bn_mem_addr_b,
+	input wire[63:0] bn_mem_dout_b, // {参数B(32bit), 参数A(32bit)}
+	// 处理结果fifo(MEM主接口)
+	output wire proc_res_fifo_mem_clk,
+	output wire proc_res_fifo_mem_wen_a, // combinational logic out
+	output wire[8:0] proc_res_fifo_mem_addr_a,
+	output wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
+	output wire proc_res_fifo_mem_ren_b, // combinational logic out
+	output wire[8:0] proc_res_fifo_mem_addr_b,
+	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b
 );
 	
 	// 计算bit_depth的最高有效位编号(即位数-1)
@@ -165,9 +205,20 @@ module conv_cal_sub_system #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	// BN处理的运算数据格式的编码
+	localparam BN_CAL_FMT_INT16 = 2'b00;
+	localparam BN_CAL_FMT_INT32 = 2'b01;
+	localparam BN_CAL_FMT_FP32 = 2'b10;
+	localparam BN_CAL_FMT_NONE = 2'b11;
+	// 乘加阵列和中间结果累加的运算数据格式的编码
+	localparam CAL_FMT_INT8 = 2'b00;
+	localparam CAL_FMT_INT16 = 2'b01;
+	localparam CAL_FMT_FP16 = 2'b10;
 	
 	/** 补充运行时参数 **/
 	wire[3:0] kernal_w; // (膨胀前)卷积核宽度 - 1
+	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
+	wire[1:0] bn_calfmt; // BN处理的数据格式
 	
 	assign kernal_w = 
 		(
@@ -178,6 +229,13 @@ module conv_cal_sub_system #(
 			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
 											 4'd11
 	    ) - 1;
+	assign bank_n_foreach_ofmap_row = 
+		(mid_res_item_n_foreach_row[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
+	assign bn_calfmt = 
+		(calfmt == CAL_FMT_INT8)  ? BN_CAL_FMT_INT16:
+		(calfmt == CAL_FMT_INT16) ? BN_CAL_FMT_INT32:
+		(calfmt == CAL_FMT_FP16)  ? BN_CAL_FMT_FP32:
+		                            BN_CAL_FMT_NONE;
 	
 	/** 物理特征图表面行适配器 **/
 	// 物理特征图表面行数据(AXIS从机)
@@ -305,10 +363,10 @@ module conv_cal_sub_system #(
 		.array_o_res_vld(array_o_res_vld),
 		.array_o_res_rdy(array_o_res_rdy),
 		
-		.mul_op_a(mul_op_a),
-		.mul_op_b(mul_op_b),
-		.mul_ce(mul_ce),
-		.mul_res(mul_res)
+		.mul_op_a(mul0_op_a),
+		.mul_op_b(mul0_op_b),
+		.mul_ce(mul0_ce),
+		.mul_res(mul0_res)
 	);
 	
 	/** 卷积中间结果表面行信息打包单元 **/
@@ -368,8 +426,6 @@ module conv_cal_sub_system #(
 	);
 	
 	/** 卷积中间结果累加与缓存 **/
-	// 运行时参数
-	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
 	// 中间结果输入(AXIS从机)
 	/*
 	对于ATOMIC_K个中间结果 -> 
@@ -392,9 +448,6 @@ module conv_cal_sub_system #(
 	wire m_axis_mid_res_buf_last; // 本行最后1个最终结果(标志)
 	wire m_axis_mid_res_buf_valid;
 	wire m_axis_mid_res_buf_ready;
-	
-	assign bank_n_foreach_ofmap_row = 
-		(mid_res_item_n_foreach_row[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	
 	assign s_axis_mid_res_buf_data = m_axis_pkt_out_data;
 	assign s_axis_mid_res_buf_keep = m_axis_pkt_out_keep;
@@ -432,20 +485,100 @@ module conv_cal_sub_system #(
 		.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
 		.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
 		
-		.mem_clk_a(mem_clk_a),
-		.mem_wen_a(mem_wen_a),
-		.mem_addr_a(mem_addr_a),
-		.mem_din_a(mem_din_a),
-		.mem_clk_b(mem_clk_b),
-		.mem_ren_b(mem_ren_b),
-		.mem_addr_b(mem_addr_b),
-		.mem_dout_b(mem_dout_b)
+		.mem_clk_a(mid_res_mem_clk_a),
+		.mem_wen_a(mid_res_mem_wen_a),
+		.mem_addr_a(mid_res_mem_addr_a),
+		.mem_din_a(mid_res_mem_din_a),
+		.mem_clk_b(mid_res_mem_clk_b),
+		.mem_ren_b(mid_res_mem_ren_b),
+		.mem_addr_b(mid_res_mem_addr_b),
+		.mem_dout_b(mid_res_mem_dout_b)
+	);
+	
+	/** 批归一化与激活处理单元 **/
+	// 卷积最终结果(AXIS从机)
+	wire[ATOMIC_K*32-1:0] s_axis_bn_act_data; // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
+	wire[ATOMIC_K*4-1:0] s_axis_bn_act_keep;
+	wire[4:0] s_axis_bn_act_user; // {是否最后1个子行(1bit), 子行号(4bit)}
+	wire s_axis_bn_act_last; // 本行最后1个最终结果(标志)
+	wire s_axis_bn_act_valid;
+	wire s_axis_bn_act_ready;
+	// 经过BN与激活处理的结果(AXIS主机)
+	wire[BN_ACT_PRL_N*32-1:0] m_axis_bn_act_data; // 对于BN_ACT_PRL_N个最终结果 -> {单精度浮点数或定点数(32位)}
+	wire[BN_ACT_PRL_N*4-1:0] m_axis_bn_act_keep;
+	wire[4:0] m_axis_bn_act_user; // {是否最后1个子行(1bit), 子行号(4bit)}
+	wire m_axis_bn_act_last; // 本行最后1个处理结果(标志)
+	wire m_axis_bn_act_valid;
+	wire m_axis_bn_act_ready;
+	
+	assign s_axis_bn_act_data = m_axis_mid_res_buf_data;
+	assign s_axis_bn_act_keep = m_axis_mid_res_buf_keep;
+	assign s_axis_bn_act_user = m_axis_mid_res_buf_user;
+	assign s_axis_bn_act_last = m_axis_mid_res_buf_last;
+	assign s_axis_bn_act_valid = m_axis_mid_res_buf_valid;
+	assign m_axis_mid_res_buf_ready = s_axis_bn_act_ready;
+	
+	conv_bn_act_proc #(
+		.ATOMIC_K(ATOMIC_K),
+		.BN_ACT_PRL_N(BN_ACT_PRL_N),
+		.INT16_SUPPORTED(BN_ACT_INT16_SUPPORTED),
+		.INT32_SUPPORTED(BN_ACT_INT32_SUPPORTED),
+		.FP32_SUPPORTED(BN_ACT_FP32_SUPPORTED),
+		.SIM_DELAY(SIM_DELAY)
+	)conv_bn_act_proc_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(aclken),
+		
+		.en_bn_act_proc(en_bn_act_proc),
+		
+		.bn_calfmt(bn_calfmt),
+		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
+		.bn_is_a_eq_1(bn_is_a_eq_1),
+		.bn_is_b_eq_0(bn_is_b_eq_0),
+		
+		.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
+		.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
+		.s_sub_row_msg_axis_valid(s_sub_row_msg_axis_valid),
+		.s_sub_row_msg_axis_ready(s_sub_row_msg_axis_ready),
+		
+		.s_axis_fnl_res_data(s_axis_bn_act_data),
+		.s_axis_fnl_res_keep(s_axis_bn_act_keep),
+		.s_axis_fnl_res_user(s_axis_bn_act_user),
+		.s_axis_fnl_res_last(s_axis_bn_act_last),
+		.s_axis_fnl_res_valid(s_axis_bn_act_valid),
+		.s_axis_fnl_res_ready(s_axis_bn_act_ready),
+		
+		.m_axis_bn_act_res_data(m_axis_bn_act_data),
+		.m_axis_bn_act_res_keep(m_axis_bn_act_keep),
+		.m_axis_bn_act_res_user(m_axis_bn_act_user),
+		.m_axis_bn_act_res_last(m_axis_bn_act_last),
+		.m_axis_bn_act_res_valid(m_axis_bn_act_valid),
+		.m_axis_bn_act_res_ready(m_axis_bn_act_ready),
+		
+		.bn_mem_clk_b(bn_mem_clk_b),
+		.bn_mem_ren_b(bn_mem_ren_b),
+		.bn_mem_addr_b(bn_mem_addr_b),
+		.bn_mem_dout_b(bn_mem_dout_b),
+		
+		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
+		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
+		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
+		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
+		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
+		
+		.mul0_op_a(mul1_op_a),
+		.mul0_op_b(mul1_op_b),
+		.mul0_ce(mul1_ce),
+		.mul0_res(mul1_res)
 	);
 	
 	/** 最终结果数据收集器 **/
 	// 收集器输入(AXIS从机)
-	wire[ATOMIC_K*32-1:0] s_axis_collector_data;
-	wire[ATOMIC_K*4-1:0] s_axis_collector_keep;
+	wire[BN_ACT_PRL_N*32-1:0] s_axis_collector_data;
+	wire[BN_ACT_PRL_N*4-1:0] s_axis_collector_keep;
 	wire[4:0] s_axis_collector_user;
 	wire s_axis_collector_last;
 	wire s_axis_collector_valid;
@@ -458,12 +591,12 @@ module conv_cal_sub_system #(
 	wire m_axis_collector_valid;
 	wire m_axis_collector_ready;
 	
-	assign s_axis_collector_data = m_axis_mid_res_buf_data;
-	assign s_axis_collector_keep = m_axis_mid_res_buf_keep;
-	assign s_axis_collector_user = m_axis_mid_res_buf_user;
-	assign s_axis_collector_last = m_axis_mid_res_buf_last;
-	assign s_axis_collector_valid = m_axis_mid_res_buf_valid;
-	assign m_axis_mid_res_buf_ready = s_axis_collector_ready;
+	assign s_axis_collector_data = m_axis_bn_act_data;
+	assign s_axis_collector_keep = m_axis_bn_act_keep;
+	assign s_axis_collector_user = m_axis_bn_act_user;
+	assign s_axis_collector_last = m_axis_bn_act_last;
+	assign s_axis_collector_valid = m_axis_bn_act_valid;
+	assign m_axis_bn_act_ready = s_axis_collector_ready;
 	
 	assign m_axis_fnl_res_data = m_axis_collector_data;
 	assign m_axis_fnl_res_keep = m_axis_collector_keep;
@@ -473,7 +606,7 @@ module conv_cal_sub_system #(
 	assign m_axis_collector_ready = m_axis_fnl_res_ready;
 	
 	conv_final_data_collector #(
-		.IN_ITEM_WIDTH(ATOMIC_K),
+		.IN_ITEM_WIDTH(BN_ACT_PRL_N),
 		.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/32),
 		.DATA_WIDTH_FOREACH_ITEM(32),
 		.HAS_USER("true"),

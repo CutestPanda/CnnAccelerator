@@ -231,11 +231,13 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 	
 	local panda_blk_ctrl_master_agent blk_ctrl_mst_agt;
 	local panda_axis_slave_agent req_axis_slv_agt;
+	local panda_axis_slave_agent msg_axis_slv_agt;
 	
 	local ConvCalCfg cal_cfg;
 	
 	local panda_blk_ctrl_configuration blk_ctrl_mst_cfg;
 	local panda_axis_configuration req_axis_slv_cfg;
+	local panda_axis_configuration msg_axis_slv_cfg;
 	
 	function new(string name = "FnlResTransReqGenTestEnv", uvm_component parent = null);
 		super.new(name, parent);
@@ -274,10 +276,23 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize req_axis_slv_cfg!")
 		
+		this.msg_axis_slv_cfg = panda_axis_configuration::type_id::create("msg_axis_slv_cfg");
+		if(!this.msg_axis_slv_cfg.randomize() with {
+			data_width == 16;
+			user_width == 0;
+			
+			has_keep == 1'b0;
+			has_strb == 1'b0;
+			has_last == 1'b1;
+		})
+			`uvm_fatal(this.get_name(), "cannot randomize msg_axis_slv_cfg!")
+		
 		if(!uvm_config_db #(panda_blk_ctrl_vif)::get(null, "", "fnl_res_trans_blk_ctrl_vif", this.blk_ctrl_mst_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for fnl_res_trans_blk_ctrl_vif!!!")
 		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "dma_s2mm_cmd_axis_vif_2", this.req_axis_slv_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for dma_s2mm_cmd_axis_vif_2!!!")
+		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "sub_row_msg_axis_vif", this.msg_axis_slv_cfg.vif))
+			`uvm_fatal(get_name(), "virtual interface must be set for sub_row_msg_axis_vif!!!")
 	endfunction
 	
 	protected function void build_status();
@@ -295,6 +310,10 @@ class FnlResTransReqGenTestEnv extends panda_env #(
 		this.req_axis_slv_agt = panda_axis_slave_agent::type_id::create("req_axis_slv_agt", this);
 		this.req_axis_slv_agt.passive_agent();
 		this.req_axis_slv_agt.set_configuration(this.req_axis_slv_cfg);
+		
+		this.msg_axis_slv_agt = panda_axis_slave_agent::type_id::create("msg_axis_slv_agt", this);
+		this.msg_axis_slv_agt.passive_agent();
+		this.msg_axis_slv_agt.set_configuration(this.msg_axis_slv_cfg);
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
@@ -567,6 +586,8 @@ class GenericConvSimTestEnv extends panda_env #(
 	local KernalCfg kernal_cfg;
 	local ConvCalCfg cal_cfg;
 	local BufferCfg buf_cfg;
+	local BNCfg bn_cfg;
+	local BNParamTable bm_params;
 	
 	local FmapOutPtCalProcListener cal_proc_listener = null;
 	
@@ -595,6 +616,10 @@ class GenericConvSimTestEnv extends panda_env #(
 			`uvm_fatal(this.get_name(), "cannot get cal_cfg!!!")
 		if(!uvm_config_db #(BufferCfg)::get(null, "", "buf_cfg", this.buf_cfg))
 			`uvm_fatal(this.get_name(), "cannot get buf_cfg!!!")
+		if(!uvm_config_db #(BNCfg)::get(null, "", "bn_cfg", this.bn_cfg))
+			`uvm_fatal(this.get_name(), "cannot get bn_cfg!!!")
+		if(!uvm_config_db #(BNParamTable)::get(null, "", "bm_params", this.bm_params))
+			`uvm_fatal(this.get_name(), "cannot get bm_params!!!")
 		
 		this.fmap_blk_ctrl_mst_cfg = panda_blk_ctrl_configuration::type_id::create("fmap_blk_ctrl_mst_cfg");
 		if(!this.fmap_blk_ctrl_mst_cfg.randomize() with {
@@ -748,6 +773,9 @@ class GenericConvSimTestEnv extends panda_env #(
 		
 		this.cfg_vif.master_cb.en_mac_array <= 1'b0;
 		this.cfg_vif.master_cb.en_packer <= 1'b0;
+		this.cfg_vif.master_cb.en_bn_act_proc <= 1'b0;
+		
+		this.cfg_vif.master_cb.bn_mem_wen_a <= 1'b0;
 		
 		repeat(4)
 			@(this.cfg_vif.master_cb);
@@ -834,12 +862,30 @@ class GenericConvSimTestEnv extends panda_env #(
 		this.cfg_vif.master_cb.kbufgrpn <= this.buf_cfg.kbufgrpn - 1;
 		this.cfg_vif.master_cb.mid_res_item_n_foreach_row <= this.buf_cfg.mid_res_item_n_foreach_row - 1;
 		this.cfg_vif.master_cb.mid_res_buf_row_n_bufferable <= this.buf_cfg.mid_res_buf_row_n_bufferable - 1;
+		this.cfg_vif.master_cb.bn_fixed_point_quat_accrc <= this.bn_cfg.bn_fixed_point_quat_accrc;
+		this.cfg_vif.master_cb.bn_is_a_eq_1 <= this.bn_cfg.bn_is_a_eq_1;
+		this.cfg_vif.master_cb.bn_is_b_eq_0 <= this.bn_cfg.bn_is_b_eq_0;
+		
+		@(this.cfg_vif.master_cb);
+		
+		for(int unsigned k = 0;k < this.kernal_cfg.kernal_num_n;k++)
+		begin
+			this.cfg_vif.master_cb.bn_mem_wen_a <= 1'b1;
+			this.cfg_vif.master_cb.bn_mem_addr_a <= k[15:0];
+			this.cfg_vif.master_cb.bn_mem_din_a[31:0] <= this.bm_params.get_param_a(k).encode_to_int32(); // 参数A
+			this.cfg_vif.master_cb.bn_mem_din_a[63:32] <= this.bm_params.get_param_b(k).encode_to_int32(); // 参数B
+			
+			@(this.cfg_vif.master_cb);
+		end
+		
+		this.cfg_vif.master_cb.bn_mem_wen_a <= 1'b0;
 		
 		repeat(4)
 			@(this.cfg_vif.master_cb);
 		
 		this.cfg_vif.master_cb.en_mac_array <= 1'b1;
 		this.cfg_vif.master_cb.en_packer <= 1'b1;
+		this.cfg_vif.master_cb.en_bn_act_proc <= 1'b1;
 		
 		phase.drop_objection(this);
 	endtask

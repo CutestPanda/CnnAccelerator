@@ -378,9 +378,11 @@ class fnl_res_trans_req_gen_test extends panda_test_single_clk_base #(
 	
 	local panda_blk_ctrl_master_agent blk_ctrl_mst_agt;
 	local panda_axis_slave_agent req_axis_slv_agt;
+	local panda_axis_slave_agent msg_axis_slv_agt;
 	
 	local panda_blk_ctrl_configuration blk_ctrl_mst_cfg;
 	local panda_axis_configuration req_axis_slv_cfg;
+	local panda_axis_configuration msg_axis_slv_cfg;
 	
 	function new(string name = "fnl_res_trans_req_gen_test", uvm_component parent = null);
 		super.new(name, parent);
@@ -435,10 +437,32 @@ class fnl_res_trans_req_gen_test extends panda_test_single_clk_base #(
 		})
 			`uvm_fatal(this.get_name(), "cannot randomize req_axis_slv_cfg!")
 		
+		this.msg_axis_slv_cfg = panda_axis_configuration::type_id::create("msg_axis_slv_cfg");
+		if(!this.msg_axis_slv_cfg.randomize() with {
+			data_width == 16;
+			user_width == 0;
+			
+			ready_delay.min_delay == 0;
+			ready_delay.mid_delay[0] == 1;
+			ready_delay.mid_delay[1] == 1;
+			ready_delay.max_delay == 3;
+			ready_delay.weight_zero_delay == 3;
+			ready_delay.weight_short_delay == 1;
+			ready_delay.weight_long_delay == 1;
+			
+			default_ready == 1'b1;
+			has_keep == 1'b0;
+			has_strb == 1'b0;
+			has_last == 1'b1;
+		})
+			`uvm_fatal(this.get_name(), "cannot randomize msg_axis_slv_cfg!")
+		
 		if(!uvm_config_db #(panda_blk_ctrl_vif)::get(null, "", "blk_ctrl_vif_m", this.blk_ctrl_mst_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for blk_ctrl_vif_m!!!")
 		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "req_axis_vif_s", this.req_axis_slv_cfg.vif))
 			`uvm_fatal(get_name(), "virtual interface must be set for req_axis_vif_s!!!")
+		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "msg_axis_vif_s", this.msg_axis_slv_cfg.vif))
+			`uvm_fatal(get_name(), "virtual interface must be set for msg_axis_vif_s!!!")
 	endfunction
 	
 	protected function void build_status();
@@ -456,6 +480,10 @@ class fnl_res_trans_req_gen_test extends panda_test_single_clk_base #(
 		this.req_axis_slv_agt = panda_axis_slave_agent::type_id::create("req_axis_slv_agt", this);
 		this.req_axis_slv_agt.active_agent();
 		this.req_axis_slv_agt.set_configuration(this.req_axis_slv_cfg);
+		
+		this.msg_axis_slv_agt = panda_axis_slave_agent::type_id::create("msg_axis_slv_agt", this);
+		this.msg_axis_slv_agt.active_agent();
+		this.msg_axis_slv_agt.set_configuration(this.msg_axis_slv_cfg);
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
@@ -464,6 +492,7 @@ class fnl_res_trans_req_gen_test extends panda_test_single_clk_base #(
 		
 		this.blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", FnlResTransReqGenBlkCtrlAllcaseSeq::type_id::get());
 		this.req_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
+		this.msg_axis_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 		
 		this.scb.set_blk_ctrl_tr_mcd(this.blk_ctrl_tr_mcd);
 		this.scb.set_req_tr_mcd(this.req_tr_mcd);

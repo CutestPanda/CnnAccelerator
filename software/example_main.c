@@ -4,16 +4,48 @@
 #include "xparameters.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/**
+通用卷积处理单元IP配置参数:
+	parameter integer INT8_SUPPORTED = 0; // 是否支持INT8
+	parameter integer INT16_SUPPORTED = 0; // 是否支持INT16
+	parameter integer FP16_SUPPORTED = 1; // 是否支持FP16
+	parameter integer LARGE_V_STRD_SUPPORTED = 1; // 是否支持>1的卷积垂直步长
+	parameter integer LARGE_H_STRD_SUPPORTED = 1; // 是否支持>1的卷积水平步长
+	parameter integer GRP_CONV_SUPPORTED = 0; // 是否支持组卷积
+	parameter integer EXT_PADDING_SUPPORTED = 1; // 是否支持外填充
+	parameter integer INNER_PADDING_SUPPORTED = 0; // 是否支持内填充
+	parameter integer KERNAL_DILATION_SUPPORTED = 0; // 是否支持卷积核膨胀
+	parameter integer EN_PERF_MON = 1; // 是否支持性能监测
+	parameter integer ACCELERATOR_ID = 0; // 加速器ID(0~3)
+	
+	parameter integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 8; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
+	parameter integer MM2S_STREAM_DATA_WIDTH = 64; // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer S2MM_STREAM_DATA_WIDTH = 64; // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 512; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_KERNAL_N = 512; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
+**/
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define IN_FMAP_FILENAME "in_fmap.bin" // 输入特征图文件名
 #define OUT_FMAP_FILENAME "out_fmap.bin" // 输出特征图文件名
+#define BN_PARAM_FILENAME "bn.bin" // BN参数文件名
 #define KWGT_FILENAME "kernal.bin" // 卷积核权重文件名
 
 #define IN_FMAP_LEN 8125 // 输入特征图数据总量
 #define KWGT_LEN 1053 // 卷积核权重数据总量
 #define OUT_FMAP_LEN 5625 // 输出特征图数据总量
+#define BN_PARAM_N 9 // BN参数总量
 
 #define OUT_FMAP_SUB_ROW_N 50 // 输出特征图子表面行总数
 
@@ -30,6 +62,7 @@ static AxiGnrConvHandler axi_generic_conv; // 通用卷积处理单元
 static uint16_t in_fmap[IN_FMAP_LEN]; // 输入特征图(数组)
 static uint16_t kwgt[KWGT_LEN]; // 卷积核权重(数组)
 static float out_fmap[OUT_FMAP_LEN]; // 输出特征图(数组)
+static BNParam bn_params[BN_PARAM_N]; // BN参数(数组)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -57,6 +90,18 @@ int main(){
 	}
 
 	if(sd_card_fatfs_fread(&file_handler, (void*)kwgt, KWGT_LEN * IN_DATA_LEN) != KWGT_LEN * IN_DATA_LEN){
+		return -1;
+	}
+	if(sd_card_fatfs_fclose(&file_handler)){
+		return -1;
+	}
+
+	// 从SD卡读取BN参数
+	if(sd_card_fatfs_fopen(&file_handler, BN_PARAM_FILENAME, FA_READ, 0)){
+		return -1;
+	}
+
+	if(sd_card_fatfs_fread(&file_handler, (void*)bn_params, BN_PARAM_N * 2 * 4) != BN_PARAM_N * 2 * 4){
 		return -1;
 	}
 	if(sd_card_fatfs_fclose(&file_handler)){
@@ -97,13 +142,23 @@ int main(){
 	conv_cfg.buffer_cfg.fmbufbankn = 2;
 	conv_cfg.buffer_cfg.fmbufcoln = CONV_COLN_32;
 	conv_cfg.buffer_cfg.sfc_n_each_wgtblk = CONV_WGTBLK_SFC_N_8;
+	conv_cfg.bn_cfg.fixed_point_quat_accrc = 0;
+	conv_cfg.bn_cfg.is_a_eq_1 = 0;
+	conv_cfg.bn_cfg.is_b_eq_0 = 0;
 
 	if(axi_generic_conv_cfg(&axi_generic_conv, (const AxiGnrConvCfg*)(&conv_cfg))){
 		return -1;
 	}
 
+	// 写BN参数
+	memcpy((void*)axi_generic_conv.bn_params_mem, (void*)bn_params, BN_PARAM_N * 2 * 4);
+
 	// 启动通用卷积处理单元
 	if(axi_generic_conv_enable_cal_sub_sys(&axi_generic_conv)){
+		return -1;
+	}
+
+	if(axi_generic_conv_enable_bn_act_proc(&axi_generic_conv)){
 		return -1;
 	}
 
@@ -125,6 +180,8 @@ int main(){
 
 	// 除能计算子系统
 	axi_generic_conv_disable_cal_sub_sys(&axi_generic_conv);
+	// 除能批归一化与激活处理单元
+	axi_generic_conv_disable_bn_act_proc(&axi_generic_conv);
 	// 除能性能监测计数器
 	axi_generic_conv_disable_pm_cnt(&axi_generic_conv);
 

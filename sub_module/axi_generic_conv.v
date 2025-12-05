@@ -35,6 +35,8 @@ AXI-通用卷积处理单元(顶层模块)
 
 可将SRAM和乘法器的接口引出, 在SOC层面再连接, 以实现SRAM和乘法器的共享
 
+BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
+
 协议:
 AXI-Lite SLAVE
 AXIS MASTER/SLAVE
@@ -58,12 +60,14 @@ module axi_generic_conv #(
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer ATOMIC_K = 4, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2, // 最大的计算轮次(1~16)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 64, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer S2MM_STREAM_DATA_WIDTH = 64, // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16, // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 1024, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512, // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter real SIM_DELAY = 1 // 仿真延时
@@ -94,6 +98,48 @@ module axi_generic_conv #(
     input wire[31:0] s_axi_lite_wdata,
     input wire s_axi_lite_wvalid,
     output wire s_axi_lite_wready,
+	
+	// BN参数存储器(AXI从机)
+    // 读地址通道
+    input wire[31:0] s_axi_araddr, // assumed to be aligned
+    // 2'b00 -> FIXED; 2'b01 -> INCR; 2'b10 -> WRAP; 2'b11 -> RESERVED
+    input wire[1:0] s_axi_arburst,
+    input wire[3:0] s_axi_arcache, // ignored
+    // 固定传输 -> len <= 16; 回环传输 -> len = 2 | 4 | 8 | 16
+    input wire[7:0] s_axi_arlen,
+    input wire s_axi_arlock, // ignored
+    input wire[2:0] s_axi_arprot, // ignored
+    input wire[2:0] s_axi_arsize, // assumed to be 3'b010(4 byte)
+    input wire s_axi_arvalid,
+    output wire s_axi_arready,
+    // 写地址通道
+    input wire[31:0] s_axi_awaddr, // assumed to be aligned
+    // 2'b00 -> FIXED; 2'b01 -> INCR; 2'b10 -> WRAP; 2'b11 -> RESERVED
+    input wire[1:0] s_axi_awburst,
+    input wire[3:0] s_axi_awcache, // ignored
+    // 固定传输 -> len <= 16; 回环传输 -> len = 2 | 4 | 8 | 16
+    input wire[7:0] s_axi_awlen,
+    input wire s_axi_awlock, // ignored
+    input wire[2:0] s_axi_awprot, // ignored
+    input wire[2:0] s_axi_awsize, // assumed to be 3'b010(4 byte)
+    input wire s_axi_awvalid,
+    output wire s_axi_awready,
+    // 写响应通道
+    output wire[1:0] s_axi_bresp, // const -> 2'b00(OKAY)
+    output wire s_axi_bvalid,
+    input wire s_axi_bready,
+    // 读数据通道
+    output wire[31:0] s_axi_rdata,
+    output wire s_axi_rlast,
+    output wire[1:0] s_axi_rresp, // const -> 2'b00(OKAY)
+    output wire s_axi_rvalid,
+    input wire s_axi_rready,
+    // 写数据通道
+    input wire[31:0] s_axi_wdata,
+    input wire s_axi_wlast,
+    input wire[3:0] s_axi_wstrb,
+    input wire s_axi_wvalid,
+    output wire s_axi_wready,
 	
 	// DMA命令完成指示
 	input wire mm2s_0_cmd_done, // 0号MM2S通道命令完成(指示)
@@ -155,12 +201,20 @@ module axi_generic_conv #(
     endfunction
 	
 	/** 内部参数 **/
-	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN); // 特征图缓存的缓存行号的位宽
+	// 特征图缓存的缓存行号的位宽
+	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN);
+	// 批归一化与激活处理结果fifo的位宽
+	localparam integer BN_ACT_PROC_RES_FIFO_WIDTH = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5;
+	// BN乘法器的位宽
+	localparam integer BN_MUL_OP_WIDTH = INT8_SUPPORTED ? 4*18:(INT16_SUPPORTED ? 32:25);
+	localparam integer BN_MUL_CE_WIDTH = INT8_SUPPORTED ? 4:3;
+	localparam integer BN_MUL_RES_WIDTH = INT8_SUPPORTED ? 4*36:(INT16_SUPPORTED ? 64:50);
 	
 	/** 寄存器配置接口 **/
 	// 使能信号
 	wire en_mac_array; // 使能乘加阵列
 	wire en_packer; // 使能打包器
+	wire en_bn_act_proc; // 使能批归一化与激活处理单元
 	// 运行时参数
 	// [计算参数]
 	wire[1:0] calfmt; // 运算数据格式
@@ -206,6 +260,10 @@ module axi_generic_conv #(
 	wire[7:0] kbufgrpn; // 可缓存的通道组数 - 1
 	wire[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
 	wire[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
+	// [批归一化参数]
+	wire[4:0] bn_fixed_point_quat_accrc; // 定点数量化精度
+	wire bn_is_a_eq_1; // 参数A的实际值为1(标志)
+	wire bn_is_b_eq_0; // 参数B的实际值为0(标志)
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
 	wire kernal_access_blk_start;
@@ -266,6 +324,7 @@ module axi_generic_conv #(
 		
 		.en_mac_array(en_mac_array),
 		.en_packer(en_packer),
+		.en_bn_act_proc(en_bn_act_proc),
 		
 		.calfmt(calfmt),
 		.conv_vertical_stride(conv_vertical_stride),
@@ -306,6 +365,9 @@ module axi_generic_conv #(
 		.kbufgrpn(kbufgrpn),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
+		.bn_is_a_eq_1(bn_is_a_eq_1),
+		.bn_is_b_eq_0(bn_is_b_eq_0),
 		
 		.kernal_access_blk_start(kernal_access_blk_start),
 		.kernal_access_blk_idle(kernal_access_blk_idle),
@@ -322,6 +384,101 @@ module axi_generic_conv #(
 		.mm2s_0_cmd_done(mm2s_0_cmd_done),
 		.mm2s_1_cmd_done(mm2s_1_cmd_done),
 		.s2mm_cmd_done(s2mm_cmd_done)
+	);
+	
+	/** BN参数MEM控制器 **/
+	// [AXI-SRAM控制器给出的存储器接口]
+	wire axi_sram_ctrler_ram_clk;
+    wire axi_sram_ctrler_ram_rst;
+    wire axi_sram_ctrler_ram_en;
+    wire[3:0] axi_sram_ctrler_ram_wen;
+    wire[29:0] axi_sram_ctrler_ram_addr;
+    wire[31:0] axi_sram_ctrler_ram_din;
+    wire[31:0] axi_sram_ctrler_ram_dout;
+	// [BN参数MEM接口]
+	wire bn_mem_clk_a;
+	wire bn_mem_en_a;
+	wire[7:0] bn_mem_wen_a;
+	wire[15:0] bn_mem_addr_a;
+	wire[63:0] bn_mem_din_a; // {参数B(32bit), 参数A(32bit)}
+	wire[63:0] bn_mem_dout_a; // {参数B(32bit), 参数A(32bit)}
+	// [读数据重对齐]
+	reg axi_sram_ctrler_word_sel;
+	
+	assign axi_sram_ctrler_ram_dout = 
+		axi_sram_ctrler_word_sel ? 
+			bn_mem_dout_a[63:32]:
+			bn_mem_dout_a[31:0];
+	
+	assign bn_mem_clk_a = axi_sram_ctrler_ram_clk;
+	assign bn_mem_en_a = axi_sram_ctrler_ram_en;
+	assign bn_mem_wen_a = 
+		axi_sram_ctrler_ram_addr[0] ? 
+			{axi_sram_ctrler_ram_wen, 4'b0000}:
+			{4'b0000, axi_sram_ctrler_ram_wen};
+	assign bn_mem_addr_a = 
+		axi_sram_ctrler_ram_addr[16:1];
+	assign bn_mem_din_a = 
+		axi_sram_ctrler_ram_addr[0] ? 
+			{axi_sram_ctrler_ram_din, 32'dx}:
+			{32'dx, axi_sram_ctrler_ram_din};
+	
+	always @(posedge axi_sram_ctrler_ram_clk)
+	begin
+		if(axi_sram_ctrler_ram_en)
+			axi_sram_ctrler_word_sel <= # SIM_DELAY axi_sram_ctrler_ram_addr[0];
+	end
+	
+	axi_bram_ctrler #(
+		.bram_depth(MAX_KERNAL_N*2),
+		.bram_read_la(1),
+		.en_read_buf_fifo("false"),
+		.simulation_delay(SIM_DELAY)
+	)bn_param_sram_ctrler(
+		.clk(aclk),
+		.rst_n(aresetn),
+		
+		.s_axi_araddr(s_axi_araddr),
+		.s_axi_arburst(s_axi_arburst),
+		.s_axi_arcache(s_axi_arcache),
+		.s_axi_arlen(s_axi_arlen),
+		.s_axi_arlock(s_axi_arlock),
+		.s_axi_arprot(s_axi_arprot),
+		.s_axi_arsize(s_axi_arsize),
+		.s_axi_arvalid(s_axi_arvalid),
+		.s_axi_arready(s_axi_arready),
+		.s_axi_awaddr(s_axi_awaddr),
+		.s_axi_awburst(s_axi_awburst),
+		.s_axi_awcache(s_axi_awcache),
+		.s_axi_awlen(s_axi_awlen),
+		.s_axi_awlock(s_axi_awlock),
+		.s_axi_awprot(s_axi_awprot),
+		.s_axi_awsize(s_axi_awsize),
+		.s_axi_awvalid(s_axi_awvalid),
+		.s_axi_awready(s_axi_awready),
+		.s_axi_bresp(s_axi_bresp),
+		.s_axi_bvalid(s_axi_bvalid),
+		.s_axi_bready(s_axi_bready),
+		.s_axi_rdata(s_axi_rdata),
+		.s_axi_rlast(s_axi_rlast),
+		.s_axi_rresp(s_axi_rresp),
+		.s_axi_rvalid(s_axi_rvalid),
+		.s_axi_rready(s_axi_rready),
+		.s_axi_wdata(s_axi_wdata),
+		.s_axi_wlast(s_axi_wlast),
+		.s_axi_wstrb(s_axi_wstrb),
+		.s_axi_wvalid(s_axi_wvalid),
+		.s_axi_wready(s_axi_wready),
+		
+		.bram_clk(axi_sram_ctrler_ram_clk),
+		.bram_rst(axi_sram_ctrler_ram_rst),
+		.bram_en(axi_sram_ctrler_ram_en),
+		.bram_wen(axi_sram_ctrler_ram_wen),
+		.bram_addr(axi_sram_ctrler_ram_addr),
+		.bram_din(axi_sram_ctrler_ram_din),
+		.bram_dout(axi_sram_ctrler_ram_dout),
+		
+		.axi_bram_ctrler_err()
 	);
 	
 	/** 控制子系统 **/
@@ -341,6 +498,11 @@ module axi_generic_conv #(
 	wire[7:0] m_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	wire m_fm_cake_info_axis_valid;
 	wire m_fm_cake_info_axis_ready;
+	// 子表面行信息(AXIS主机)
+	wire[15:0] m_sub_row_msg_axis_data; // {输出通道号(16bit)}
+	wire m_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
+	wire m_sub_row_msg_axis_valid;
+	wire m_sub_row_msg_axis_ready;
 	// 无符号乘法器
 	// [乘法器#0(u16*u16)]
 	wire[15:0] mul0_op_a; // 操作数A
@@ -422,6 +584,11 @@ module axi_generic_conv #(
 		.m_fm_cake_info_axis_valid(m_fm_cake_info_axis_valid),
 		.m_fm_cake_info_axis_ready(m_fm_cake_info_axis_ready),
 		
+		.m_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
+		.m_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
+		.m_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
+		.m_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
+		
 		.m_dma_s2mm_cmd_axis_data(m_dma_s2mm_cmd_axis_data),
 		.m_dma_s2mm_cmd_axis_user(m_dma_s2mm_cmd_axis_user),
 		.m_dma_s2mm_cmd_axis_valid(m_dma_s2mm_cmd_axis_valid),
@@ -431,10 +598,12 @@ module axi_generic_conv #(
 		.mul0_op_b(mul0_op_b),
 		.mul0_ce(mul0_ce),
 		.mul0_res(mul0_res),
+		
 		.mul1_op_a(mul1_op_a),
 		.mul1_op_b(mul1_op_b),
 		.mul1_ce(mul1_ce),
 		.mul1_res(mul1_res),
+		
 		.mul2_op_a(mul2_op_a),
 		.mul2_op_b(mul2_op_b),
 		.mul2_ce(mul2_ce),
@@ -588,6 +757,11 @@ module axi_generic_conv #(
 	wire[7:0] s_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	wire s_fm_cake_info_axis_valid;
 	wire s_fm_cake_info_axis_ready;
+	// 子表面行信息(AXIS从机)
+	wire[15:0] s_sub_row_msg_axis_data; // {输出通道号(16bit)}
+	wire s_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
+	wire s_sub_row_msg_axis_valid;
+	wire s_sub_row_msg_axis_ready;
 	// 物理特征图表面行数据(AXIS从机)
 	wire[ATOMIC_C*2*8-1:0] s_fmap_row_axis_data;
 	wire s_fmap_row_axis_last; // 标志物理特征图行的最后1个表面
@@ -598,12 +772,17 @@ module axi_generic_conv #(
 	wire s_kwgtblk_axis_last; // 标志卷积核权重块的最后1个表面
 	wire s_kwgtblk_axis_valid;
 	wire s_kwgtblk_axis_ready;
-	// 有符号乘法器阵列
+	// (卷积乘加)有符号乘法器阵列
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_a; // 操作数A
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_b; // 操作数B
 	wire[ATOMIC_K-1:0] mul_array_ce; // 计算使能
 	wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_array_res; // 计算结果
-	// 缓存MEM主接口
+	// BN乘法器组
+	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_a; // 操作数A
+	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_b; // 操作数B
+	wire[BN_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_ce; // 计算使能
+	wire[BN_MUL_RES_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_res; // 计算结果
+	// 中间结果缓存MEM主接口
 	wire mid_res_mem_clk_a;
 	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
 	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_a;
@@ -612,10 +791,28 @@ module axi_generic_conv #(
 	wire[RBUF_BANK_N-1:0] mid_res_mem_ren_b;
 	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
 	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b;
+	// BN参数MEM主接口
+	wire bn_mem_clk_b;
+	wire bn_mem_ren_b;
+	wire[15:0] bn_mem_addr_b;
+	wire[63:0] bn_mem_dout_b; // {参数B(32bit), 参数A(32bit)}
+	// 处理结果fifo(MEM主接口)
+	wire proc_res_fifo_mem_clk;
+	wire proc_res_fifo_mem_wen_a;
+	wire[8:0] proc_res_fifo_mem_addr_a;
+	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_din_a;
+	wire proc_res_fifo_mem_ren_b;
+	wire[8:0] proc_res_fifo_mem_addr_b;
+	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
 	
 	assign s_fm_cake_info_axis_data = m_fm_cake_info_axis_data;
 	assign s_fm_cake_info_axis_valid = m_fm_cake_info_axis_valid;
 	assign m_fm_cake_info_axis_ready = s_fm_cake_info_axis_ready;
+	
+	assign s_sub_row_msg_axis_data = m_sub_row_msg_axis_data;
+	assign s_sub_row_msg_axis_last = m_sub_row_msg_axis_last;
+	assign s_sub_row_msg_axis_valid = m_sub_row_msg_axis_valid;
+	assign m_sub_row_msg_axis_ready = s_sub_row_msg_axis_ready;
 	
 	assign s_fmap_row_axis_data = m_fm_fout_axis_data;
 	assign s_fmap_row_axis_last = m_fm_fout_axis_last;
@@ -630,10 +827,14 @@ module axi_generic_conv #(
 	conv_cal_sub_system #(
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
+		.BN_ACT_PRL_N(BN_ACT_PRL_N),
 		.STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),
+		.BN_ACT_INT16_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
+		.BN_ACT_INT32_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
+		.BN_ACT_FP32_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
 		.SIM_DELAY(SIM_DELAY)
@@ -647,6 +848,7 @@ module axi_generic_conv #(
 		.row_n_submitted_to_mac_array(),
 		.en_mac_array(en_mac_array),
 		.en_packer(en_packer),
+		.en_bn_act_proc(en_bn_act_proc),
 		
 		.conv_horizontal_stride(conv_horizontal_stride),
 		.calfmt(calfmt),
@@ -661,10 +863,18 @@ module axi_generic_conv #(
 		.kernal_w_dilated(kernal_w_dilated),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
+		.bn_is_a_eq_1(bn_is_a_eq_1),
+		.bn_is_b_eq_0(bn_is_b_eq_0),
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
 		.s_fm_cake_info_axis_ready(s_fm_cake_info_axis_ready),
+		
+		.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
+		.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
+		.s_sub_row_msg_axis_valid(s_sub_row_msg_axis_valid),
+		.s_sub_row_msg_axis_ready(s_sub_row_msg_axis_ready),
 		
 		.s_fmap_row_axis_data(s_fmap_row_axis_data),
 		.s_fmap_row_axis_last(s_fmap_row_axis_last),
@@ -683,19 +893,37 @@ module axi_generic_conv #(
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),
 		
-		.mul_op_a(mul_array_op_a),
-		.mul_op_b(mul_array_op_b),
-		.mul_ce(mul_array_ce),
-		.mul_res(mul_array_res),
+		.mul0_op_a(mul_array_op_a),
+		.mul0_op_b(mul_array_op_b),
+		.mul0_ce(mul_array_ce),
+		.mul0_res(mul_array_res),
 		
-		.mem_clk_a(mid_res_mem_clk_a),
-		.mem_wen_a(mid_res_mem_wen_a),
-		.mem_addr_a(mid_res_mem_addr_a),
-		.mem_din_a(mid_res_mem_din_a),
-		.mem_clk_b(mid_res_mem_clk_b),
-		.mem_ren_b(mid_res_mem_ren_b),
-		.mem_addr_b(mid_res_mem_addr_b),
-		.mem_dout_b(mid_res_mem_dout_b)
+		.mul1_op_a(bn_mul_op_a),
+		.mul1_op_b(bn_mul_op_b),
+		.mul1_ce(bn_mul_ce),
+		.mul1_res(bn_mul_res),
+		
+		.mid_res_mem_clk_a(mid_res_mem_clk_a),
+		.mid_res_mem_wen_a(mid_res_mem_wen_a),
+		.mid_res_mem_addr_a(mid_res_mem_addr_a),
+		.mid_res_mem_din_a(mid_res_mem_din_a),
+		.mid_res_mem_clk_b(mid_res_mem_clk_b),
+		.mid_res_mem_ren_b(mid_res_mem_ren_b),
+		.mid_res_mem_addr_b(mid_res_mem_addr_b),
+		.mid_res_mem_dout_b(mid_res_mem_dout_b),
+		
+		.bn_mem_clk_b(bn_mem_clk_b),
+		.bn_mem_ren_b(bn_mem_ren_b),
+		.bn_mem_addr_b(bn_mem_addr_b),
+		.bn_mem_dout_b(bn_mem_dout_b),
+		
+		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
+		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
+		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
+		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
+		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b)
 	);
 	
 	/** 乘法器 **/
@@ -747,25 +975,83 @@ module axi_generic_conv #(
 		.res(mul2_res)
 	);
 	
-	genvar mul_i;
+	genvar conv_mac_mul_i;
 	generate
-		for(mul_i = 0;mul_i < ATOMIC_K*ATOMIC_C;mul_i = mul_i + 1)
+		for(conv_mac_mul_i = 0;conv_mac_mul_i < ATOMIC_K*ATOMIC_C;conv_mac_mul_i = conv_mac_mul_i + 1)
 		begin:mul_blk
 			signed_mul #(
 				.op_a_width(16),
 				.op_b_width(16),
 				.output_width(32),
+				.en_in_reg("false"),
+				.en_out_reg("false"),
 				.simulation_delay(SIM_DELAY)
 			)mul_s16_s16_u(
 				.clk(aclk),
 				
-				.ce_s0_mul(mul_array_ce[mul_i/ATOMIC_C]),
+				.ce_in_reg(1'b0),
+				.ce_mul(mul_array_ce[conv_mac_mul_i/ATOMIC_C]),
+				.ce_out_reg(1'b0),
 				
-				.op_a(mul_array_op_a[16*mul_i+15:16*mul_i]),
-				.op_b(mul_array_op_b[16*mul_i+15:16*mul_i]),
+				.op_a(mul_array_op_a[16*conv_mac_mul_i+15:16*conv_mac_mul_i]),
+				.op_b(mul_array_op_b[16*conv_mac_mul_i+15:16*conv_mac_mul_i]),
 				
-				.res(mul_array_res[32*mul_i+31:32*mul_i])
+				.res(mul_array_res[32*conv_mac_mul_i+31:32*conv_mac_mul_i])
 			);
+		end
+	endgenerate
+	
+	genvar bn_mul_i;
+	generate
+		if(INT8_SUPPORTED)
+		begin:case_bn_int16_supported
+			for(bn_mul_i = 0;bn_mul_i < 4 * BN_ACT_PRL_N;bn_mul_i = bn_mul_i + 1)
+			begin:bn_mul_blk_a
+				signed_mul #(
+					.op_a_width(18),
+					.op_b_width(18),
+					.output_width(36),
+					.en_in_reg("false"),
+					.en_out_reg("false"),
+					.simulation_delay(SIM_DELAY)
+				)bn_mul_u(
+					.clk(aclk),
+					
+					.ce_in_reg(1'b0),
+					.ce_mul(bn_mul_ce[bn_mul_i]),
+					.ce_out_reg(1'b0),
+					
+					.op_a(bn_mul_op_a[(bn_mul_i+1)*18-1:bn_mul_i*18]),
+					.op_b(bn_mul_op_b[(bn_mul_i+1)*18-1:bn_mul_i*18]),
+					
+					.res(bn_mul_res[(bn_mul_i+1)*36-1:bn_mul_i*36])
+				);
+			end
+		end
+		else
+		begin:case_bn_int16_not_supported
+			for(bn_mul_i = 0;bn_mul_i < BN_ACT_PRL_N;bn_mul_i = bn_mul_i + 1)
+			begin:bn_mul_blk_b
+				signed_mul #(
+					.op_a_width(INT16_SUPPORTED ? 32:25),
+					.op_b_width(INT16_SUPPORTED ? 32:25),
+					.output_width(INT16_SUPPORTED ? 64:50),
+					.en_in_reg("true"),
+					.en_out_reg("true"),
+					.simulation_delay(SIM_DELAY)
+				)bn_mul_u(
+					.clk(aclk),
+					
+					.ce_in_reg(bn_mul_ce[bn_mul_i*3+0]),
+					.ce_mul(bn_mul_ce[bn_mul_i*3+1]),
+					.ce_out_reg(bn_mul_ce[bn_mul_i*3+2]),
+					
+					.op_a(bn_mul_op_a[(bn_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_mul_i*(INT16_SUPPORTED ? 32:25)]),
+					.op_b(bn_mul_op_b[(bn_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_mul_i*(INT16_SUPPORTED ? 32:25)]),
+					
+					.res(bn_mul_res[(bn_mul_i+1)*(INT16_SUPPORTED ? 64:50)-1:bn_mul_i*(INT16_SUPPORTED ? 64:50)])
+				);
+			end
 		end
 	endgenerate
 	
@@ -853,5 +1139,47 @@ module axi_generic_conv #(
 			);
 		end
 	endgenerate
+	
+	bram_simple_dual_port #(
+		.style("LOW_LATENCY"),
+		.mem_width(BN_ACT_PROC_RES_FIFO_WIDTH),
+		.mem_depth(512),
+		.INIT_FILE("no_init"),
+		.simulation_delay(SIM_DELAY)
+	)bn_act_proc_res_fifo_ram_u(
+		.clk(proc_res_fifo_mem_clk),
+		
+		.wen_a(proc_res_fifo_mem_wen_a),
+		.addr_a(proc_res_fifo_mem_addr_a),
+		.din_a(proc_res_fifo_mem_din_a),
+		
+		.ren_b(proc_res_fifo_mem_ren_b),
+		.addr_b(proc_res_fifo_mem_addr_b),
+		.dout_b(proc_res_fifo_mem_dout_b)
+	);
+	
+	bram_true_dual_port #(
+		.mem_width(64),
+		.mem_depth(MAX_KERNAL_N),
+		.INIT_FILE("no_init"),
+		.read_write_mode("read_first"),
+		.use_output_register("false"),
+		.en_byte_write("true"),
+		.simulation_delay(SIM_DELAY)
+	)bn_param_ram_u(
+		.clk(bn_mem_clk_a),
+		
+		.ena(bn_mem_en_a),
+		.wea(bn_mem_wen_a),
+		.addra(bn_mem_addr_a),
+		.dina(bn_mem_din_a),
+		.douta(bn_mem_dout_a),
+		
+		.enb(bn_mem_ren_b),
+		.web(8'b0000_0000),
+		.addrb(bn_mem_addr_b),
+		.dinb(64'dx),
+		.doutb(bn_mem_dout_b)
+	);
 	
 endmodule

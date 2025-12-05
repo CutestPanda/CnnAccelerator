@@ -5,6 +5,7 @@
 @author 陈家耀
 @eidt   2025.11.29 1.00 创建了第1个正式版本
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
+        2025.12.05 1.10 增加批归一化处理
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -23,6 +24,10 @@
 #define REG_REGION_FMAP_CFG_OFS 0x00C0
 #define REG_REGION_KRN_CFG_OFS 0x0100
 #define REG_REGION_BUF_CFG_OFS 0x0140
+#define REG_REGION_BN_ACT_CFG_OFS 0x0180
+
+// BN参数存储器域的偏移地址
+#define MEM_REGION_BN_PARAMS_OFS 0x10000
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -50,6 +55,9 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	handler->reg_region_fmap_cfg = (AxiGnrConvRegRgnFmapCfg*)(baseaddr + REG_REGION_FMAP_CFG_OFS);
 	handler->reg_region_kernal_cfg = (AxiGnrConvRegRgnKrnCfg*)(baseaddr + REG_REGION_KRN_CFG_OFS);
 	handler->reg_region_buffer_cfg = (AxiGnrConvRegRgnBufCfg*)(baseaddr + REG_REGION_BUF_CFG_OFS);
+	handler->reg_region_bn_act_cfg = (AxiGnrConvRegRgnBNActCfg*)(baseaddr + REG_REGION_BN_ACT_CFG_OFS);
+
+	handler->bn_params_mem = (BNParam*)(baseaddr + MEM_REGION_BN_PARAMS_OFS);
 
 	uint32_t version_encoded = handler->reg_region_prop->version;
 	handler->property.version[8] = '\0';
@@ -220,6 +228,34 @@ void axi_generic_conv_disable_pm_cnt(AxiGnrConvHandler* handler){
 /*************************
 @ctrl
 @public
+@brief  使能批归一化与激活处理单元
+@param  handler 通用卷积处理单元(加速器句柄)
+@return 是否成功
+*************************/
+int axi_generic_conv_enable_bn_act_proc(AxiGnrConvHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000004;
+
+	return 0;
+}
+
+/*************************
+@ctrl
+@public
+@brief  除能批归一化与激活处理单元
+@param  handler 通用卷积处理单元(加速器句柄)
+@return none
+*************************/
+void axi_generic_conv_disable_bn_act_proc(AxiGnrConvHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000004);
+}
+
+/*************************
+@ctrl
+@public
 @brief  启动通用卷积处理单元
 @param  handler 通用卷积处理单元(加速器句柄)
 @return 是否成功
@@ -324,6 +360,10 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	}
 
 	if(cfg->buffer_cfg.fmbufbankn == 0 || cfg->buffer_cfg.fmbufbankn >= handler->property.phy_buf_bank_n - 1){
+		return -2;
+	}
+
+	if((cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) && (cfg->bn_cfg.fixed_point_quat_accrc >= 32)){
 		return -2;
 	}
 
@@ -461,6 +501,9 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	handler->reg_region_buffer_cfg->buf_cfg1 = ((uint32_t)cfg->buffer_cfg.fmbufcoln) | ((fmbufrown - 1) << 16);
 	handler->reg_region_buffer_cfg->buf_cfg2 = ((uint32_t)cfg->buffer_cfg.sfc_n_each_wgtblk) | ((kbufgrpn - 1) << 8);
 	handler->reg_region_buffer_cfg->buf_cfg3 = (mid_res_item_n_foreach_row - 1) | ((mid_res_buf_row_n_bufferable - 1) << 16);
+
+	handler->reg_region_bn_act_cfg->bn_act_cfg0 =
+		((uint32_t)cfg->bn_cfg.fixed_point_quat_accrc) | (((uint32_t)cfg->bn_cfg.is_a_eq_1) << 8) | (((uint32_t)cfg->bn_cfg.is_b_eq_0) << 9);
 
 	return 0;
 }

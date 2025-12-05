@@ -229,6 +229,26 @@ class BufferCfg extends tue_configuration;
 	
 endclass
 
+class BNCfg extends tue_configuration;
+	
+	rand int unsigned bn_fixed_point_quat_accrc; // 定点数量化精度
+	rand bit bn_is_a_eq_1; // 参数A的实际值为1(标志)
+	rand bit bn_is_b_eq_0; // 参数B的实际值为0(标志)
+	
+	constraint c_default_cst{
+		bn_fixed_point_quat_accrc inside {[0:31]};
+	}
+	
+	`tue_object_default_constructor(BNCfg)
+	
+	`uvm_object_utils_begin(BNCfg)
+		`uvm_field_int(bn_fixed_point_quat_accrc, UVM_DEFAULT | UVM_DEC)
+		`uvm_field_int(bn_is_a_eq_1, UVM_DEFAULT | UVM_BIN)
+		`uvm_field_int(bn_is_b_eq_0, UVM_DEFAULT | UVM_BIN)
+	`uvm_object_utils_end
+	
+endclass
+
 class FmapBuilderCfg extends tue_configuration;
 	
 	rand bit has_vld_actual_sfc_rid; // 实际表面行号有效

@@ -77,7 +77,7 @@ module conv_mac_cell #(
 	output wire[7:0] mac_out_exp, // 指数部分(仅当运算数据格式为FP16时有效)
 	output wire signed[39:0] mac_out_frac, // 尾数部分或定点数
 	output wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along, // 随路数据
-	output wire mac_out_valid,
+	output wire mac_out_valid, // 输出有效指示
 	
 	// 外部有符号乘法器
 	output wire[ATOMIC_C*16-1:0] mul_op_a, // 操作数A

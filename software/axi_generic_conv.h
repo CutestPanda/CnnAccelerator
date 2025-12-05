@@ -5,6 +5,7 @@
 @author 陈家耀
 @eidt   2025.11.29 1.00 创建了第1个正式版本
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
+        2025.12.05 1.10 增加批归一化处理
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -171,6 +172,11 @@ typedef struct{
 	uint32_t buf_cfg3;
 }AxiGnrConvRegRgnBufCfg;
 
+// 结构体: 寄存器域(批归一化与激活配置)
+typedef struct{
+	uint32_t bn_act_cfg0;
+}AxiGnrConvRegRgnBNActCfg;
+
 // 结构体: 子配置参数(计算)
 typedef struct{
 	AxiGnrConvCalFmt cal_fmt; // 运算数据格式
@@ -208,12 +214,20 @@ typedef struct{
 	AxiGnrConvWgtblkSfcNType sfc_n_each_wgtblk; // 卷积核缓存每个权重块的表面个数的类型
 }AxiGnrConvBufferCfg;
 
+// 结构体: 子配置参数(BN)
+typedef struct{
+	uint8_t fixed_point_quat_accrc; // 定点数量化精度
+	uint8_t is_a_eq_1; // 参数A的实际值是否为1
+	uint8_t is_b_eq_0; // 参数B的实际值是否为0
+}AxiGnrConvBNCfg;
+
 // 结构体: 配置参数
 typedef struct{
 	AxiGnrConvCalCfg cal_cfg; // 子配置参数(计算)
 	AxiGnrConvFmapCfg fmap_cfg; // 子配置参数(特征图)
 	AxiGnrConvKernalCfg kernal_cfg; // 子配置参数(卷积核)
 	AxiGnrConvBufferCfg buffer_cfg; // 子配置参数(缓存)
+	AxiGnrConvBNCfg bn_cfg; // 子配置参数(BN)
 
 	uint8_t* ifmap_baseaddr; // 输入特征图基地址
 	uint8_t* ofmap_baseaddr; // 输出特征图基地址
@@ -223,6 +237,12 @@ typedef struct{
 
 	uint8_t max_wgtblk_w; // 权重块最大宽度
 }AxiGnrConvCfg;
+
+// 结构体: BN参数
+typedef struct{
+	float param_a;
+	float param_b;
+}BNParam;
 
 // 结构体: 通用卷积处理单元
 typedef struct{
@@ -237,6 +257,9 @@ typedef struct{
 	AxiGnrConvRegRgnFmapCfg* reg_region_fmap_cfg; // 寄存器域(特征图配置)
 	AxiGnrConvRegRgnKrnCfg* reg_region_kernal_cfg; // 寄存器域(卷积核配置)
 	AxiGnrConvRegRgnBufCfg* reg_region_buffer_cfg; // 寄存器域(缓存配置)
+	AxiGnrConvRegRgnBNActCfg* reg_region_bn_act_cfg; // 寄存器域(批归一化与激活配置)
+
+	BNParam* bn_params_mem; // BN参数存储器域
 
 	AxiGnrConvProp property; // 加速器属性
 }AxiGnrConvHandler;
@@ -249,6 +272,8 @@ int axi_generic_conv_enable_cal_sub_sys(AxiGnrConvHandler* handler); // 使能�
 void axi_generic_conv_disable_cal_sub_sys(AxiGnrConvHandler* handler); // 除能计算子系统
 int axi_generic_conv_enable_pm_cnt(AxiGnrConvHandler* handler); // 使能性能监测计数器
 void axi_generic_conv_disable_pm_cnt(AxiGnrConvHandler* handler); // 除能性能监测计数器
+int axi_generic_conv_enable_bn_act_proc(AxiGnrConvHandler* handler); // 使能批归一化与激活处理单元
+void axi_generic_conv_disable_bn_act_proc(AxiGnrConvHandler* handler); // 除能批归一化与激活处理单元
 int axi_generic_conv_start(AxiGnrConvHandler* handler); // 启动通用卷积处理单元
 uint8_t axi_generic_conv_is_busy(AxiGnrConvHandler* handler); // 判断通用卷积处理单元是否忙碌
 

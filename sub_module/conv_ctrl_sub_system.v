@@ -167,6 +167,12 @@ module conv_ctrl_sub_system #(
 	output wire m_fm_cake_info_axis_valid,
 	input wire m_fm_cake_info_axis_ready,
 	
+	// 子表面行信息(AXIS主机)
+	output wire[15:0] m_sub_row_msg_axis_data, // {输出通道号(16bit)}
+	output wire m_sub_row_msg_axis_last, // 整个输出特征图的最后1个子表面行(标志)
+	output wire m_sub_row_msg_axis_valid,
+	input wire m_sub_row_msg_axis_ready,
+	
 	// S2MM方向DMA命令(AXIS主机)
 	output wire[55:0] m_dma_s2mm_cmd_axis_data, // {待传输字节数(24bit), 传输首地址(32bit)}
 	output wire m_dma_s2mm_cmd_axis_user, // 固定(1'b1)/递增(1'b0)传输(1bit)
@@ -576,6 +582,11 @@ module conv_ctrl_sub_system #(
 		.blk_start(fnl_res_trans_blk_start),
 		.blk_idle(fnl_res_trans_blk_idle),
 		.blk_done(fnl_res_trans_blk_done),
+		
+		.m_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
+		.m_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
+		.m_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
+		.m_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
 		
 		.m_dma_cmd_axis_data(m_dma_cmd_axis_data),
 		.m_dma_cmd_axis_user(m_dma_cmd_axis_user),

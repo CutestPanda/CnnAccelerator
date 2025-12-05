@@ -17,6 +17,8 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 	
 	local int unsigned blk_ctrl_tr_id;
 	local int unsigned req_tr_id;
+	local int unsigned match_tr_n;
+	local int unsigned mismatch_tr_n;
 	
 	local int blk_ctrl_tr_mcd = UVM_STDOUT;
 	local int req_tr_mcd = UVM_STDOUT;
@@ -40,6 +42,8 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 		
 		this.blk_ctrl_tr_id = 0;
 		this.req_tr_id = 0;
+		this.match_tr_n = 0;
+		this.mismatch_tr_n = 0;
 		
 		this.blk_ctrl_tr_mb = new();
 		this.req_mb = new();
@@ -140,6 +144,8 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 						if(res_tr.compare(exp_tr))
 						begin
 							`uvm_info(this.get_name(), $sformatf("match, cmd_id = %0d", res_tr.cmd_id), UVM_LOW)
+							
+							this.match_tr_n++;
 						end
 						else
 						begin
@@ -147,6 +153,8 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 							
 							res_tr.print();
 							exp_tr.print();
+							
+							this.mismatch_tr_n++;
 						end
 						
 						ochn_id_ofs += this.atomic_k;
@@ -186,6 +194,15 @@ class FnlResTransReqGenScoreboard extends tue_scoreboard #(
 			`uvm_error(this.get_name(), "req_mb is not empty")
 		else
 			`uvm_info(this.get_name(), "req_mb is empty", UVM_LOW)
+	endfunction
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
+		
+		if(this.match_tr_n == this.req_tr_id)
+			`uvm_info(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n), UVM_LOW)
+		else
+			`uvm_error(this.get_name(), $sformatf("get %0d tr, match = %0d, mismatch = %0d", this.req_tr_id, this.match_tr_n, this.mismatch_tr_n))
 	endfunction
 	
 	`tue_component_default_constructor(FnlResTransReqGenScoreboard)

@@ -25,6 +25,7 @@ module tb_fnl_res_trans_req_gen();
 	panda_reset_if rst_if(clk_if.clk_p);
 	panda_blk_ctrl_if blk_ctrl_m(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if req_axis_s(clk_if.clk_p, rst_if.reset_n);
+	panda_axis_if msg_axis_s(clk_if.clk_p, rst_if.reset_n);
 	
 	/** 主任务 **/
 	initial begin
@@ -33,6 +34,7 @@ module tb_fnl_res_trans_req_gen();
 		
 		uvm_config_db #(panda_blk_ctrl_vif)::set(null, "", "blk_ctrl_vif_m", blk_ctrl_m);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "req_axis_vif_s", req_axis_s);
+		uvm_config_db #(panda_axis_vif)::set(null, "", "msg_axis_vif_s", msg_axis_s);
 		
 		run_test("fnl_res_trans_req_gen_test");
 	end
@@ -90,6 +92,11 @@ module tb_fnl_res_trans_req_gen();
 	wire blk_start;
 	wire blk_idle;
 	wire blk_done;
+	// 子表面行信息(AXIS主机)
+	wire[15:0] m_sub_row_msg_axis_data; // {输出通道号(16bit)}
+	wire m_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
+	wire m_sub_row_msg_axis_valid;
+	wire m_sub_row_msg_axis_ready;
 	// DMA命令(AXIS主机)
 	wire[55:0] m_dma_cmd_axis_data; // {待传输字节数(24bit), 传输首地址(32bit)}
 	wire[24:0] m_dma_cmd_axis_user; // {命令ID(24bit), 固定(1'b1)/递增(1'b0)传输(1bit)}
@@ -143,6 +150,11 @@ module tb_fnl_res_trans_req_gen();
 		ofmap_h, ofmap_w, ofmap_baseaddr
 	} = blk_ctrl_m.params[120:0];
 	
+	assign msg_axis_s.data[15:0] = m_sub_row_msg_axis_data;
+	assign msg_axis_s.last = m_sub_row_msg_axis_last;
+	assign msg_axis_s.valid = m_sub_row_msg_axis_valid;
+	assign m_sub_row_msg_axis_ready = msg_axis_s.ready;
+	
 	assign req_axis_s.data[55:0] = m_dma_cmd_axis_data;
 	assign req_axis_s.user[24:0] = m_dma_cmd_axis_user;
 	assign req_axis_s.valid = m_dma_cmd_axis_valid;
@@ -169,6 +181,11 @@ module tb_fnl_res_trans_req_gen();
 		.blk_start(blk_start),
 		.blk_idle(blk_idle),
 		.blk_done(blk_done),
+		
+		.m_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
+		.m_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
+		.m_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
+		.m_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
 		
 		.m_dma_cmd_axis_data(m_dma_cmd_axis_data),
 		.m_dma_cmd_axis_user(m_dma_cmd_axis_user),

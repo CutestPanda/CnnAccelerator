@@ -4,6 +4,7 @@
 
 import "DPI-C" function int unsigned encode_fp16(input real d);
 import "DPI-C" function real decode_fp16(input int unsigned fp16);
+import "DPI-C" function int unsigned encode_fp32(input real d);
 import "DPI-C" function real decode_fp32(input int unsigned fp32);
 import "DPI-C" function real get_fixed36_exp(input longint frac, input int exp);
 
