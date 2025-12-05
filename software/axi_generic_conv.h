@@ -6,9 +6,12 @@
 @eidt   2025.11.29 1.00 创建了第1个正式版本
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
         2025.12.05 1.10 增加批归一化处理
+        2025.12.05 1.11 增加2个加速器属性(BN与激活并行数, 最大的卷积核个数)
 ************************************************************************************************************************/
 
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -99,6 +102,7 @@ typedef struct{
 
 	uint8_t atomic_k; // 核并行数
 	uint8_t atomic_c; // 通道并行数
+	uint8_t bn_act_prl_n; // BN与激活并行数
 	uint8_t max_cal_round_n; // 最大的计算轮次
 
 	uint16_t mm2s_stream_data_width; // MM2S通道DMA数据流的位宽
@@ -107,6 +111,7 @@ typedef struct{
 	uint16_t phy_buf_bank_n; // 物理缓存BANK数
 	uint16_t phy_buf_bank_depth; // 物理缓存BANK深度
 	uint16_t max_fmbuf_row_n; // 特征图缓存最大表面行数
+	uint16_t max_kernal_n; // 最大的卷积核个数
 	uint8_t mid_res_buf_bank_n; // 中间结果缓存BANK数
 	uint16_t mid_res_buf_bank_depth; // 中间结果缓存BANK深度
 }AxiGnrConvProp;
@@ -119,6 +124,7 @@ typedef struct{
 	uint32_t info1;
 	uint32_t info2;
 	uint32_t info3;
+	uint32_t info4;
 }AxiGnrConvRegRgnProp;
 
 // 结构体: 寄存器域(控制)
@@ -278,6 +284,7 @@ int axi_generic_conv_start(AxiGnrConvHandler* handler); // 启动通用卷积处
 uint8_t axi_generic_conv_is_busy(AxiGnrConvHandler* handler); // 判断通用卷积处理单元是否忙碌
 
 int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg); // 配置通用卷积处理单元
+void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_param_buf, uint32_t num); // 写BN参数存储器
 
 uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNQueryType query_type); // 查询DMA命令完成数
 int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNClrType clr_type); // 清除DMA命令完成数计数器

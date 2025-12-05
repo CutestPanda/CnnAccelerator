@@ -52,6 +52,9 @@ SOFTWARE.
 	|  info3   | 0x14/5  |15~0: 中间结果缓存BANK数 - 1   |      RO      |                                  |
 	|          |         |31~16: 中间结果缓存BANK深度 - 1|              |                                  |
 	--------------------------------------------------------------------------------------------------------
+	|  info4   | 0x18/6  |7~0: BN与激活并行数 - 1        |      RO      |                                  |
+	|          |         |31~16: 最大的卷积核个数 - 1    |              |                                  |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
 	|  ctrl0   | 0x40/16 | 0: 使能计算子系统             |      RW      |                                  |
@@ -181,12 +184,14 @@ module reg_if_for_generic_conv #(
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 32, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer S2MM_STREAM_DATA_WIDTH = 64, // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16, // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 4096, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512, // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter real SIM_DELAY = 1 // 仿真延时
@@ -416,7 +421,7 @@ module reg_if_for_generic_conv #(
 	end
 	
 	/**
-	寄存器(version, acc_name, info0, info1, info2, info3)
+	寄存器(version, acc_name, info0, info1, info2, info3, info4)
 	
 	--------------------------------------------------------------------------------------------------------
     | version  | 0x00/0  |31~0: 版本号                   |      RO      | 用日期表示的版本号,              |
@@ -441,6 +446,9 @@ module reg_if_for_generic_conv #(
 	|  info3   | 0x14/5  |15~0: 中间结果缓存BANK数 - 1   |      RO      |                                  |
 	|          |         |31~16: 中间结果缓存BANK深度 - 1|              |                                  |
 	--------------------------------------------------------------------------------------------------------
+	|  info4   | 0x18/6  |7~0: BN与激活并行数 - 1        |      RO      |                                  |
+	|          |         |31~16: 最大的卷积核个数 - 1    |              |                                  |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire[31:0] version_r; // 版本号
 	wire[29:0] accelerator_type_r; // 加速器类型
@@ -455,6 +463,8 @@ module reg_if_for_generic_conv #(
 	wire[15:0] max_fmbuf_rown_r; // 特征图缓存最大表面行数 - 1
 	wire[15:0] mid_res_buf_bank_n_r; // 中间结果缓存BANK数 - 1
 	wire[15:0] mid_res_buf_bank_depth_r; // 中间结果缓存BANK深度 - 1
+	wire[7:0] bn_act_prl_n_r; // BN与激活并行数 - 1
+	wire[15:0] max_kernal_n_r; // 最大的卷积核个数 - 1
 	
 	assign version_r = {4'd2, 4'd0, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.02
 	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv"
@@ -469,6 +479,8 @@ module reg_if_for_generic_conv #(
 	assign max_fmbuf_rown_r = MAX_FMBUF_ROWN - 1;
 	assign mid_res_buf_bank_n_r = RBUF_BANK_N - 1;
 	assign mid_res_buf_bank_depth_r = RBUF_DEPTH - 1;
+	assign bn_act_prl_n_r = BN_ACT_PRL_N - 1;
+	assign max_kernal_n_r = MAX_KERNAL_N - 1;
 	
 	/**
 	寄存器(ctrl0)
@@ -1178,6 +1190,7 @@ module reg_if_for_generic_conv #(
 				3: regs_dout <= # SIM_DELAY {phy_buf_bank_n_r[15:0], s2mm_data_width_r[7:0], mm2s_data_width_r[7:0]};
 				4: regs_dout <= # SIM_DELAY {max_fmbuf_rown_r[15:0], phy_buf_bank_depth_r[15:0]};
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
+				6: regs_dout <= # SIM_DELAY {max_kernal_n_r[15:0], 8'd0, bn_act_prl_n_r[7:0]};
 				
 				16: regs_dout <= # SIM_DELAY {29'd0, en_bn_act_proc_r, en_pm_cnt_r, en_cal_sub_sys_r};
 				

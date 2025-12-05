@@ -4,8 +4,6 @@
 #include "xparameters.h"
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /**
 通用卷积处理单元IP配置参数:
@@ -29,7 +27,7 @@
 	parameter integer S2MM_STREAM_DATA_WIDTH = 64; // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 512; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
-	parameter integer MAX_KERNAL_N = 512; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_KERNAL_N = 1024; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
@@ -151,7 +149,7 @@ int main(){
 	}
 
 	// 写BN参数
-	memcpy((void*)axi_generic_conv.bn_params_mem, (void*)bn_params, BN_PARAM_N * 2 * 4);
+	axi_generic_conv_wr_bn_param_mem(&axi_generic_conv, bn_params, BN_PARAM_N);
 
 	// 启动通用卷积处理单元
 	if(axi_generic_conv_enable_cal_sub_sys(&axi_generic_conv)){

@@ -233,7 +233,7 @@ module batch_nml_mac_cell #(
 	end
 	
 	/** 参数特例标志延迟链 **/
-	reg[4:1] mac_cell_i_is_a_eq_1_delayed; // 延迟的参数A的实际值为1(标志)
+	reg[6:1] mac_cell_i_is_a_eq_1_delayed; // 延迟的参数A的实际值为1(标志)
 	reg[6:1] mac_cell_i_is_b_eq_0_delayed; // 延迟的参数B的实际值为0(标志)
 	
 	// 延迟的参数A的实际值为1(标志)
@@ -256,6 +256,16 @@ module batch_nml_mac_cell #(
 	begin
 		if(aclken & mac_cell_i_vld_delayed[3])
 			mac_cell_i_is_a_eq_1_delayed[4] <= # SIM_DELAY mac_cell_i_is_a_eq_1_delayed[3];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[4])
+			mac_cell_i_is_a_eq_1_delayed[5] <= # SIM_DELAY mac_cell_i_is_a_eq_1_delayed[4];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[5])
+			mac_cell_i_is_a_eq_1_delayed[6] <= # SIM_DELAY mac_cell_i_is_a_eq_1_delayed[5];
 	end
 	
 	// 延迟的参数B的实际值为0(标志)
@@ -671,6 +681,8 @@ module batch_nml_mac_cell #(
 	wire signed[32:0] fp_mac_f_added_rvs;
 	// [标准化]
 	wire fp_mac_nml_in_vld;
+	wire fp_mac_nml_in_is_a_eq_1;
+	wire fp_mac_nml_in_is_b_eq_0;
 	wire[31:0] fp_mac_nml_shift_n_onehot;
 	reg signed[32:0] fp_mac_nml_res; // 标准化之后的尾数(Q29)
 	reg signed[5:0] fp_mac_nml_exp_var; // 标准化导致的指数变化量(在范围[-29, 2]内)
@@ -832,6 +844,8 @@ module batch_nml_mac_cell #(
 		};
 	
 	assign fp_mac_nml_in_vld = mac_cell_i_vld_delayed[6];
+	assign fp_mac_nml_in_is_a_eq_1 = mac_cell_i_is_a_eq_1_delayed[6];
+	assign fp_mac_nml_in_is_b_eq_0 = mac_cell_i_is_b_eq_0_delayed[6];
 	/*
 	当"相加后的定点尾数" < 0时, 从MSB开始找第1个"0"的位置;当"相加后的定点尾数" >= 0时, 从MSB开始找第1个"1"的位置
 	
@@ -989,75 +1003,82 @@ module batch_nml_mac_cell #(
 		if(aclken & fp_mac_nml_in_vld)
 		begin
 			fp_mac_nml_res <= # SIM_DELAY 
-				(
-					({33{fp_mac_nml_shift_n_onehot[0]}} & {{2{fp_mac_f_added[32]}}, fp_mac_f_added[32:2]}) | // 算术右移2位
-					({33{fp_mac_nml_shift_n_onehot[1]}} & {fp_mac_f_added[32], fp_mac_f_added[32:1]}) | // 算术右移1位
-					({33{fp_mac_nml_shift_n_onehot[2]}} & fp_mac_f_added) | 
-					({33{fp_mac_nml_shift_n_onehot[3]}} & (fp_mac_f_added << 1)) | 
-					({33{fp_mac_nml_shift_n_onehot[4]}} & (fp_mac_f_added << 2)) | 
-					({33{fp_mac_nml_shift_n_onehot[5]}} & (fp_mac_f_added << 3)) | 
-					({33{fp_mac_nml_shift_n_onehot[6]}} & (fp_mac_f_added << 4)) | 
-					({33{fp_mac_nml_shift_n_onehot[7]}} & (fp_mac_f_added << 5)) | 
-					({33{fp_mac_nml_shift_n_onehot[8]}} & (fp_mac_f_added << 6)) | 
-					({33{fp_mac_nml_shift_n_onehot[9]}} & (fp_mac_f_added << 7)) | 
-					({33{fp_mac_nml_shift_n_onehot[10]}} & (fp_mac_f_added << 8)) | 
-					({33{fp_mac_nml_shift_n_onehot[11]}} & (fp_mac_f_added << 9)) | 
-					({33{fp_mac_nml_shift_n_onehot[12]}} & (fp_mac_f_added << 10)) | 
-					({33{fp_mac_nml_shift_n_onehot[13]}} & (fp_mac_f_added << 11)) | 
-					({33{fp_mac_nml_shift_n_onehot[14]}} & (fp_mac_f_added << 12)) | 
-					({33{fp_mac_nml_shift_n_onehot[15]}} & (fp_mac_f_added << 13)) | 
-					({33{fp_mac_nml_shift_n_onehot[16]}} & (fp_mac_f_added << 14)) | 
-					({33{fp_mac_nml_shift_n_onehot[17]}} & (fp_mac_f_added << 15)) | 
-					({33{fp_mac_nml_shift_n_onehot[18]}} & (fp_mac_f_added << 16)) | 
-					({33{fp_mac_nml_shift_n_onehot[19]}} & (fp_mac_f_added << 17)) | 
-					({33{fp_mac_nml_shift_n_onehot[20]}} & (fp_mac_f_added << 18)) | 
-					({33{fp_mac_nml_shift_n_onehot[21]}} & (fp_mac_f_added << 19)) | 
-					({33{fp_mac_nml_shift_n_onehot[22]}} & (fp_mac_f_added << 20)) | 
-					({33{fp_mac_nml_shift_n_onehot[23]}} & (fp_mac_f_added << 21)) | 
-					({33{fp_mac_nml_shift_n_onehot[24]}} & (fp_mac_f_added << 22)) | 
-					({33{fp_mac_nml_shift_n_onehot[25]}} & (fp_mac_f_added << 23)) | 
-					({33{fp_mac_nml_shift_n_onehot[26]}} & (fp_mac_f_added << 24)) | 
-					({33{fp_mac_nml_shift_n_onehot[27]}} & (fp_mac_f_added << 25)) | 
-					({33{fp_mac_nml_shift_n_onehot[28]}} & (fp_mac_f_added << 26)) | 
-					({33{fp_mac_nml_shift_n_onehot[29]}} & (fp_mac_f_added << 27)) | 
-					({33{fp_mac_nml_shift_n_onehot[30]}} & (fp_mac_f_added << 28)) | 
-					({33{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & (fp_mac_f_added << 29))
-				) | 
-				{4'd0, 22'd0, fp_mac_f_added[32], 6'd0};
+				(fp_mac_nml_in_is_a_eq_1 & fp_mac_nml_in_is_b_eq_0) ? 
+					fp_mac_f_added:
+					(
+						(
+							({33{fp_mac_nml_shift_n_onehot[0]}} & {{2{fp_mac_f_added[32]}}, fp_mac_f_added[32:2]}) | // 算术右移2位
+							({33{fp_mac_nml_shift_n_onehot[1]}} & {fp_mac_f_added[32], fp_mac_f_added[32:1]}) | // 算术右移1位
+							({33{fp_mac_nml_shift_n_onehot[2]}} & fp_mac_f_added) | 
+							({33{fp_mac_nml_shift_n_onehot[3]}} & (fp_mac_f_added << 1)) | 
+							({33{fp_mac_nml_shift_n_onehot[4]}} & (fp_mac_f_added << 2)) | 
+							({33{fp_mac_nml_shift_n_onehot[5]}} & (fp_mac_f_added << 3)) | 
+							({33{fp_mac_nml_shift_n_onehot[6]}} & (fp_mac_f_added << 4)) | 
+							({33{fp_mac_nml_shift_n_onehot[7]}} & (fp_mac_f_added << 5)) | 
+							({33{fp_mac_nml_shift_n_onehot[8]}} & (fp_mac_f_added << 6)) | 
+							({33{fp_mac_nml_shift_n_onehot[9]}} & (fp_mac_f_added << 7)) | 
+							({33{fp_mac_nml_shift_n_onehot[10]}} & (fp_mac_f_added << 8)) | 
+							({33{fp_mac_nml_shift_n_onehot[11]}} & (fp_mac_f_added << 9)) | 
+							({33{fp_mac_nml_shift_n_onehot[12]}} & (fp_mac_f_added << 10)) | 
+							({33{fp_mac_nml_shift_n_onehot[13]}} & (fp_mac_f_added << 11)) | 
+							({33{fp_mac_nml_shift_n_onehot[14]}} & (fp_mac_f_added << 12)) | 
+							({33{fp_mac_nml_shift_n_onehot[15]}} & (fp_mac_f_added << 13)) | 
+							({33{fp_mac_nml_shift_n_onehot[16]}} & (fp_mac_f_added << 14)) | 
+							({33{fp_mac_nml_shift_n_onehot[17]}} & (fp_mac_f_added << 15)) | 
+							({33{fp_mac_nml_shift_n_onehot[18]}} & (fp_mac_f_added << 16)) | 
+							({33{fp_mac_nml_shift_n_onehot[19]}} & (fp_mac_f_added << 17)) | 
+							({33{fp_mac_nml_shift_n_onehot[20]}} & (fp_mac_f_added << 18)) | 
+							({33{fp_mac_nml_shift_n_onehot[21]}} & (fp_mac_f_added << 19)) | 
+							({33{fp_mac_nml_shift_n_onehot[22]}} & (fp_mac_f_added << 20)) | 
+							({33{fp_mac_nml_shift_n_onehot[23]}} & (fp_mac_f_added << 21)) | 
+							({33{fp_mac_nml_shift_n_onehot[24]}} & (fp_mac_f_added << 22)) | 
+							({33{fp_mac_nml_shift_n_onehot[25]}} & (fp_mac_f_added << 23)) | 
+							({33{fp_mac_nml_shift_n_onehot[26]}} & (fp_mac_f_added << 24)) | 
+							({33{fp_mac_nml_shift_n_onehot[27]}} & (fp_mac_f_added << 25)) | 
+							({33{fp_mac_nml_shift_n_onehot[28]}} & (fp_mac_f_added << 26)) | 
+							({33{fp_mac_nml_shift_n_onehot[29]}} & (fp_mac_f_added << 27)) | 
+							({33{fp_mac_nml_shift_n_onehot[30]}} & (fp_mac_f_added << 28)) | 
+							({33{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & (fp_mac_f_added << 29))
+						) | {4'd0, 22'd0, fp_mac_f_added[32], 6'd0}
+					);
 			
 			fp_mac_nml_exp_var <= # SIM_DELAY 
-				({6{fp_mac_nml_shift_n_onehot[0]}} & 6'b000010) | // 2
-				({6{fp_mac_nml_shift_n_onehot[1]}} & 6'b000001) | // 1
-				({6{fp_mac_nml_shift_n_onehot[2]}} & 6'b000000) | // 0
-				({6{fp_mac_nml_shift_n_onehot[3]}} & 6'b111111) | // -1
-				({6{fp_mac_nml_shift_n_onehot[4]}} & 6'b111110) | // -2
-				({6{fp_mac_nml_shift_n_onehot[5]}} & 6'b111101) | // -3
-				({6{fp_mac_nml_shift_n_onehot[6]}} & 6'b111100) | // -4
-				({6{fp_mac_nml_shift_n_onehot[7]}} & 6'b111011) | // -5
-				({6{fp_mac_nml_shift_n_onehot[8]}} & 6'b111010) | // -6
-				({6{fp_mac_nml_shift_n_onehot[9]}} & 6'b111001) | // -7
-				({6{fp_mac_nml_shift_n_onehot[10]}} & 6'b111000) | // -8
-				({6{fp_mac_nml_shift_n_onehot[11]}} & 6'b110111) | // -9
-				({6{fp_mac_nml_shift_n_onehot[12]}} & 6'b110110) | // -10
-				({6{fp_mac_nml_shift_n_onehot[13]}} & 6'b110101) | // -11
-				({6{fp_mac_nml_shift_n_onehot[14]}} & 6'b110100) | // -12
-				({6{fp_mac_nml_shift_n_onehot[15]}} & 6'b110011) | // -13
-				({6{fp_mac_nml_shift_n_onehot[16]}} & 6'b110010) | // -14
-				({6{fp_mac_nml_shift_n_onehot[17]}} & 6'b110001) | // -15
-				({6{fp_mac_nml_shift_n_onehot[18]}} & 6'b110000) | // -16
-				({6{fp_mac_nml_shift_n_onehot[19]}} & 6'b101111) | // -17
-				({6{fp_mac_nml_shift_n_onehot[20]}} & 6'b101110) | // -18
-				({6{fp_mac_nml_shift_n_onehot[21]}} & 6'b101101) | // -19
-				({6{fp_mac_nml_shift_n_onehot[22]}} & 6'b101100) | // -20
-				({6{fp_mac_nml_shift_n_onehot[23]}} & 6'b101011) | // -21
-				({6{fp_mac_nml_shift_n_onehot[24]}} & 6'b101010) | // -22
-				({6{fp_mac_nml_shift_n_onehot[25]}} & 6'b101001) | // -23
-				({6{fp_mac_nml_shift_n_onehot[26]}} & 6'b101000) | // -24
-				({6{fp_mac_nml_shift_n_onehot[27]}} & 6'b100111) | // -25
-				({6{fp_mac_nml_shift_n_onehot[28]}} & 6'b100110) | // -26
-				({6{fp_mac_nml_shift_n_onehot[29]}} & 6'b100101) | // -27
-				({6{fp_mac_nml_shift_n_onehot[30]}} & 6'b100100) | // -28
-				({6{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & 6'b100011); // -29
+				(fp_mac_nml_in_is_a_eq_1 & fp_mac_nml_in_is_b_eq_0) ? 
+					6'b000000:
+					(
+						({6{fp_mac_nml_shift_n_onehot[0]}} & 6'b000010) | // 2
+						({6{fp_mac_nml_shift_n_onehot[1]}} & 6'b000001) | // 1
+						({6{fp_mac_nml_shift_n_onehot[2]}} & 6'b000000) | // 0
+						({6{fp_mac_nml_shift_n_onehot[3]}} & 6'b111111) | // -1
+						({6{fp_mac_nml_shift_n_onehot[4]}} & 6'b111110) | // -2
+						({6{fp_mac_nml_shift_n_onehot[5]}} & 6'b111101) | // -3
+						({6{fp_mac_nml_shift_n_onehot[6]}} & 6'b111100) | // -4
+						({6{fp_mac_nml_shift_n_onehot[7]}} & 6'b111011) | // -5
+						({6{fp_mac_nml_shift_n_onehot[8]}} & 6'b111010) | // -6
+						({6{fp_mac_nml_shift_n_onehot[9]}} & 6'b111001) | // -7
+						({6{fp_mac_nml_shift_n_onehot[10]}} & 6'b111000) | // -8
+						({6{fp_mac_nml_shift_n_onehot[11]}} & 6'b110111) | // -9
+						({6{fp_mac_nml_shift_n_onehot[12]}} & 6'b110110) | // -10
+						({6{fp_mac_nml_shift_n_onehot[13]}} & 6'b110101) | // -11
+						({6{fp_mac_nml_shift_n_onehot[14]}} & 6'b110100) | // -12
+						({6{fp_mac_nml_shift_n_onehot[15]}} & 6'b110011) | // -13
+						({6{fp_mac_nml_shift_n_onehot[16]}} & 6'b110010) | // -14
+						({6{fp_mac_nml_shift_n_onehot[17]}} & 6'b110001) | // -15
+						({6{fp_mac_nml_shift_n_onehot[18]}} & 6'b110000) | // -16
+						({6{fp_mac_nml_shift_n_onehot[19]}} & 6'b101111) | // -17
+						({6{fp_mac_nml_shift_n_onehot[20]}} & 6'b101110) | // -18
+						({6{fp_mac_nml_shift_n_onehot[21]}} & 6'b101101) | // -19
+						({6{fp_mac_nml_shift_n_onehot[22]}} & 6'b101100) | // -20
+						({6{fp_mac_nml_shift_n_onehot[23]}} & 6'b101011) | // -21
+						({6{fp_mac_nml_shift_n_onehot[24]}} & 6'b101010) | // -22
+						({6{fp_mac_nml_shift_n_onehot[25]}} & 6'b101001) | // -23
+						({6{fp_mac_nml_shift_n_onehot[26]}} & 6'b101000) | // -24
+						({6{fp_mac_nml_shift_n_onehot[27]}} & 6'b100111) | // -25
+						({6{fp_mac_nml_shift_n_onehot[28]}} & 6'b100110) | // -26
+						({6{fp_mac_nml_shift_n_onehot[29]}} & 6'b100101) | // -27
+						({6{fp_mac_nml_shift_n_onehot[30]}} & 6'b100100) | // -28
+						({6{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & 6'b100011) // -29
+					);
 		end
 	end
 	
@@ -1067,7 +1088,8 @@ module batch_nml_mac_cell #(
 		if(aclken & fp_mac_pack_in_vld)
 		begin
 			// 符号位
-			fp_mac_fp32_packed[31] <= # SIM_DELAY fp_mac_nml_res[32];
+			fp_mac_fp32_packed[31] <= # SIM_DELAY 
+				fp_mac_nml_res[32];
 			// 阶码
 			fp_mac_fp32_packed[30:23] <= # SIM_DELAY 
 				fp_mac_pack_underflow ? 

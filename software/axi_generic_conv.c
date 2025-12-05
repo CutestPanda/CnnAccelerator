@@ -6,6 +6,7 @@
 @eidt   2025.11.29 1.00 创建了第1个正式版本
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
         2025.12.05 1.10 增加批归一化处理
+        2025.12.05 1.11 增加2个加速器属性(BN与激活并行数, 最大的卷积核个数)
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -79,12 +80,14 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 
 	handler->property.atomic_k = (uint8_t)((handler->reg_region_prop->info0 & 0x000000FF) + 1);
 	handler->property.atomic_c = (uint8_t)(((handler->reg_region_prop->info0 >> 8) & 0x000000FF) + 1);
+	handler->property.bn_act_prl_n = (uint8_t)((handler->reg_region_prop->info4 & 0x000000FF) + 1);
 	handler->property.max_cal_round_n = (uint8_t)(((handler->reg_region_prop->info0 >> 16) & 0x000000FF) + 1);
 	handler->property.mm2s_stream_data_width = (uint16_t)((handler->reg_region_prop->info1 & 0x000000FF) + 1);
 	handler->property.s2mm_stream_data_width = (uint16_t)(((handler->reg_region_prop->info1 >> 8) & 0x000000FF) + 1);
 	handler->property.phy_buf_bank_n = (uint16_t)(((handler->reg_region_prop->info1 >> 16) & 0x0000FFFF) + 1);
 	handler->property.phy_buf_bank_depth = (uint16_t)((handler->reg_region_prop->info2 & 0x0000FFFF) + 1);
 	handler->property.max_fmbuf_row_n = (uint16_t)(((handler->reg_region_prop->info2 >> 16) & 0x0000FFFF) + 1);
+	handler->property.max_kernal_n = (uint16_t)(((handler->reg_region_prop->info4 >> 16) & 0x0000FFFF) + 1);
 	handler->property.mid_res_buf_bank_n = (uint8_t)((handler->reg_region_prop->info3 & 0x000000FF) + 1);
 	handler->property.mid_res_buf_bank_depth = (uint16_t)(((handler->reg_region_prop->info3 >> 16) & 0x0000FFFF) + 1);
 
@@ -293,7 +296,7 @@ uint8_t axi_generic_conv_is_busy(AxiGnrConvHandler* handler){
 }
 
 /*************************
-@ctrl
+@cfg
 @public
 @brief  配置通用卷积处理单元
 @param  handler 通用卷积处理单元(加速器句柄)
@@ -364,6 +367,10 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	}
 
 	if((cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) && (cfg->bn_cfg.fixed_point_quat_accrc >= 32)){
+		return -2;
+	}
+
+	if(cfg->kernal_cfg.kernal_n > handler->property.max_kernal_n){
 		return -2;
 	}
 
@@ -506,6 +513,19 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		((uint32_t)cfg->bn_cfg.fixed_point_quat_accrc) | (((uint32_t)cfg->bn_cfg.is_a_eq_1) << 8) | (((uint32_t)cfg->bn_cfg.is_b_eq_0) << 9);
 
 	return 0;
+}
+
+/*************************
+@cfg
+@public
+@brief  写BN参数存储器
+@param  handler 通用卷积处理单元(加速器句柄)
+        bn_param_buf BN参数缓存区(指针)
+        num 参数总量
+@return none
+*************************/
+void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_param_buf, uint32_t num){
+	memcpy((void*)handler->bn_params_mem, (void*)bn_param_buf, num * 2 * 4);
 }
 
 /*************************
