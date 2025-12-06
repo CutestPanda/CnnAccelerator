@@ -93,7 +93,7 @@ class PhyFmapSfcRowAdapterVseq0 extends tue_sequence #(
 					len == test_cfg.ifmap_w;
 					
 					foreach(data[i]){
-						data[i] == i;
+						data[i] == (i+1);
 					}
 				})
 			end

@@ -37,7 +37,7 @@ SOFTWARE.
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/10
+日期: 2025/12/06
 ********************************************************************/
 
 
@@ -195,7 +195,7 @@ module phy_fmap_sfc_row_adapter #(
 		if(aclken & (rst_adapter | on_moving_cursor_to_nxt_pt))
 			logic_x_to_cvt <= # SIM_DELAY 
 				(rst_adapter | to_rst_cursor) ? 
-					({13'b1_1111_1111_1111, ~external_padding_left} + 1'b1):
+					((~(external_padding_left[2:0] | 16'h0000)) + 1'b1): // -左部外填充数
 					(logic_x_to_cvt + 1'b1);
 	end
 	
@@ -216,7 +216,7 @@ module phy_fmap_sfc_row_adapter #(
 							(
 								is_cursor_at_inner_padding_region ? 
 									(pos_at_padding_region_cnt == inner_padding_left_right):
-									(inner_padding_left_right == 3'b000)
+									(inner_padding_left_right == 3'd0)
 							)
 						)
 					)
@@ -241,7 +241,7 @@ module phy_fmap_sfc_row_adapter #(
 		)
 			pos_at_padding_region_cnt <= # SIM_DELAY 
 				(rst_adapter | to_rst_cursor | (pos_at_padding_region_cnt == inner_padding_left_right)) ? 
-					3'b001:
+					3'd1:
 					(pos_at_padding_region_cnt + 1'b1);
 	end
 	
@@ -431,19 +431,27 @@ module phy_fmap_sfc_row_adapter #(
 	assign m_row_reg_axis_ready = 
 		aclken & 
 		has_phy_row_traffic & 
-		(cursor_phy_x == phy_sfc_x) & 
-		(~is_cursor_at_external_padding_region) & (~is_cursor_at_inner_padding_region) & 
-		((logic_x_to_cvt != cur_cal_pos) | s_mac_array_reg_axis_ready);
+		(
+			cursor_exceeded_cal_region | 
+			(
+				(cursor_phy_x == phy_sfc_x) & 
+				(~(is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region)) & 
+				((logic_x_to_cvt != cur_cal_pos) | s_mac_array_reg_axis_ready)
+			)
+		);
 	
 	assign s_mac_array_reg_axis_data = 
 		(is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region) ? 
 			{(ATOMIC_C*2*8){1'b0}}:
 			m_row_reg_axis_data;
-	assign s_mac_array_reg_axis_last = pst_cal_sfc_n == ofmap_w;
-	assign s_mac_array_reg_axis_user = is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region;
+	assign s_mac_array_reg_axis_last = 
+		pst_cal_sfc_n == ofmap_w;
+	assign s_mac_array_reg_axis_user = 
+		is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region;
 	assign s_mac_array_reg_axis_valid = 
 		aclken & 
 		has_phy_row_traffic & 
+		(~cursor_exceeded_cal_region) & 
 		(logic_x_to_cvt == cur_cal_pos) & 
 		(is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region | m_row_reg_axis_valid);
 	
@@ -451,12 +459,16 @@ module phy_fmap_sfc_row_adapter #(
 		aclken & 
 		has_phy_row_traffic & 
 		(
-			(~((cursor_phy_x == phy_sfc_x) & (~is_cursor_at_external_padding_region) & (~is_cursor_at_inner_padding_region))) | 
-			m_row_reg_axis_valid
+			(
+				(~cursor_exceeded_cal_region) & 
+				((cursor_phy_x != phy_sfc_x) | is_cursor_at_external_padding_region | is_cursor_at_inner_padding_region)
+			) | m_row_reg_axis_valid
 		) & 
-		((~(logic_x_to_cvt == cur_cal_pos)) | s_mac_array_reg_axis_ready);
+		(cursor_exceeded_cal_region | (logic_x_to_cvt != cur_cal_pos) | s_mac_array_reg_axis_ready);
 	assign to_rst_cursor = 
-		(cursor_exceeded_phy_row | ((cursor_phy_x == ifmap_w) & (~is_cursor_at_inner_padding_region))) & 
+		// 光标已越过物理表面行, 或处于物理表面行的最后1个表面
+		(cursor_exceeded_phy_row | (cursor_phy_x == ifmap_w)) & 
+		// 光标已越过计算区, 或处于计算区的最后1个表面
 		(cursor_exceeded_cal_region | (s_mac_array_reg_axis_valid & s_mac_array_reg_axis_ready & s_mac_array_reg_axis_last));
 	assign cursor_at_last_cal_sfc = (logic_x_to_cvt == cur_cal_pos) & (pst_cal_sfc_n == ofmap_w);
 	

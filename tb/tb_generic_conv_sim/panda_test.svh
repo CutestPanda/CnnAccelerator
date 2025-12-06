@@ -145,7 +145,7 @@ class ConcreteExpFmapCalProcListener extends FmapOutPtCalProcListener;
 		int unsigned sfc_id
 	);
 		/*
-		if((kset_id == 0) && (oy == 3) && (ox == 0) && (sfc_id == 0))
+		if((kset_id == 0) && (oy == 0) && (ox == 0) && (sfc_id == 0))
 		begin
 			AbstractData data;
 			
@@ -176,12 +176,12 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	.STATUS(tue_status_dummy)
 );
 	
-	protected int unsigned ATOMIC_C = 8; // 通道并行数
-	protected int unsigned ATOMIC_K = 8; // 核并行数
+	protected int unsigned ATOMIC_C = 2; // 通道并行数
+	protected int unsigned ATOMIC_K = 4; // 核并行数
 	protected int unsigned STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	protected int unsigned FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	
-	protected bit en_output_mem_bin = 1'b1; // 是否生成特征图与卷积核数据BIN文件
+	protected bit en_output_mem_bin = 1'b0; // 是否生成特征图与卷积核数据BIN文件
 	
 	protected FmapReqGenTestEnv fmap_req_gen_env;
 	protected KernalReqGenTestEnv kernal_req_gen_env;
@@ -385,6 +385,20 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	
 endclass
 
+/**
+CASE#0:
+
+常规普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w30 h6 c19
+卷积核 = 3x3 c19 n7
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_0 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -456,6 +470,20 @@ class generic_conv_sim_test_0 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#1:
+
+常规普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w30 h10 c26
+卷积核 = 3x3 c26 n7
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_1 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -527,6 +555,20 @@ class generic_conv_sim_test_1 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#2:
+
+1x1核普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w30 h10 c26
+卷积核 = 1x1 c26 n7
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (0, 0, 0, 0)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_2 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -598,6 +640,20 @@ class generic_conv_sim_test_2 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#3:
+
+非常规步长普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w40 h24 c37
+卷积核 = 3x3 c37 n10
+步长 = h2 v2
+外填充(上, 下, 左, 右) = (1, 0, 1, 0)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_3 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -669,6 +725,20 @@ class generic_conv_sim_test_3 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#4:
+
+带内填充的普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w16 h9 c11
+卷积核 = 3x3 c11 n5
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (1, 1)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_4 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -740,6 +810,20 @@ class generic_conv_sim_test_4 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#5:
+
+多轮计算普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w50 h28 c2
+卷积核 = 3x3 c2 n32
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 2
+**/
 class generic_conv_sim_test_5 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -811,6 +895,21 @@ class generic_conv_sim_test_5 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#6:
+
+常规组卷积测试
+
+使用配置参数#0
+
+输入特征图 = w24 h16 c16
+卷积核 = 3x3 c16 n16
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+分组数 = 4
+**/
 class generic_conv_sim_test_6 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -882,6 +981,21 @@ class generic_conv_sim_test_6 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#7:
+
+多轮计算组卷积测试
+
+使用配置参数#0
+
+输入特征图 = w24 h16 c32
+卷积核 = 3x3 c32 n32
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 2
+分组数 = 4
+**/
 class generic_conv_sim_test_7 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -953,6 +1067,21 @@ class generic_conv_sim_test_7 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#8:
+
+膨胀卷积测试
+
+使用配置参数#0
+
+输入特征图 = w24 h16 c6
+卷积核 = 3x3 c6 n16
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (0, 0, 0, 0)
+内填充(上下, 左右) = (0, 0)
+核膨胀 = 1
+计算轮次 = 1
+**/
 class generic_conv_sim_test_8 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1024,6 +1153,20 @@ class generic_conv_sim_test_8 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#9:
+
+多轮计算普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w50 h28 c2
+卷积核 = 3x3 c2 n14
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 2
+**/
 class generic_conv_sim_test_9 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1095,6 +1238,20 @@ class generic_conv_sim_test_9 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#10:
+
+多轮计算普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w50 h28 c2
+卷积核 = 3x3 c2 n12
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 2
+**/
 class generic_conv_sim_test_10 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1166,6 +1323,20 @@ class generic_conv_sim_test_10 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#11:
+
+常规普通卷积测试
+
+使用配置参数#0
+
+输入特征图 = w11 h6 c13
+卷积核 = 3x3 c13 n7
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_11 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1237,6 +1408,20 @@ class generic_conv_sim_test_11 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#12:
+
+常规普通卷积测试
+
+使用配置参数#1
+
+输入特征图 = w25 h25 c13
+卷积核 = 3x3 c13 n9
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_12 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1308,6 +1493,20 @@ class generic_conv_sim_test_12 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#13:
+
+常规普通卷积测试
+
+使用配置参数#2
+
+输入特征图 = w25 h25 c13
+卷积核 = 3x3 c13 n9
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
 class generic_conv_sim_test_13 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1379,6 +1578,20 @@ class generic_conv_sim_test_13 extends generic_conv_sim_base_test;
 	
 endclass
 
+/**
+CASE#14:
+
+多轮计算普通卷积测试
+
+使用配置参数#2
+
+输入特征图 = w25 h25 c13
+卷积核 = 3x3 c13 n9
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 2
+**/
 class generic_conv_sim_test_14 extends generic_conv_sim_base_test;
 	
 	virtual protected function void build_test_cfg();
@@ -1447,6 +1660,176 @@ class generic_conv_sim_test_14 extends generic_conv_sim_base_test;
 	
 	`tue_component_default_constructor(generic_conv_sim_test_14)
 	`uvm_component_utils(generic_conv_sim_test_14)
+	
+endclass
+
+/**
+CASE#15:
+
+全连接层测试
+
+使用配置参数#2
+
+输入特征图 = w3 h3 c5
+卷积核 = 3x3 c5 n64
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (0, 0, 0, 0)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
+class generic_conv_sim_test_15 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
+			fmap_w == 3;
+			fmap_h == 3;
+			fmap_c == 5;
+			ofmap_data_type == DATA_4_BYTE;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 64;
+			kernal_chn_n == 5;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == ATOMIC_C;
+			atomic_k == ATOMIC_K;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 0;
+			external_padding_right == 0;
+			external_padding_top == 0;
+			external_padding_bottom == 0;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == STREAM_DATA_WIDTH;
+			fnl_res_data_width == FNL_RES_DATA_WIDTH;
+			fmbufbankn == 2;
+			fmbufcoln == COLN_4;
+			fmbufrown == 256;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_8;
+			kbufgrpn == 99;
+			mid_res_item_n_foreach_row == 1;
+			mid_res_buf_row_n_bufferable == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_15)
+	`uvm_component_utils(generic_conv_sim_test_15)
+	
+endclass
+
+/**
+CASE#16:
+
+全连接层测试
+
+使用配置参数#2
+
+输入特征图 = w3 h3 c33
+卷积核 = 3x3 c33 n256
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (0, 0, 0, 0)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
+class generic_conv_sim_test_16 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
+			fmap_w == 3;
+			fmap_h == 3;
+			fmap_c == 33;
+			ofmap_data_type == DATA_4_BYTE;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 256;
+			kernal_chn_n == 33;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == ATOMIC_C;
+			atomic_k == ATOMIC_K;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 0;
+			external_padding_right == 0;
+			external_padding_top == 0;
+			external_padding_bottom == 0;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 8;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == STREAM_DATA_WIDTH;
+			fnl_res_data_width == FNL_RES_DATA_WIDTH;
+			fmbufbankn == 10;
+			fmbufcoln == COLN_4;
+			fmbufrown == 512;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_8;
+			kbufgrpn == 4;
+			mid_res_item_n_foreach_row == 1;
+			mid_res_buf_row_n_bufferable == 4;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b0;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_16)
+	`uvm_component_utils(generic_conv_sim_test_16)
 	
 endclass
 

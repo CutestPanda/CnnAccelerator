@@ -14,13 +14,13 @@ module tb_phy_fmap_sfc_row_adapter();
 	
 	/** 配置参数 **/
 	parameter int ATOMIC_C = 4; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter EN_ROW_AXIS_REG_SLICE = "true"; // 是否在物理特征图表面行数据AXIS接口插入寄存器片
-	parameter EN_MAC_ARRAY_AXIS_REG_SLICE = "true"; // 是否在乘加阵列计算数据AXIS接口插入寄存器片
+	parameter EN_ROW_AXIS_REG_SLICE = "false"; // 是否在物理特征图表面行数据AXIS接口插入寄存器片
+	parameter EN_MAC_ARRAY_AXIS_REG_SLICE = "false"; // 是否在乘加阵列计算数据AXIS接口插入寄存器片
 	parameter int CONV_HORIZONTAL_STRIDE = 1; // 卷积水平步长
-	parameter int EXTERNAL_PADDING_LEFT = 0; // 左部外填充数
-	parameter int EXTERNAL_PADDING_RIGHT = 0; // 右部外填充数
-	parameter int INNER_PADDING_LEFT_RIGHT = 0; // 左右内填充数
-	parameter int IFMAP_W = 10; // 输入特征图宽度
+	parameter int EXTERNAL_PADDING_LEFT = 1; // 左部外填充数
+	parameter int EXTERNAL_PADDING_RIGHT = 1; // 右部外填充数
+	parameter int INNER_PADDING_LEFT_RIGHT = 1; // 左右内填充数
+	parameter int IFMAP_W = 3; // 输入特征图宽度
 	parameter int KERNAL_DILATION_HZT_N = 0; // 水平膨胀量
 	parameter int KERNAL_W = 3; // (膨胀前)卷积核宽度
 	parameter int KERNAL_W_DILATED = KERNAL_W + (KERNAL_W-1)*KERNAL_DILATION_HZT_N; // (膨胀后)卷积核宽度
