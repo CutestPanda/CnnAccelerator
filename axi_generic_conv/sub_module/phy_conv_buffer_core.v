@@ -46,7 +46,7 @@ ICB SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/10
 ********************************************************************/
 
 
@@ -369,70 +369,70 @@ module phy_conv_buffer_core #(
 		for(buf_mem_ctrl_i = 0;buf_mem_ctrl_i < CBUF_BANK_N;buf_mem_ctrl_i = buf_mem_ctrl_i + 1)
 		begin:buf_mem_ctrl_blk
 			assign mem_en_a[buf_mem_ctrl_i] = aclken & (
-				((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
 					(buf_mem_access_by_slave[buf_mem_ctrl_i][0] | buf_mem_access_by_slave[buf_mem_ctrl_i][1]):
 					(buf_mem_access_by_slave[buf_mem_ctrl_i][2] | buf_mem_access_by_slave[buf_mem_ctrl_i][3])
 			);
 			assign mem_wen_a_arr[buf_mem_ctrl_i] = 
-				((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
-				(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
-						({(ATOMIC_C*2){~s0_fmbuf_cmd_read}} & s0_fmbuf_cmd_wmask):
-						({(ATOMIC_C*2){~s1_fmbuf_cmd_read}} & s1_fmbuf_cmd_wmask)
-				):(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
-						({(ATOMIC_C*2){~s0_kbuf_cmd_read}} & s0_kbuf_cmd_wmask):
-						({(ATOMIC_C*2){~s1_kbuf_cmd_read}} & s1_kbuf_cmd_wmask)
-				);
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+							({(ATOMIC_C*2){~s0_fmbuf_cmd_read}} & s0_fmbuf_cmd_wmask):
+							({(ATOMIC_C*2){~s1_fmbuf_cmd_read}} & s1_fmbuf_cmd_wmask)
+					):(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+							({(ATOMIC_C*2){~s0_kbuf_cmd_read}} & s0_kbuf_cmd_wmask):
+							({(ATOMIC_C*2){~s1_kbuf_cmd_read}} & s1_kbuf_cmd_wmask)
+					);
 			assign mem_addr_a_arr[buf_mem_ctrl_i] = 
-				((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
-				(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
-						(16'h0000 | fmbuf_access_pgaddr[0]):
-						(16'h0000 | fmbuf_access_pgaddr[1])
-				):(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
-						(16'h0000 | kbuf_access_pgaddr[0]):
-						(16'h0000 | kbuf_access_pgaddr[1])
-				);
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+							(16'h0000 | fmbuf_access_pgaddr[0]):
+							(16'h0000 | fmbuf_access_pgaddr[1])
+					):(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+							(16'h0000 | kbuf_access_pgaddr[0]):
+							(16'h0000 | kbuf_access_pgaddr[1])
+					);
 			assign mem_din_a_arr[buf_mem_ctrl_i] = 
-				((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
-				(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
-						s0_fmbuf_cmd_wdata:
-						s1_fmbuf_cmd_wdata
-				):(
-					buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
-						s0_kbuf_cmd_wdata:
-						s1_kbuf_cmd_wdata
-				);
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+							s0_fmbuf_cmd_wdata:
+							s1_fmbuf_cmd_wdata
+					):(
+						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+							s0_kbuf_cmd_wdata:
+							s1_kbuf_cmd_wdata
+					);
 			
 			assign buf_mem_rsp_slave_ready[buf_mem_ctrl_i] = 
 				(EN_HP_ICB == "true") & (
-					((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
-					(
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & s0_fmbuf_rsp_ready) | 
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & s1_fmbuf_rsp_ready)
-					):(
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & s0_kbuf_rsp_ready) | 
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & s1_kbuf_rsp_ready)
-					)
+					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+						(
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & s0_fmbuf_rsp_ready) | 
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & s1_fmbuf_rsp_ready)
+						):(
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & s0_kbuf_rsp_ready) | 
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & s1_kbuf_rsp_ready)
+						)
 				);
 			assign buf_mem_rsp_to_pass[buf_mem_ctrl_i] = 
 				(EN_HP_ICB == "true") & 
 				(
-					((buf_mem_ctrl_i != (CBUF_BANK_N-1)) & ((buf_mem_ctrl_i == 0) | (buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]))) ? 
-					(
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & 
-							fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & 
-							fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
-					):(
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & 
-							kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
-						(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & 
-							kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
-					)
+					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+						(
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & 
+								fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & 
+								fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
+						):(
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & 
+								kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
+							(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & 
+								kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
+						)
 				);
 			// 断言: 缓存MEM被从机访问(指示向量)要么是4'b0000, 要么是独热码!
 			assign buf_mem_access_by_slave[buf_mem_ctrl_i] = {

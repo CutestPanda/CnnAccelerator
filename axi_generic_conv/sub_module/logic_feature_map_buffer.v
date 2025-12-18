@@ -30,6 +30,9 @@ SOFTWARE.
 将物理特征图缓存分为若干个表面行区域
 每个表面行区域都能独立地激活/置换
 
+支持读请求后自动置换表面行
+支持表面行随机读取
+
 记录实际表面行号与缓存行号之间的双向映射 -> 
 	1个实际表面行号映射表MEM(简单双口, 位宽 = BUFFER_RID_WIDTH, 深度 = 4K)
 	1个缓存行号映射表MEM(简单双口, 位宽 = 12, 深度 = MAX_FMBUF_ROWN)
@@ -58,7 +61,7 @@ ICB MASTER
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/06/23
+日期: 2025/12/10
 ********************************************************************/
 
 
@@ -76,6 +79,7 @@ module logic_feature_map_buffer #(
 	// 运行时参数
 	input wire[3:0] fmbufcoln, // 每个表面行的表面个数类型
 	input wire[9:0] fmbufrown, // 表面行数 - 1
+	input wire fmrow_random_rd_mode, // 是否处于表面行随机读取模式
 	
 	// 控制/状态
 	input wire rst_logic_fmbuf, // 重置逻辑特征图缓存
@@ -105,16 +109,21 @@ module logic_feature_map_buffer #(
 	/*
 	请求格式 -> 
 		{
-			保留(5bit), 
-			是否需要自动置换表面行(1bit), 
-			表面行的缓存编号(10bit), 
-			起始表面编号(12bit), 
+			保留(5bit),
+			是否需要自动置换表面行(1bit),
+			表面行的缓存编号(10bit),
+			起始表面编号(12bit),
 			待读取的表面个数 - 1(12bit)
 		}
 	*/
 	input wire[39:0] s_rd_req_axis_data,
 	input wire s_rd_req_axis_valid,
 	output wire s_rd_req_axis_ready,
+	// 特征图表面行随机读取(AXIS从机)
+	input wire[15:0] s_random_rd_axis_data, // 表面号
+	input wire s_random_rd_axis_last, // 标志本次读请求待读取的最后1个表面
+	input wire s_random_rd_axis_valid,
+	output wire s_random_rd_axis_ready,
 	// 特征图表面行数据输出(AXIS主机)
 	output wire[ATOMIC_C*2*8-1:0] m_fout_axis_data,
 	output wire m_fout_axis_user, // 标志表面行未缓存
@@ -123,30 +132,30 @@ module logic_feature_map_buffer #(
 	input wire m_fout_axis_ready,
 	
 	// 特征图缓存ICB主机#0
-	// 命令通道
+	// [命令通道]
 	output wire[31:0] m0_fmbuf_cmd_addr,
 	output wire m0_fmbuf_cmd_read, // const -> 1'b0
 	output wire[ATOMIC_C*2*8-1:0] m0_fmbuf_cmd_wdata,
 	output wire[ATOMIC_C*2-1:0] m0_fmbuf_cmd_wmask, // const -> {(ATOMIC_C*2){1'b1}}
 	output wire m0_fmbuf_cmd_valid,
 	input wire m0_fmbuf_cmd_ready,
-	// 响应通道
+	// [响应通道]
 	input wire[ATOMIC_C*2*8-1:0] m0_fmbuf_rsp_rdata, // ignored
 	input wire m0_fmbuf_rsp_err, // ignored
 	input wire m0_fmbuf_rsp_valid,
 	output wire m0_fmbuf_rsp_ready, // const -> 1'b1
 	
 	// 特征图缓存ICB主机#1
-	// 命令通道
+	// [命令通道]
 	output wire[31:0] m1_fmbuf_cmd_addr,
 	output wire m1_fmbuf_cmd_read, // const -> 1'b1
 	output wire[ATOMIC_C*2*8-1:0] m1_fmbuf_cmd_wdata, // not care
 	output wire[ATOMIC_C*2-1:0] m1_fmbuf_cmd_wmask, // not care
 	output wire m1_fmbuf_cmd_valid,
 	input wire m1_fmbuf_cmd_ready,
-	// 响应通道
+	// [响应通道]
 	input wire[ATOMIC_C*2*8-1:0] m1_fmbuf_rsp_rdata,
-	input wire m1_fmbuf_rsp_err, // ignored
+	input wire m1_fmbuf_rsp_err,
 	input wire m1_fmbuf_rsp_valid,
 	output wire m1_fmbuf_rsp_ready,
 	
@@ -211,6 +220,22 @@ module logic_feature_map_buffer #(
 	localparam RDFM_STS_ROW_INVALID = 3'b010;
 	localparam RDFM_STS_TRANS = 3'b011;
 	localparam RDFM_STS_UPD_FLAG = 3'b100;
+	
+	/** 补充运行时参数 **/
+	wire[3:0] fmbufcoln_lshn; // 表面行缓存宽度导致的左移量
+	
+	assign fmbufcoln_lshn = 
+		(fmbufcoln == FMBUFCOLN_4)    ? 4'd2:
+		(fmbufcoln == FMBUFCOLN_8)    ? 4'd3:
+		(fmbufcoln == FMBUFCOLN_16)   ? 4'd4:
+		(fmbufcoln == FMBUFCOLN_32)   ? 4'd5:
+		(fmbufcoln == FMBUFCOLN_64)   ? 4'd6:
+		(fmbufcoln == FMBUFCOLN_128)  ? 4'd7:
+		(fmbufcoln == FMBUFCOLN_256)  ? 4'd8:
+		(fmbufcoln == FMBUFCOLN_512)  ? 4'd9:
+		(fmbufcoln == FMBUFCOLN_1024) ? 4'd10:
+		(fmbufcoln == FMBUFCOLN_2048) ? 4'd11:
+		                                4'd12;
 	
 	/** 表面行有效标志 **/
 	reg sfc_row_vld_flags[0:MAX_FMBUF_ROWN-1]; // 表面行有效标志(存储实体)
@@ -324,12 +349,10 @@ module logic_feature_map_buffer #(
 				(s_fin_axis_valid & (~fmrow_to_wt_is_vld))
 			)
 				wt_fmbuf_addr <= # SIM_DELAY 
-					(
-						(s_fin_axis_user[clogb2(MAX_FMBUF_ROWN-1):0] | 32'h0000_0000) << 
-							(fmbufcoln + 4'd2)
-					) * ATOMIC_C * 2;
+					((s_fin_axis_user[clogb2(MAX_FMBUF_ROWN-1):0] | 32'h0000_0000) << fmbufcoln_lshn) * ATOMIC_C * 2;
 			else if(m0_fmbuf_cmd_valid & m0_fmbuf_cmd_ready)
-				wt_fmbuf_addr <= # SIM_DELAY wt_fmbuf_addr + ATOMIC_C * 2;
+				wt_fmbuf_addr <= # SIM_DELAY 
+					wt_fmbuf_addr + ATOMIC_C * 2;
 		end
 	end
 	
@@ -390,42 +413,77 @@ module logic_feature_map_buffer #(
 	reg[31:0] rd_fmbuf_addr; // 读特征图缓存地址
 	reg auto_rplc_sfc_row_after_rd; // 锁存的自动置换表面行标志
 	reg[9:0] sfc_rid_to_rd; // 锁存的待读取表面行编号
-	reg[11:0] sfc_n_to_rd; // 锁存的(待读取表面数 - 1)
+	reg[11:0] sfc_n_to_rd; // 锁存的"待读取表面数 - 1"
 	reg[12:0] sfc_rd_cmd_n_sent; // 已发送的表面读命令
 	reg[12:0] sfc_rd_resp_n_recv; // 已接收的表面读响应
+	reg to_suppress_random_rd; // 镇压随机读取(标志)
 	
-	// 握手条件: aclken & (rdfm_sts == RDFM_STS_FLAG_JUDGE) & s_rd_req_axis_valid
+	// 握手条件: aclken & s_rd_req_axis_valid & (rdfm_sts == RDFM_STS_FLAG_JUDGE)
 	assign s_rd_req_axis_ready = aclken & (rdfm_sts == RDFM_STS_FLAG_JUDGE);
 	
-	assign m_fout_axis_data = m1_fmbuf_rsp_rdata;
-	assign m_fout_axis_user = rdfm_sts == RDFM_STS_ROW_INVALID;
-	assign m_fout_axis_last = (rdfm_sts == RDFM_STS_ROW_INVALID) | (sfc_rd_resp_n_recv == {1'b0, sfc_n_to_rd});
+	/*
+	握手条件:
+		s_random_rd_axis_valid & 
+		(
+			(~fmrow_random_rd_mode) | 
+			(aclken & (rdfm_sts == RDFM_STS_TRANS) & (~to_suppress_random_rd) & m1_fmbuf_cmd_ready)
+		)
+	*/
+	assign s_random_rd_axis_ready = 
+		(~fmrow_random_rd_mode) | 
+		(aclken & (rdfm_sts == RDFM_STS_TRANS) & (~to_suppress_random_rd) & m1_fmbuf_cmd_ready);
+	
+	assign m_fout_axis_data = 
+		m1_fmbuf_rsp_rdata;
+	assign m_fout_axis_user = 
+		rdfm_sts == RDFM_STS_ROW_INVALID;
+	assign m_fout_axis_last = 
+		(rdfm_sts == RDFM_STS_ROW_INVALID) | 
+		(((~fmrow_random_rd_mode) | to_suppress_random_rd) & (sfc_rd_resp_n_recv == {1'b0, sfc_n_to_rd}));
 	/*
 	握手条件:
 		aclken & (
 			(rdfm_sts == RDFM_STS_ROW_INVALID) | 
-			((rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_resp_n_recv <= {1'b0, sfc_n_to_rd}) & m1_fmbuf_rsp_valid)
+			((rdfm_sts == RDFM_STS_TRANS) & m1_fmbuf_rsp_valid)
 		) & m_fout_axis_ready
 	*/
 	assign m_fout_axis_valid = 
 		aclken & (
 			(rdfm_sts == RDFM_STS_ROW_INVALID) | 
-			((rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_resp_n_recv <= {1'b0, sfc_n_to_rd}) & m1_fmbuf_rsp_valid)
+			((rdfm_sts == RDFM_STS_TRANS) & m1_fmbuf_rsp_valid)
 		);
 	
-	assign m1_fmbuf_cmd_addr = rd_fmbuf_addr;
+	assign m1_fmbuf_cmd_addr = 
+		rd_fmbuf_addr + 
+		(fmrow_random_rd_mode ? (s_random_rd_axis_data | 32'd0):32'd0) * ATOMIC_C * 2;
 	assign m1_fmbuf_cmd_read = 1'b1;
 	assign m1_fmbuf_cmd_wdata = {(ATOMIC_C*2*8){1'bx}};
 	assign m1_fmbuf_cmd_wmask = {(ATOMIC_C*2){1'bx}};
-	// 握手条件: aclken & (rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_cmd_n_sent <= {1'b0, sfc_n_to_rd}) & m1_fmbuf_cmd_ready
-	assign m1_fmbuf_cmd_valid = aclken & (rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_cmd_n_sent <= {1'b0, sfc_n_to_rd});
+	/*
+	握手条件:
+		aclken & (rdfm_sts == RDFM_STS_TRANS) & 
+		(
+			fmrow_random_rd_mode ? 
+				(s_random_rd_axis_valid & (~to_suppress_random_rd)):
+				(sfc_rd_cmd_n_sent <= {1'b0, sfc_n_to_rd})
+		) & 
+		m1_fmbuf_cmd_ready
+	*/
+	assign m1_fmbuf_cmd_valid = 
+		aclken & (rdfm_sts == RDFM_STS_TRANS) & 
+		(
+			fmrow_random_rd_mode ? 
+				(s_random_rd_axis_valid & (~to_suppress_random_rd)):
+				(sfc_rd_cmd_n_sent <= {1'b0, sfc_n_to_rd})
+		);
 	
-	/* 握手条件: 
-		aclken & (rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_resp_n_recv <= {1'b0, sfc_n_to_rd}) & m1_fmbuf_rsp_valid & 
+	/*
+	握手条件: 
+		aclken & (rdfm_sts == RDFM_STS_TRANS) & m1_fmbuf_rsp_valid & 
 		m_fout_axis_ready
 	*/
 	assign m1_fmbuf_rsp_ready = 
-		aclken & (rdfm_sts == RDFM_STS_TRANS) & (sfc_rd_resp_n_recv <= {1'b0, sfc_n_to_rd}) & m_fout_axis_ready;
+		aclken & (rdfm_sts == RDFM_STS_TRANS) & m_fout_axis_ready;
 	
 	assign rdfm_rplc_req = (~rst_logic_fmbuf) & (rdfm_sts == RDFM_STS_UPD_FLAG);
 	assign rdfm_rplc_rid = sfc_rid_to_rd[clogb2(MAX_FMBUF_ROWN-1):0];
@@ -460,7 +518,11 @@ module logic_feature_map_buffer #(
 						if(m_fout_axis_ready)
 							rdfm_sts <= # SIM_DELAY RDFM_STS_IDLE;
 					RDFM_STS_TRANS:
-						if(m1_fmbuf_rsp_valid & m1_fmbuf_rsp_ready & (sfc_rd_resp_n_recv == {1'b0, sfc_n_to_rd}))
+						if(
+							m1_fmbuf_rsp_valid & m1_fmbuf_rsp_ready & 
+							((~fmrow_random_rd_mode) | to_suppress_random_rd) & 
+							(sfc_rd_resp_n_recv == {1'b0, sfc_n_to_rd})
+						)
 							rdfm_sts <= # SIM_DELAY 
 								auto_rplc_sfc_row_after_rd ? 
 									RDFM_STS_UPD_FLAG:
@@ -486,37 +548,62 @@ module logic_feature_map_buffer #(
 	begin
 		if(aclken)
 		begin
-			if((rdfm_sts == RDFM_STS_IDLE) & s_rd_req_axis_valid)
+			if(
+				((rdfm_sts == RDFM_STS_IDLE) & s_rd_req_axis_valid) | 
+				((~fmrow_random_rd_mode) & m1_fmbuf_cmd_valid & m1_fmbuf_cmd_ready)
+			)
 				rd_fmbuf_addr <= # SIM_DELAY 
-					(
+					(rdfm_sts == RDFM_STS_IDLE) ? 
 						(
-							(s_rd_req_axis_data_rid[clogb2(MAX_FMBUF_ROWN-1):0] | 32'h0000_0000) << 
-								(fmbufcoln + 4'd2)
-						) + s_rd_req_axis_data_start_sfc_id
-					) * ATOMIC_C * 2;
-			else if(m1_fmbuf_cmd_valid & m1_fmbuf_cmd_ready)
-				rd_fmbuf_addr <= # SIM_DELAY rd_fmbuf_addr + ATOMIC_C * 2;
+							(
+								((s_rd_req_axis_data_rid[clogb2(MAX_FMBUF_ROWN-1):0] | 32'h0000_0000) << fmbufcoln_lshn) + 
+								(fmrow_random_rd_mode ? 12'd0:s_rd_req_axis_data_start_sfc_id)
+							) * ATOMIC_C * 2
+						):
+						(rd_fmbuf_addr + ATOMIC_C * 2);
 		end
 	end
 	
-	// 锁存的自动置换表面行标志, 锁存的待读取表面行编号, 锁存的(待读取表面数 - 1)
+	// 锁存的自动置换表面行标志, 锁存的待读取表面行编号
 	always @(posedge aclk)
 	begin
 		if(s_rd_req_axis_valid & s_rd_req_axis_ready)
 		begin
 			auto_rplc_sfc_row_after_rd <= # SIM_DELAY s_rd_req_axis_data_auto_rplc;
 			sfc_rid_to_rd <= # SIM_DELAY s_rd_req_axis_data_rid;
-			sfc_n_to_rd <= # SIM_DELAY s_rd_req_axis_data_sfc_n;
+		end
+	end
+	// 锁存的"待读取表面数 - 1"
+	always @(posedge aclk)
+	begin
+		if(aclken)
+		begin
+			if(
+				(s_rd_req_axis_valid & s_rd_req_axis_ready) | 
+				(fmrow_random_rd_mode & s_random_rd_axis_valid & s_random_rd_axis_ready)
+			)
+				sfc_n_to_rd <= # SIM_DELAY 
+					fmrow_random_rd_mode ? 
+						(
+							(rdfm_sts == RDFM_STS_TRANS) ? 
+								(sfc_n_to_rd + 1'b1):
+								12'b1111_1111_1111
+						):
+						s_rd_req_axis_data_sfc_n;
 		end
 	end
 	
 	// 已发送的表面读命令
 	always @(posedge aclk)
 	begin
-		if(aclken & (
-			(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE)) | 
-			(m1_fmbuf_cmd_valid & m1_fmbuf_cmd_ready)
-		))
+		if(
+			aclken & 
+			(~fmrow_random_rd_mode) & 
+			(
+				(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE)) | 
+				(m1_fmbuf_cmd_valid & m1_fmbuf_cmd_ready)
+			)
+		)
 			sfc_rd_cmd_n_sent <= # SIM_DELAY 
 				{13{~(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE))}} & 
 				(sfc_rd_cmd_n_sent + 13'd1);
@@ -531,6 +618,21 @@ module logic_feature_map_buffer #(
 			sfc_rd_resp_n_recv <= # SIM_DELAY 
 				{13{~(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE))}} & 
 				(sfc_rd_resp_n_recv + 13'd1);
+	end
+	
+	// 镇压随机读取(标志)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			fmrow_random_rd_mode & 
+			(
+				(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE)) | 
+				(s_random_rd_axis_valid & s_random_rd_axis_ready)
+			)
+		)
+			to_suppress_random_rd <= # SIM_DELAY 
+				(~(rst_logic_fmbuf | (rdfm_sts == RDFM_STS_FLAG_JUDGE))) & s_random_rd_axis_last;
 	end
 	
 	/** 表面行检索 **/

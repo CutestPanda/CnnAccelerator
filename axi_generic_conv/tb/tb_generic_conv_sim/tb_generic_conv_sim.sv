@@ -66,18 +66,18 @@ module tb_generic_conv_sim();
 	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
 	*/
-	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 8; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
-	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 512; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_KERNAL_N = 1024; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
-	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
-	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
-	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
+	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -399,7 +399,7 @@ module tb_generic_conv_sim();
 	
 	assign fnl_res_trans_blk_ctrl_if.params[120:0] = {
 		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.n_foreach_group,
-		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.group_n,
+		dut.conv_ctrl_sub_system_u.group_n, // 模块fnl_res_trans_req_gen_u里没有group_n
 		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.is_grp_conv_mode,
 		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.max_wgtblk_w,
 		dut.conv_ctrl_sub_system_u.fnl_res_trans_req_gen_u.kernal_num_n,
@@ -451,15 +451,15 @@ module tb_generic_conv_sim();
 		begin:mid_res_acmlt_blk
 			assign acmlt_in_if[mid_res_acmlt_i].data[79:0] = 
 				{
-					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_exp[mid_res_acmlt_i][7:0],
-					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_frac[mid_res_acmlt_i][39:0],
-					dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_org_mid_res[mid_res_acmlt_i][31:0]
+					dut.conv_cal_sub_system_u.acmlt_in_new_res[mid_res_acmlt_i*48+47:mid_res_acmlt_i*48+40],
+					dut.conv_cal_sub_system_u.acmlt_in_new_res[mid_res_acmlt_i*48+39:mid_res_acmlt_i*48+0],
+					dut.conv_cal_sub_system_u.acmlt_in_org_mid_res[mid_res_acmlt_i*32+31:mid_res_acmlt_i*32+0]
 				};
 			assign acmlt_in_if[mid_res_acmlt_i].user[0] = 
-				dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_first_item[mid_res_acmlt_i];
+				dut.conv_cal_sub_system_u.acmlt_in_first_item;
 			assign acmlt_in_if[mid_res_acmlt_i].last = 1'b1;
 			assign acmlt_in_if[mid_res_acmlt_i].valid = 
-				dut.conv_cal_sub_system_u.conv_middle_res_acmlt_buf_u.acmlt_in_valid[mid_res_acmlt_i];
+				dut.conv_cal_sub_system_u.acmlt_in_valid[mid_res_acmlt_i];
 			assign acmlt_in_if[mid_res_acmlt_i].ready = 1'b1;
 			
 			initial

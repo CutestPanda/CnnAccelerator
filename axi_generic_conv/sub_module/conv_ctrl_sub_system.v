@@ -47,7 +47,7 @@ BLK CTRL
 AXIS MASTER
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/18
 ********************************************************************/
 
 
@@ -576,8 +576,8 @@ module conv_ctrl_sub_system #(
 		.kernal_num_n(kernal_num_n),
 		.max_wgtblk_w(max_wgtblk_w),
 		.is_grp_conv_mode(is_grp_conv_mode),
-		.group_n(group_n),
 		.n_foreach_group(n_foreach_group),
+		.en_send_sub_row_msg(1'b1),
 		
 		.blk_start(fnl_res_trans_blk_start),
 		.blk_idle(fnl_res_trans_blk_idle),

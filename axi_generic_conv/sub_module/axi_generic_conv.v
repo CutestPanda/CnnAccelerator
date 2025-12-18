@@ -28,6 +28,7 @@ SOFTWARE.
 
 描述:
 AXI-通用卷积处理单元(顶层模块)
+
 包括寄存器配置接口、控制子系统、数据枢纽、计算子系统
 
 注意：
@@ -42,7 +43,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/29
+日期: 2025/12/18
 ********************************************************************/
 
 
@@ -682,6 +683,7 @@ module axi_generic_conv #(
 		
 		.fmbufcoln(fmbufcoln),
 		.fmbufrown(fmbufrown),
+		.fmrow_random_rd_mode(1'b0),
 		.grp_conv_buf_mode(is_grp_conv_mode),
 		.kbufgrpsz(kernal_shape),
 		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
@@ -691,6 +693,11 @@ module axi_generic_conv #(
 		.s_fm_rd_req_axis_data(s_fm_rd_req_axis_data),
 		.s_fm_rd_req_axis_valid(s_fm_rd_req_axis_valid),
 		.s_fm_rd_req_axis_ready(s_fm_rd_req_axis_ready),
+		
+		.s_fm_random_rd_axis_data(16'dx),
+		.s_fm_random_rd_axis_last(1'bx),
+		.s_fm_random_rd_axis_valid(1'b0),
+		.s_fm_random_rd_axis_ready(),
 		
 		.s_kwgtblk_rd_req_axis_data(s_kwgtblk_rd_req_axis_data),
 		.s_kwgtblk_rd_req_axis_valid(s_kwgtblk_rd_req_axis_valid),

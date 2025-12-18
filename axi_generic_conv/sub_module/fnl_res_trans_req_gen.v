@@ -29,8 +29,10 @@ SOFTWARE.
 描述:
 根据输出特征图参数、卷积核核数、权重块最大宽度、组卷积参数, 生成每个"输出特征图子表面行"的基地址和字节数
 
-当不处于组卷积模式时, 输出通道域的最大深度 = 权重块最大宽度(max_wgtblk_w)
-当处于组卷积模式时, 输出通道域的深度 = 每组的核数(n_foreach_group + 1)
+可使能的"输出子表面行信息"
+
+当不处于组卷积模式时, 输出通道域的最大深度 = 权重块最大宽度(max_wgtblk_w), 按核并行数(ATOMIC_K)划分子表面行
+当处于组卷积模式时, 输出通道域的深度 = 每组的核数(n_foreach_group + 1), 按核并行数(ATOMIC_K)划分子表面行
 
 使用2个共享u16*u24乘法器
 
@@ -42,7 +44,7 @@ BLK CTRL
 AXIS MASTER
 
 作者: 陈家耀
-日期: 2025/12/03
+日期: 2025/12/14
 ********************************************************************/
 
 
@@ -63,8 +65,8 @@ module fnl_res_trans_req_gen #(
 	input wire[15:0] kernal_num_n, // 卷积核核数 - 1
 	input wire[5:0] max_wgtblk_w, // 权重块最大宽度
 	input wire is_grp_conv_mode, // 是否处于组卷积模式
-	input wire[15:0] group_n, // 分组数 - 1
 	input wire[15:0] n_foreach_group, // 每组的通道数/核数 - 1
+	input wire en_send_sub_row_msg, // 是否输出子表面行信息
 	
 	// 块级控制
 	input wire blk_start,
@@ -766,7 +768,11 @@ module fnl_res_trans_req_gen #(
 				) | 
 				(
 					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_CAL_SFC_ROW_ADDR]}} & 
-					(1 << DMA_CMD_GEN_STS_ONEHOT_SEND_MSG)
+					(
+						en_send_sub_row_msg ? 
+							(1 << DMA_CMD_GEN_STS_ONEHOT_SEND_MSG):
+							(1 << DMA_CMD_GEN_STS_ONEHOT_SEND_CMD)
+					)
 				) | 
 				(
 					{10{dma_cmd_gen_sts[DMA_CMD_GEN_STS_ONEHOT_SEND_MSG]}} & 

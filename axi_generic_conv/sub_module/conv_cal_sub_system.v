@@ -51,7 +51,7 @@ BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/18
 ********************************************************************/
 
 
@@ -448,6 +448,23 @@ module conv_cal_sub_system #(
 	wire m_axis_mid_res_buf_last; // 本行最后1个最终结果(标志)
 	wire m_axis_mid_res_buf_valid;
 	wire m_axis_mid_res_buf_ready;
+	// 中间结果累加单元组
+	// [累加单元组输入]
+	wire[ATOMIC_K*48-1:0] acmlt_in_new_res; // 新结果
+	wire[ATOMIC_K*32-1:0] acmlt_in_org_mid_res; // 原中间结果
+	wire[ATOMIC_K+2-1:0] acmlt_in_info_along[0:ATOMIC_K-1]; // 随路数据
+	wire[ATOMIC_K-1:0] acmlt_in_mask; // 项掩码
+	wire acmlt_in_first_item; // 是否第1项(标志)
+	wire acmlt_in_last_grp; // 是否最后1组(标志)
+	wire acmlt_in_last_res; // 本行最后1个中间结果(标志)
+	wire[ATOMIC_K-1:0] acmlt_in_valid; // 输入有效指示
+	// [累加单元组输出]
+	wire[ATOMIC_K*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
+	wire[ATOMIC_K+2-1:0] acmlt_out_info_along[0:ATOMIC_K-1]; // 随路数据
+	wire[ATOMIC_K-1:0] acmlt_out_mask; // 输出项掩码
+	wire acmlt_out_last_grp; // 是否最后1组(标志)
+	wire acmlt_out_last_res; // 本行最后1个中间结果(标志)
+	wire[ATOMIC_K-1:0] acmlt_out_valid; // 输出有效指示
 	
 	assign s_axis_mid_res_buf_data = m_axis_pkt_out_data;
 	assign s_axis_mid_res_buf_keep = m_axis_pkt_out_keep;
@@ -456,11 +473,47 @@ module conv_cal_sub_system #(
 	assign s_axis_mid_res_buf_valid = m_axis_pkt_out_valid;
 	assign m_axis_pkt_out_ready = s_axis_mid_res_buf_ready;
 	
+	assign {acmlt_out_last_res, acmlt_out_last_grp, acmlt_out_mask} = acmlt_out_info_along[0];
+	
+	genvar acmlt_i;
+	generate
+		for(acmlt_i = 0;acmlt_i < ATOMIC_K;acmlt_i = acmlt_i + 1)
+		begin:acmlt_blk
+			assign acmlt_in_info_along[acmlt_i] = 
+				(acmlt_i == 0) ? 
+					{acmlt_in_last_res, acmlt_in_last_grp, acmlt_in_mask}:
+					{(ATOMIC_K+2){1'bx}};
+			
+			conv_middle_res_accumulate #(
+				.EN_SMALL_FP32(EN_SMALL_FP32),
+				.INFO_ALONG_WIDTH(ATOMIC_K+2),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_middle_res_accumulate_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(aclken),
+				
+				.calfmt(calfmt),
+				
+				.acmlt_in_exp(acmlt_in_new_res[acmlt_i*48+47:acmlt_i*48+40]),
+				.acmlt_in_frac(acmlt_in_new_res[acmlt_i*48+39:acmlt_i*48+0]),
+				.acmlt_in_org_mid_res(acmlt_in_org_mid_res[acmlt_i*32+31:acmlt_i*32+0]),
+				.acmlt_in_first_item(acmlt_in_first_item),
+				.acmlt_in_info_along(acmlt_in_info_along[acmlt_i]),
+				.acmlt_in_valid(acmlt_in_valid[acmlt_i]),
+				
+				.acmlt_out_data(acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0]),
+				.acmlt_out_info_along(acmlt_out_info_along[acmlt_i]),
+				.acmlt_out_valid(acmlt_out_valid[acmlt_i])
+			);
+		end
+	endgenerate
+	
 	conv_middle_res_acmlt_buf #(
 		.ATOMIC_K(ATOMIC_K),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
-		.EN_SMALL_FP32(EN_SMALL_FP32),
+		.INFO_ALONG_WIDTH(1),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_middle_res_acmlt_buf_u(
 		.aclk(aclk),
@@ -470,10 +523,13 @@ module conv_cal_sub_system #(
 		.calfmt(calfmt),
 		.row_n_bufferable(mid_res_buf_row_n_bufferable),
 		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
+		.max_upd_latency(2 + 9),
+		.en_cal_round_ext(1'b1),
+		.ofmap_w(16'dx),
 		
 		.s_axis_mid_res_data(s_axis_mid_res_buf_data),
 		.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
-		.s_axis_mid_res_user(s_axis_mid_res_buf_user),
+		.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
 		.s_axis_mid_res_last(s_axis_mid_res_buf_last),
 		.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
 		.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
@@ -492,7 +548,23 @@ module conv_cal_sub_system #(
 		.mem_clk_b(mid_res_mem_clk_b),
 		.mem_ren_b(mid_res_mem_ren_b),
 		.mem_addr_b(mid_res_mem_addr_b),
-		.mem_dout_b(mid_res_mem_dout_b)
+		.mem_dout_b(mid_res_mem_dout_b),
+		
+		.acmlt_in_new_res(acmlt_in_new_res),
+		.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+		.acmlt_in_mask(acmlt_in_mask),
+		.acmlt_in_first_item(acmlt_in_first_item),
+		.acmlt_in_last_grp(acmlt_in_last_grp),
+		.acmlt_in_last_res(acmlt_in_last_res),
+		.acmlt_in_info_along(),
+		.acmlt_in_valid(acmlt_in_valid),
+		
+		.acmlt_out_data(acmlt_out_data),
+		.acmlt_out_mask(acmlt_out_mask),
+		.acmlt_out_last_grp(acmlt_out_last_grp),
+		.acmlt_out_last_res(acmlt_out_last_res),
+		.acmlt_out_to_upd_mem(1'b1),
+		.acmlt_out_valid(acmlt_out_valid)
 	);
 	
 	/** 批归一化与激活处理单元 **/

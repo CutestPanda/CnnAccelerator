@@ -387,6 +387,7 @@ module generic_conv_sim #(
 		
 		.fmbufcoln(fmbufcoln),
 		.fmbufrown(fmbufrown),
+		.fmrow_random_rd_mode(1'b0),
 		.grp_conv_buf_mode(is_grp_conv_mode),
 		.kbufgrpsz(kernal_shape),
 		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
@@ -396,6 +397,11 @@ module generic_conv_sim #(
 		.s_fm_rd_req_axis_data(s_fm_rd_req_axis_data),
 		.s_fm_rd_req_axis_valid(s_fm_rd_req_axis_valid),
 		.s_fm_rd_req_axis_ready(s_fm_rd_req_axis_ready),
+		
+		.s_fm_random_rd_axis_data(16'dx),
+		.s_fm_random_rd_axis_last(1'bx),
+		.s_fm_random_rd_axis_valid(1'b0),
+		.s_fm_random_rd_axis_ready(),
 		
 		.s_kwgtblk_rd_req_axis_data(s_kwgtblk_rd_req_axis_data),
 		.s_kwgtblk_rd_req_axis_valid(s_kwgtblk_rd_req_axis_valid),

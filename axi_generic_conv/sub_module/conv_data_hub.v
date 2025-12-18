@@ -33,6 +33,8 @@ SOFTWARE.
 缓存单位为特征图表面行
 特征图数据必须先加载到逻辑缓存中才可被获取, 而无法直接从外部存储器得到
 
+支持表面行随机读取
+
 2.卷积核权重块缓存
 接受访问请求、检查权重块是否已缓存、置换交换区通道组、发送DMA命令、加载新的权重数据、从逻辑缓存获取权重数据
 访问请求分为正常和重置缓存两种
@@ -50,7 +52,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/10
 ********************************************************************/
 
 
@@ -76,6 +78,7 @@ module conv_data_hub #(
 	// [特征图缓存]
 	input wire[3:0] fmbufcoln, // 每个表面行的表面个数类型
 	input wire[9:0] fmbufrown, // 可缓存的表面行数 - 1
+	input wire fmrow_random_rd_mode, // 是否处于表面行随机读取模式
 	// [卷积核缓存]
 	input wire grp_conv_buf_mode, // 是否处于组卷积缓存模式
 	input wire[2:0] kbufgrpsz, // 每个通道组的权重块个数的类型
@@ -101,6 +104,11 @@ module conv_data_hub #(
 	input wire[103:0] s_fm_rd_req_axis_data,
 	input wire s_fm_rd_req_axis_valid,
 	output wire s_fm_rd_req_axis_ready,
+	// 特征图表面行随机读取(AXIS从机)
+	input wire[15:0] s_fm_random_rd_axis_data, // 表面号
+	input wire s_fm_random_rd_axis_last, // 标志本次读请求待读取的最后1个表面
+	input wire s_fm_random_rd_axis_valid,
+	output wire s_fm_random_rd_axis_ready, // combinational logic out
 	
 	// 卷积核权重块读请求(AXIS从机)
 	/*
@@ -1714,6 +1722,7 @@ module conv_data_hub #(
 		
 		.fmbufcoln(fmbufcoln),
 		.fmbufrown(fmbufrown),
+		.fmrow_random_rd_mode(fmrow_random_rd_mode),
 		
 		.rst_logic_fmbuf(rst_logic_fmbuf),
 		.sfc_row_rplc_req(sfc_row_rplc_req),
@@ -1737,6 +1746,11 @@ module conv_data_hub #(
 		.s_rd_req_axis_data(s_fmbuf_rd_req_axis_data),
 		.s_rd_req_axis_valid(s_fmbuf_rd_req_axis_valid),
 		.s_rd_req_axis_ready(s_fmbuf_rd_req_axis_ready),
+		
+		.s_random_rd_axis_data(s_fm_random_rd_axis_data),
+		.s_random_rd_axis_last(s_fm_random_rd_axis_last),
+		.s_random_rd_axis_valid(s_fm_random_rd_axis_valid),
+		.s_random_rd_axis_ready(s_fm_random_rd_axis_ready),
 		
 		.m_fout_axis_data(m_fm_fout_axis_data),
 		.m_fout_axis_user(),
