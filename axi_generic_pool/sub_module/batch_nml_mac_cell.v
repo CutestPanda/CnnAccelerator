@@ -70,7 +70,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2025/12/19
+日期: 2025/12/21
 ********************************************************************/
 
 
@@ -876,7 +876,8 @@ module batch_nml_mac_cell #(
 	assign fp_mac_pack_exp = 
 		{fp_mac_exp_aligned_delayed[7][8], fp_mac_exp_aligned_delayed[7][8:0]} + {{4{fp_mac_nml_exp_var[5]}}, fp_mac_nml_exp_var[5:0]};
 	assign fp_mac_pack_underflow = 
-		(fp_mac_pack_exp < -10'sd126) | (fp_mac_nml_res[30:29] == 2'b00);
+		(fp_mac_pack_exp < -10'sd126) | 
+		(fp_mac_nml_res[30:29] == 2'b00) | ((fp_mac_nml_res[30:29] == 2'b11) & (|fp_mac_nml_res[28:6])); // (-1.0, 1.0)
 	
 	// 延迟的操作数X的补码形式定点尾数
 	always @(posedge aclk)
@@ -1008,40 +1009,38 @@ module batch_nml_mac_cell #(
 				(fp_mac_nml_in_is_a_eq_1 & fp_mac_nml_in_is_b_eq_0) ? 
 					fp_mac_f_added:
 					(
-						(
-							({33{fp_mac_nml_shift_n_onehot[0]}} & {{2{fp_mac_f_added[32]}}, fp_mac_f_added[32:2]}) | // 算术右移2位
-							({33{fp_mac_nml_shift_n_onehot[1]}} & {fp_mac_f_added[32], fp_mac_f_added[32:1]}) | // 算术右移1位
-							({33{fp_mac_nml_shift_n_onehot[2]}} & fp_mac_f_added) | 
-							({33{fp_mac_nml_shift_n_onehot[3]}} & (fp_mac_f_added << 1)) | 
-							({33{fp_mac_nml_shift_n_onehot[4]}} & (fp_mac_f_added << 2)) | 
-							({33{fp_mac_nml_shift_n_onehot[5]}} & (fp_mac_f_added << 3)) | 
-							({33{fp_mac_nml_shift_n_onehot[6]}} & (fp_mac_f_added << 4)) | 
-							({33{fp_mac_nml_shift_n_onehot[7]}} & (fp_mac_f_added << 5)) | 
-							({33{fp_mac_nml_shift_n_onehot[8]}} & (fp_mac_f_added << 6)) | 
-							({33{fp_mac_nml_shift_n_onehot[9]}} & (fp_mac_f_added << 7)) | 
-							({33{fp_mac_nml_shift_n_onehot[10]}} & (fp_mac_f_added << 8)) | 
-							({33{fp_mac_nml_shift_n_onehot[11]}} & (fp_mac_f_added << 9)) | 
-							({33{fp_mac_nml_shift_n_onehot[12]}} & (fp_mac_f_added << 10)) | 
-							({33{fp_mac_nml_shift_n_onehot[13]}} & (fp_mac_f_added << 11)) | 
-							({33{fp_mac_nml_shift_n_onehot[14]}} & (fp_mac_f_added << 12)) | 
-							({33{fp_mac_nml_shift_n_onehot[15]}} & (fp_mac_f_added << 13)) | 
-							({33{fp_mac_nml_shift_n_onehot[16]}} & (fp_mac_f_added << 14)) | 
-							({33{fp_mac_nml_shift_n_onehot[17]}} & (fp_mac_f_added << 15)) | 
-							({33{fp_mac_nml_shift_n_onehot[18]}} & (fp_mac_f_added << 16)) | 
-							({33{fp_mac_nml_shift_n_onehot[19]}} & (fp_mac_f_added << 17)) | 
-							({33{fp_mac_nml_shift_n_onehot[20]}} & (fp_mac_f_added << 18)) | 
-							({33{fp_mac_nml_shift_n_onehot[21]}} & (fp_mac_f_added << 19)) | 
-							({33{fp_mac_nml_shift_n_onehot[22]}} & (fp_mac_f_added << 20)) | 
-							({33{fp_mac_nml_shift_n_onehot[23]}} & (fp_mac_f_added << 21)) | 
-							({33{fp_mac_nml_shift_n_onehot[24]}} & (fp_mac_f_added << 22)) | 
-							({33{fp_mac_nml_shift_n_onehot[25]}} & (fp_mac_f_added << 23)) | 
-							({33{fp_mac_nml_shift_n_onehot[26]}} & (fp_mac_f_added << 24)) | 
-							({33{fp_mac_nml_shift_n_onehot[27]}} & (fp_mac_f_added << 25)) | 
-							({33{fp_mac_nml_shift_n_onehot[28]}} & (fp_mac_f_added << 26)) | 
-							({33{fp_mac_nml_shift_n_onehot[29]}} & (fp_mac_f_added << 27)) | 
-							({33{fp_mac_nml_shift_n_onehot[30]}} & (fp_mac_f_added << 28)) | 
-							({33{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & (fp_mac_f_added << 29))
-						) | {4'd0, 22'd0, fp_mac_f_added[32], 6'd0}
+						({33{fp_mac_nml_shift_n_onehot[0]}} & {{2{fp_mac_f_added[32]}}, fp_mac_f_added[32:2]}) | // 算术右移2位
+						({33{fp_mac_nml_shift_n_onehot[1]}} & {fp_mac_f_added[32], fp_mac_f_added[32:1]}) | // 算术右移1位
+						({33{fp_mac_nml_shift_n_onehot[2]}} & fp_mac_f_added) | 
+						({33{fp_mac_nml_shift_n_onehot[3]}} & (fp_mac_f_added << 1)) | 
+						({33{fp_mac_nml_shift_n_onehot[4]}} & (fp_mac_f_added << 2)) | 
+						({33{fp_mac_nml_shift_n_onehot[5]}} & (fp_mac_f_added << 3)) | 
+						({33{fp_mac_nml_shift_n_onehot[6]}} & (fp_mac_f_added << 4)) | 
+						({33{fp_mac_nml_shift_n_onehot[7]}} & (fp_mac_f_added << 5)) | 
+						({33{fp_mac_nml_shift_n_onehot[8]}} & (fp_mac_f_added << 6)) | 
+						({33{fp_mac_nml_shift_n_onehot[9]}} & (fp_mac_f_added << 7)) | 
+						({33{fp_mac_nml_shift_n_onehot[10]}} & (fp_mac_f_added << 8)) | 
+						({33{fp_mac_nml_shift_n_onehot[11]}} & (fp_mac_f_added << 9)) | 
+						({33{fp_mac_nml_shift_n_onehot[12]}} & (fp_mac_f_added << 10)) | 
+						({33{fp_mac_nml_shift_n_onehot[13]}} & (fp_mac_f_added << 11)) | 
+						({33{fp_mac_nml_shift_n_onehot[14]}} & (fp_mac_f_added << 12)) | 
+						({33{fp_mac_nml_shift_n_onehot[15]}} & (fp_mac_f_added << 13)) | 
+						({33{fp_mac_nml_shift_n_onehot[16]}} & (fp_mac_f_added << 14)) | 
+						({33{fp_mac_nml_shift_n_onehot[17]}} & (fp_mac_f_added << 15)) | 
+						({33{fp_mac_nml_shift_n_onehot[18]}} & (fp_mac_f_added << 16)) | 
+						({33{fp_mac_nml_shift_n_onehot[19]}} & (fp_mac_f_added << 17)) | 
+						({33{fp_mac_nml_shift_n_onehot[20]}} & (fp_mac_f_added << 18)) | 
+						({33{fp_mac_nml_shift_n_onehot[21]}} & (fp_mac_f_added << 19)) | 
+						({33{fp_mac_nml_shift_n_onehot[22]}} & (fp_mac_f_added << 20)) | 
+						({33{fp_mac_nml_shift_n_onehot[23]}} & (fp_mac_f_added << 21)) | 
+						({33{fp_mac_nml_shift_n_onehot[24]}} & (fp_mac_f_added << 22)) | 
+						({33{fp_mac_nml_shift_n_onehot[25]}} & (fp_mac_f_added << 23)) | 
+						({33{fp_mac_nml_shift_n_onehot[26]}} & (fp_mac_f_added << 24)) | 
+						({33{fp_mac_nml_shift_n_onehot[27]}} & (fp_mac_f_added << 25)) | 
+						({33{fp_mac_nml_shift_n_onehot[28]}} & (fp_mac_f_added << 26)) | 
+						({33{fp_mac_nml_shift_n_onehot[29]}} & (fp_mac_f_added << 27)) | 
+						({33{fp_mac_nml_shift_n_onehot[30]}} & (fp_mac_f_added << 28)) | 
+						({33{fp_mac_nml_shift_n_onehot[31] | (~(|fp_mac_nml_shift_n_onehot))}} & (fp_mac_f_added << 29))
 					);
 			
 			fp_mac_nml_exp_var <= # SIM_DELAY 
@@ -1096,10 +1095,24 @@ module batch_nml_mac_cell #(
 			fp_mac_fp32_packed[30:23] <= # SIM_DELAY 
 				fp_mac_pack_underflow ? 
 					8'h00:
-					(fp_mac_pack_exp[7:0] + 8'd127);
+					(
+						fp_mac_pack_exp[7:0] + 
+						(
+							(fp_mac_nml_res[30:6] == {2'b10, 23'd0}) ? // -2.0
+								8'd128:
+								8'd127
+						)
+					);
 			// 尾数
 			fp_mac_fp32_packed[22:0] <= # SIM_DELAY 
-				({23{fp_mac_nml_res[32]}} ^ fp_mac_nml_res[28:6]) + fp_mac_nml_res[32];
+				(
+					{23{fp_mac_nml_res[32]}} ^ 
+					(
+						(fp_mac_pack_underflow | (fp_mac_nml_res[30:6] == {2'b10, 23'd0})) ? 
+							23'd0:
+							fp_mac_nml_res[28:6]
+					)
+				) + fp_mac_nml_res[32];
 		end
 	end
 	
