@@ -60,15 +60,8 @@ add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_in_valid_d5
 add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_frac_nml_s2
 add wave -noupdate -radix decimal /tb_conv_middle_res_accumulate/dut/acmlt_exp_nml_s2
 add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_in_valid_d6
-add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_frac_nml_s3
-add wave -noupdate -radix decimal /tb_conv_middle_res_accumulate/dut/acmlt_exp_nml_s3
-add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_in_valid_d7
-add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_frac_nml_s4
-add wave -noupdate -radix decimal /tb_conv_middle_res_accumulate/dut/acmlt_exp_nml_s4
-add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_in_valid_d8
 add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_out_data_fp16
 add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_out_valid_fp16
-add wave -noupdate /tb_conv_middle_res_accumulate/dut/acmlt_in_valid_d9
 TreeUpdate [SetDefaultTree]
 WaveRestoreCursors {{Cursor 1} {338112 ps} 0}
 quietly wave cursor active 1

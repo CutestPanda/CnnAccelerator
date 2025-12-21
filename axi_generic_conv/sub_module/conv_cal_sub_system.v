@@ -53,7 +53,7 @@ BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/20
+日期: 2025/12/21
 ********************************************************************/
 
 
@@ -534,7 +534,7 @@ module conv_cal_sub_system #(
 		.calfmt(calfmt),
 		.row_n_bufferable(mid_res_buf_row_n_bufferable),
 		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
-		.max_upd_latency(2 + 9),
+		.max_upd_latency(2 + 7),
 		.en_cal_round_ext(1'b1),
 		.ofmap_w(16'dx),
 		
