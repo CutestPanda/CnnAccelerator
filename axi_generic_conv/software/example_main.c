@@ -35,20 +35,32 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "sd_card_fatfs.h"
+#include "axi_generic_conv.h"
+
+#include "xparameters.h"
+#include "xil_cache.h"
+
+#include <stdio.h>
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 #define IN_FMAP_FILENAME "in_fmap.bin" // 输入特征图文件名
 #define OUT_FMAP_FILENAME "out_fmap.bin" // 输出特征图文件名
 #define BN_PARAM_FILENAME "bn.bin" // BN参数文件名
 #define KWGT_FILENAME "kernal.bin" // 卷积核权重文件名
 
-#define IN_FMAP_LEN 8125 // 输入特征图数据总量
-#define KWGT_LEN 1053 // 卷积核权重数据总量
-#define OUT_FMAP_LEN 5625 // 输出特征图数据总量
-#define BN_PARAM_N 9 // BN参数总量
+#define IN_FMAP_LEN 320 * 320 * 16 // 输入特征图数据总量
+#define KWGT_LEN 3 * 3 * 16 * 32 // 卷积核权重数据总量
+#define OUT_FMAP_LEN 320 * 320 * 32 // 输出特征图数据总量
+#define BN_PARAM_N 32 // BN参数总量
 
-#define OUT_FMAP_SUB_ROW_N 50 // 输出特征图子表面行总数
+#define OUT_FMAP_SUB_ROW_N 320 * 4 // 输出特征图子表面行总数
 
 #define IN_DATA_LEN 2 // 输入特征图或卷积核的数据大小
 #define OUT_DATA_LEN 4 // 输出特征图的数据大小
+
+// #define TO_FLUSH_DCACHE // 是否需要刷新DCache
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -118,9 +130,9 @@ int main(){
 	conv_cfg.ofmap_baseaddr = (uint8_t*)out_fmap;
 	conv_cfg.kernal_wgt_baseaddr = (uint8_t*)kwgt;
 	conv_cfg.group_n = 1;
-	conv_cfg.max_wgtblk_w = 8;
+	conv_cfg.max_wgtblk_w = 16;
 	conv_cfg.cal_cfg.cal_fmt = CONV_FP16;
-	conv_cfg.cal_cfg.cal_round_n = 1;
+	conv_cfg.cal_cfg.cal_round_n = 2;
 	conv_cfg.cal_cfg.conv_horizontal_stride = 1;
 	conv_cfg.cal_cfg.conv_vertical_stride = 1;
 	conv_cfg.fmap_cfg.external_padding_bottom = 1;
@@ -129,20 +141,22 @@ int main(){
 	conv_cfg.fmap_cfg.external_padding_top = 1;
 	conv_cfg.fmap_cfg.inner_padding_left_right = 0;
 	conv_cfg.fmap_cfg.inner_padding_top_bottom = 0;
-	conv_cfg.fmap_cfg.ifmap_width = 25;
-	conv_cfg.fmap_cfg.ifmap_height = 25;
-	conv_cfg.fmap_cfg.ifmap_chn_n = 13;
+	conv_cfg.fmap_cfg.ifmap_width = 320;
+	conv_cfg.fmap_cfg.ifmap_height = 320;
+	conv_cfg.fmap_cfg.ifmap_chn_n = 16;
 	conv_cfg.fmap_cfg.ofmap_data_type = CONV_O_4_BYTE;
 	conv_cfg.kernal_cfg.dilation_n = 0;
-	conv_cfg.kernal_cfg.kernal_chn_n = 13;
-	conv_cfg.kernal_cfg.kernal_n = 9;
+	conv_cfg.kernal_cfg.kernal_chn_n = 16;
+	conv_cfg.kernal_cfg.kernal_n = 32;
 	conv_cfg.kernal_cfg.kernal_shape = CONV_KRN_3x3;
-	conv_cfg.buffer_cfg.fmbufbankn = 2;
-	conv_cfg.buffer_cfg.fmbufcoln = CONV_COLN_32;
-	conv_cfg.buffer_cfg.sfc_n_each_wgtblk = CONV_WGTBLK_SFC_N_8;
-	conv_cfg.bn_cfg.fixed_point_quat_accrc = 0;
-	conv_cfg.bn_cfg.is_a_eq_1 = 0;
-	conv_cfg.bn_cfg.is_b_eq_0 = 0;
+	conv_cfg.buffer_cfg.fmbufbankn = 14;
+	conv_cfg.buffer_cfg.fmbufcoln = CONV_COLN_512;
+	conv_cfg.buffer_cfg.sfc_n_each_wgtblk = CONV_WGTBLK_SFC_N_16;
+	conv_cfg.bn_act_cfg.use_bn_unit = 1;
+	conv_cfg.bn_act_cfg.use_act_unit = 1;
+	conv_cfg.bn_act_cfg.bn_is_a_eq_1 = 1;
+	conv_cfg.bn_act_cfg.bn_is_b_eq_0 = 0;
+	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.01f;
 
 	if(axi_generic_conv_cfg(&axi_generic_conv, (const AxiGnrConvCfg*)(&conv_cfg))){
 		return -1;
@@ -150,6 +164,12 @@ int main(){
 
 	// 写BN参数
 	axi_generic_conv_wr_bn_param_mem(&axi_generic_conv, bn_params, BN_PARAM_N);
+
+#ifdef TO_FLUSH_DCACHE
+	// 刷新DCache
+	Xil_DCacheFlushRange((INTPTR)in_fmap, IN_FMAP_LEN * IN_DATA_LEN);
+	Xil_DCacheFlushRange((INTPTR)kwgt, KWGT_LEN * IN_DATA_LEN);
+#endif
 
 	// 启动通用卷积处理单元
 	if(axi_generic_conv_enable_cal_sub_sys(&axi_generic_conv)){
@@ -191,6 +211,11 @@ int main(){
 	if(axi_generic_conv_clr_pm_cnt(&axi_generic_conv)){
 		return -1;
 	}
+
+#ifdef TO_FLUSH_DCACHE
+	// 刷新DCache
+	Xil_DCacheFlushRange((INTPTR)out_fmap, OUT_FMAP_LEN * OUT_DATA_LEN);
+#endif
 
 	// 向SD卡写入输出特征图
 	if(sd_card_fatfs_fopen(&file_handler, OUT_FMAP_FILENAME, FA_WRITE | FA_CREATE_ALWAYS, 0)){

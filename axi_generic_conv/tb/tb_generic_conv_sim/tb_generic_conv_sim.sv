@@ -66,18 +66,18 @@ module tb_generic_conv_sim();
 	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
 	*/
-	parameter integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_C = 8; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
-	parameter integer CBUF_DEPTH_FOREACH_BANK = 512; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_KERNAL_N = 1024; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
-	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
-	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
-	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
+	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
 	
 	/** 接口 **/
 	panda_clock_if clk_if();
@@ -102,6 +102,7 @@ module tb_generic_conv_sim();
 	panda_axis_if dma0_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if dma1_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if final_res_axis_if(clk_if.clk_p, rst_if.reset_n);
+	panda_axis_if dma_s2mm_strm_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if dma_s2mm_cmd_axis_if(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if dma_s2mm_cmd_axis_if_2(clk_if.clk_p, rst_if.reset_n);
 	panda_axis_if sub_row_msg_axis_if(clk_if.clk_p, rst_if.reset_n);
@@ -132,6 +133,7 @@ module tb_generic_conv_sim();
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma0_cmd_axis_vif", dma0_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma1_cmd_axis_vif", dma1_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "final_res_axis_vif", final_res_axis_if);
+		uvm_config_db #(panda_axis_vif)::set(null, "", "dma_s2mm_strm_axis_vif", dma_s2mm_strm_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma_s2mm_cmd_axis_vif", dma_s2mm_cmd_axis_if);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "dma_s2mm_cmd_axis_vif_2", dma_s2mm_cmd_axis_if_2);
 		uvm_config_db #(panda_axis_vif)::set(null, "", "sub_row_msg_axis_vif", sub_row_msg_axis_if);
@@ -338,12 +340,12 @@ module tb_generic_conv_sim();
 	assign dma_s2mm_cmd_axis_if.valid = m_dma_s2mm_cmd_axis_valid;
 	assign m_dma_s2mm_cmd_axis_ready = dma_s2mm_cmd_axis_if.ready;
 	
-	assign final_res_axis_if.data[FNL_RES_DATA_WIDTH-1:0] = m_axis_fnl_res_data;
-	assign final_res_axis_if.keep[FNL_RES_DATA_WIDTH/8-1:0] = m_axis_fnl_res_keep;
-	assign final_res_axis_if.user[4:0] = m_axis_fnl_res_user;
-	assign final_res_axis_if.last = m_axis_fnl_res_last;
-	assign final_res_axis_if.valid = m_axis_fnl_res_valid;
-	assign m_axis_fnl_res_ready = final_res_axis_if.ready;
+	assign final_res_axis_if.data[BN_ACT_PRL_N*32-1:0] = dut.conv_cal_sub_system_u.m_axis_bn_act_data;
+	assign final_res_axis_if.keep[BN_ACT_PRL_N*4-1:0] = dut.conv_cal_sub_system_u.m_axis_bn_act_keep;
+	assign final_res_axis_if.user[4:0] = dut.conv_cal_sub_system_u.m_axis_bn_act_user;
+	assign final_res_axis_if.last = dut.conv_cal_sub_system_u.m_axis_bn_act_last;
+	assign final_res_axis_if.valid = dut.conv_cal_sub_system_u.m_axis_bn_act_valid;
+	assign final_res_axis_if.ready = dut.conv_cal_sub_system_u.m_axis_bn_act_ready;
 	
 	assign fmap_blk_ctrl_if.params[211:0] = 
 	{
@@ -473,6 +475,12 @@ module tb_generic_conv_sim();
 			end
 		end
  	endgenerate
+	
+	assign dma_s2mm_strm_axis_if.data[FNL_RES_DATA_WIDTH-1:0] = m_axis_fnl_res_data;
+	assign dma_s2mm_strm_axis_if.keep[FNL_RES_DATA_WIDTH/8-1:0] = m_axis_fnl_res_keep;
+	assign dma_s2mm_strm_axis_if.last = m_axis_fnl_res_last;
+	assign dma_s2mm_strm_axis_if.valid = m_axis_fnl_res_valid;
+	assign m_axis_fnl_res_ready = dma_s2mm_strm_axis_if.ready;
 	
 	generic_conv_sim #(
 		.ATOMIC_K(ATOMIC_K),

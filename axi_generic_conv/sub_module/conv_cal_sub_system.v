@@ -27,10 +27,12 @@ SOFTWARE.
 本模块: 通用卷积单元计算子系统
 
 描述:
-包括物理特征图表面行适配器、卷积乘加阵列、卷积中间结果表面行信息打包单元、卷积中间结果累加与缓存
+包括物理特征图表面行适配器、卷积乘加阵列、卷积中间结果表面行信息打包单元、卷积中间结果累加与缓存、
+	批归一化与激活处理单元、最终结果数据收集器
 
-使用ATOMIC_K*ATOMIC_C个s16*s16乘法器, 时延 = 1clk
-使用BN_ACT_PRL_N*4个s18*s18乘法器或BN_ACT_PRL_N个s32*s32乘法器或BN_ACT_PRL_N个s25*s25乘法器, 时延 = 1或3clk
+乘加阵列使用ATOMIC_K*ATOMIC_C个s16*s16乘法器, 时延 = 1clk
+批归一化单元组使用BN_ACT_PRL_N*4个s18*s18乘法器或BN_ACT_PRL_N个s32*s32乘法器或BN_ACT_PRL_N个s25*s25乘法器, 时延 = 1或3clk
+泄露Relu激活单元组使用BN_ACT_PRL_N个s32*s32乘法器或BN_ACT_PRL_N个s25*s25乘法器, 时延 = 2clk
 
 使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH), 读时延 = 1clk
 使用1个真双口SRAM(位宽 = 64, 深度 = 最大的卷积核个数), 读时延 = 1clk
@@ -39,7 +41,7 @@ SOFTWARE.
 注意：
 当参数calfmt(运算数据格式)或cal_round(计算轮次 - 1)无效时, 需要除能乘加阵列(en_mac_array拉低)
 卷积乘加阵列仅提供简单反压(阵列输出ready拉低时暂停整个计算流水线), 当参数ofmap_w(输出特征图宽度 - 1)或kernal_w((膨胀前)卷积核宽度 - 1)
-无效时, 需要除能打包器(en_packer拉低)
+	无效时, 需要除能打包器(en_packer拉低)
 当(BN参数MEM里的)BN参数未准备好时, 需要除能BN与激活处理单元(en_bn_act_proc拉低)
 
 计算1层多通道卷积前, 必须先重置适配器(拉高rst_adapter)
@@ -51,7 +53,7 @@ BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/18
+日期: 2025/12/20
 ********************************************************************/
 
 
@@ -109,10 +111,14 @@ module conv_cal_sub_system #(
 	// [中间结果缓存参数]
 	input wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
 	input wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
-	// [批归一化参数]
-	input wire[4:0] bn_fixed_point_quat_accrc, // 定点数量化精度
-	input wire bn_is_a_eq_1, // 参数A的实际值为1(标志)
-	input wire bn_is_b_eq_0, // 参数B的实际值为0(标志)
+	// [批归一化与激活参数]
+	input wire use_bn_unit, // 启用BN单元
+	input wire use_act_unit, // 启用激活单元
+	input wire[4:0] bn_fixed_point_quat_accrc, // (批归一化操作数A)定点数量化精度
+	input wire bn_is_a_eq_1, // 批归一化参数A的实际值为1(标志)
+	input wire bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
+	input wire[4:0] leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
+	input wire[31:0] leaky_relu_param_alpha, // 泄露Relu激活参数
 	
 	// 特征图切块信息(AXIS从机)
 	input wire[7:0] s_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
@@ -159,6 +165,11 @@ module conv_cal_sub_system #(
 	output wire[(BN_ACT_INT16_SUPPORTED ? 4:3)*BN_ACT_PRL_N-1:0] mul1_ce, // 计算使能
 	                                                                      // combinational logic out
 	input wire[(BN_ACT_INT16_SUPPORTED ? 4*36:(BN_ACT_INT32_SUPPORTED ? 64:50))*BN_ACT_PRL_N-1:0] mul1_res, // 计算结果
+	// 外部有符号乘法器#2
+	output wire[(BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N-1:0] mul2_op_a, // 操作数A
+	output wire[(BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N-1:0] mul2_op_b, // 操作数B
+	output wire[2*BN_ACT_PRL_N-1:0] mul2_ce, // 计算使能
+	input wire[(BN_ACT_INT32_SUPPORTED ? 64:50)*BN_ACT_PRL_N-1:0] mul2_res, // 计算结果
 	
 	// 中间结果缓存MEM主接口
 	output wire mid_res_mem_clk_a,
@@ -205,11 +216,11 @@ module conv_cal_sub_system #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
-	// BN处理的运算数据格式的编码
-	localparam BN_CAL_FMT_INT16 = 2'b00;
-	localparam BN_CAL_FMT_INT32 = 2'b01;
-	localparam BN_CAL_FMT_FP32 = 2'b10;
-	localparam BN_CAL_FMT_NONE = 2'b11;
+	// BN与激活处理的运算数据格式的编码
+	localparam BN_ACT_CAL_FMT_INT16 = 2'b00;
+	localparam BN_ACT_CAL_FMT_INT32 = 2'b01;
+	localparam BN_ACT_CAL_FMT_FP32 = 2'b10;
+	localparam BN_ACT_CAL_FMT_NONE = 2'b11;
 	// 乘加阵列和中间结果累加的运算数据格式的编码
 	localparam CAL_FMT_INT8 = 2'b00;
 	localparam CAL_FMT_INT16 = 2'b01;
@@ -218,7 +229,7 @@ module conv_cal_sub_system #(
 	/** 补充运行时参数 **/
 	wire[3:0] kernal_w; // (膨胀前)卷积核宽度 - 1
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
-	wire[1:0] bn_calfmt; // BN处理的数据格式
+	wire[1:0] bn_act_calfmt; // BN与激活处理的数据格式
 	
 	assign kernal_w = 
 		(
@@ -231,11 +242,11 @@ module conv_cal_sub_system #(
 	    ) - 1;
 	assign bank_n_foreach_ofmap_row = 
 		(mid_res_item_n_foreach_row[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
-	assign bn_calfmt = 
-		(calfmt == CAL_FMT_INT8)  ? BN_CAL_FMT_INT16:
-		(calfmt == CAL_FMT_INT16) ? BN_CAL_FMT_INT32:
-		(calfmt == CAL_FMT_FP16)  ? BN_CAL_FMT_FP32:
-		                            BN_CAL_FMT_NONE;
+	assign bn_act_calfmt = 
+		(calfmt == CAL_FMT_INT8)  ? BN_ACT_CAL_FMT_INT16:
+		(calfmt == CAL_FMT_INT16) ? BN_ACT_CAL_FMT_INT32:
+		(calfmt == CAL_FMT_FP16)  ? BN_ACT_CAL_FMT_FP32:
+		                            BN_ACT_CAL_FMT_NONE;
 	
 	/** 物理特征图表面行适配器 **/
 	// 物理特征图表面行数据(AXIS从机)
@@ -604,10 +615,17 @@ module conv_cal_sub_system #(
 		
 		.en_bn_act_proc(en_bn_act_proc),
 		
-		.bn_calfmt(bn_calfmt),
+		.calfmt(bn_act_calfmt),
+		.use_bn_unit(use_bn_unit),
+		.use_act_unit(use_act_unit),
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
+		.is_in_const_mac_mode(1'b0),
+		.param_a_in_const_mac_mode(32'hxxxxxxxx),
+		.param_b_in_const_mac_mode(32'hxxxxxxxx),
+		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
+		.leaky_relu_param_alpha(leaky_relu_param_alpha),
 		
 		.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
 		.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
@@ -644,7 +662,12 @@ module conv_cal_sub_system #(
 		.mul0_op_a(mul1_op_a),
 		.mul0_op_b(mul1_op_b),
 		.mul0_ce(mul1_ce),
-		.mul0_res(mul1_res)
+		.mul0_res(mul1_res),
+		
+		.mul1_op_a(mul2_op_a),
+		.mul1_op_b(mul2_op_b),
+		.mul1_ce(mul2_ce),
+		.mul1_res(mul2_res)
 	);
 	
 	/** 最终结果数据收集器 **/

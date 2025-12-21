@@ -7,6 +7,9 @@
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
         2025.12.05 1.10 增加批归一化处理
         2025.12.05 1.11 增加2个加速器属性(BN与激活并行数, 最大的卷积核个数), 增加写BN参数存储器的函数
+        2025.12.09 1.12 增加配置加速器时对中间结果缓存可缓存行数的检查
+        2025.12.12 1.13 修改对"分配给特征图缓存的Bank数"的合法性判断
+        2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -163,6 +166,21 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	}
 	handler->reg_region_ctrl->ctrl0 = pre_ctrl0;
 
+	handler->reg_region_bn_act_cfg->bn_cfg = 0x00000001;
+	if(handler->reg_region_bn_act_cfg->bn_cfg & 0x00000001){
+		handler->property.bn_supported = 1;
+	}else{
+		handler->property.bn_supported = 0;
+	}
+	handler->reg_region_bn_act_cfg->bn_cfg = 0x00000000;
+
+	handler->reg_region_bn_act_cfg->act_cfg0 = (0x00000002 << 8);
+	if((((handler->reg_region_bn_act_cfg->act_cfg0) >> 8) & 0x000000FF) == 2){
+		handler->property.leaky_relu_supported = 1;
+	}else{
+		handler->property.leaky_relu_supported = 0;
+	}
+
 	axi_generic_conv_disable_cal_sub_sys(handler);
 
 	return 0;
@@ -308,6 +326,14 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		return -1;
 	}
 
+	if(cfg->bn_act_cfg.use_bn_unit && (!handler->property.bn_supported)){
+		return -2;
+	}
+
+	if(cfg->bn_act_cfg.use_act_unit && (!handler->property.leaky_relu_supported)){
+		return -2;
+	}
+
 	if((cfg->cal_cfg.cal_fmt == CONV_INT8 && (!handler->property.int8_supported)) ||
 		(cfg->cal_cfg.cal_fmt == CONV_INT16 && (!handler->property.int16_supported)) ||
 		(cfg->cal_cfg.cal_fmt == CONV_FP16 && (!handler->property.fp16_supported))){
@@ -362,11 +388,23 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		return -2;
 	}
 
-	if(cfg->buffer_cfg.fmbufbankn == 0 || cfg->buffer_cfg.fmbufbankn >= handler->property.phy_buf_bank_n - 1){
+	if(cfg->buffer_cfg.fmbufbankn == 0 || cfg->buffer_cfg.fmbufbankn >= handler->property.phy_buf_bank_n){
 		return -2;
 	}
 
-	if((cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) && (cfg->bn_cfg.fixed_point_quat_accrc >= 32)){
+	if(
+		(cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) &&
+		cfg->bn_act_cfg.use_bn_unit &&
+		(cfg->bn_act_cfg.bn_fixed_point_quat_accrc >= 32)
+	){
+		return -2;
+	}
+
+	if(
+		(cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) &&
+		cfg->bn_act_cfg.use_act_unit &&
+		(cfg->bn_act_cfg.leaky_relu_point_quat_accrc >= 32)
+	){
 		return -2;
 	}
 
@@ -470,6 +508,10 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		(mid_res_item_n_foreach_row % handler->property.mid_res_buf_bank_depth ? 1:0);
 	uint32_t mid_res_buf_row_n_bufferable = handler->property.mid_res_buf_bank_n / bank_n_foreach_mid_res_row;
 
+	if(mid_res_buf_row_n_bufferable == 0){
+		return -2;
+	}
+
 	if(mid_res_buf_row_n_bufferable > 16){
 		mid_res_buf_row_n_bufferable = 16;
 	}
@@ -481,7 +523,10 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		(((uint32_t)(cfg->cal_cfg.cal_round_n - 1)) << 16);
 
 	handler->reg_region_grp_conv_cfg->grp_conv0 = (cfg->group_n > 1 ? 0x00000001:0x00000000) | (data_size_foreach_group << 1);
-	handler->reg_region_grp_conv_cfg->grp_conv1 = (n_foreach_group - 1) | (((uint32_t)cfg->group_n - 1) << 16);
+
+	if(cfg->group_n > 1){
+		handler->reg_region_grp_conv_cfg->grp_conv1 = (n_foreach_group - 1) | (((uint32_t)cfg->group_n - 1) << 16);
+	}
 
 	handler->reg_region_fmap_cfg->fmap_cfg0 = (uint32_t)cfg->ifmap_baseaddr;
 	handler->reg_region_fmap_cfg->fmap_cfg1 = (uint32_t)cfg->ofmap_baseaddr;
@@ -509,8 +554,19 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	handler->reg_region_buffer_cfg->buf_cfg2 = ((uint32_t)cfg->buffer_cfg.sfc_n_each_wgtblk) | ((kbufgrpn - 1) << 8);
 	handler->reg_region_buffer_cfg->buf_cfg3 = (mid_res_item_n_foreach_row - 1) | ((mid_res_buf_row_n_bufferable - 1) << 16);
 
-	handler->reg_region_bn_act_cfg->bn_act_cfg0 =
-		((uint32_t)cfg->bn_cfg.fixed_point_quat_accrc) | (((uint32_t)cfg->bn_cfg.is_a_eq_1) << 8) | (((uint32_t)cfg->bn_cfg.is_b_eq_0) << 9);
+	handler->reg_region_bn_act_cfg->bn_cfg =
+		((uint32_t)cfg->bn_act_cfg.use_bn_unit) |
+		(((uint32_t)cfg->bn_act_cfg.bn_fixed_point_quat_accrc) << 8) |
+		(((uint32_t)cfg->bn_act_cfg.bn_is_a_eq_1) << 16) |
+		(((uint32_t)cfg->bn_act_cfg.bn_is_b_eq_0) << 17);
+
+	handler->reg_region_bn_act_cfg->act_cfg0 =
+		((uint32_t)cfg->bn_act_cfg.use_act_unit) |
+		(((uint32_t)cfg->bn_act_cfg.leaky_relu_point_quat_accrc) << 8);
+
+	if(cfg->bn_act_cfg.use_act_unit){
+		handler->reg_region_bn_act_cfg->act_cfg1 = (*((uint32_t*)(&cfg->bn_act_cfg.leaky_relu_param_alpha)));
+	}
 
 	return 0;
 }

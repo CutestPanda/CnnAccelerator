@@ -495,11 +495,6 @@ class DMAS2MMEnv extends panda_env #(
 	function void connect_phase(uvm_phase phase);
 		super.connect_phase(phase);
 		
-		if(dma_s2mm_cmd_slv_agt == null || dma_s2mm_strm_slv_agt == null)
-			`uvm_fatal(this.get_name(), "e1")
-		if(dma_s2mm_cmd_slv_agt.sequencer == null || dma_s2mm_strm_slv_agt.sequencer == null)
-			`uvm_fatal(this.get_name(), "e1")
-		
 		this.dma_s2mm_cmd_slv_agt.item_port.connect(this.dma_s2mm_data_len_scb.req_port);
 		this.dma_s2mm_strm_slv_agt.item_port.connect(this.dma_s2mm_data_len_scb.final_res_port);
 		

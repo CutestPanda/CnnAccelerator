@@ -28,6 +28,7 @@ SOFTWARE.
 
 描述:
 寄存器 -> 
+	--------------------------------------------------------------------------------------------------------
 	| 寄存器名 | 偏移量  |             含义              |   读写特性   |              备注                |
     --------------------------------------------------------------------------------------------------------
     | version  | 0x00/0  |31~0: 版本号                   |      RO      | 用日期表示的版本号,              |
@@ -153,9 +154,20 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
-	| bn_act   |0x180/96 |4~0: 定点数量化精度            |      RW      |                                  |
-	| _cfg0    |         |  8: 参数A的实际值是否为1      |      RW      |                                  |
-	|          |         |  9: 参数B的实际值是否为0      |      RW      |                                  |
+	| bn_cfg   |0x180/96 |0: 启用BN单元                  |      RW      | 仅当支持批归一化处理时, 写1生效  |
+	|          |         |12~8:(批归一化操作数A)         |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	|          |         |16: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |    参数A的实际值是否为1       |              | 该字段可用                       |
+	|          |         |17: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |    参数B的实际值是否为0       |              | 该字段可用                       |
+	--------------------------------------------------------------------------------------------------------
+	| act_cfg0 |0x184/97 |0: 启用激活单元                |      RW      | 仅当支持任意1种激活时, 写1生效   |
+	|          |         |12~8:(泄露Relu激活参数)        |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	--------------------------------------------------------------------------------------------------------
+	| act_cfg1 |0x188/98 |31~0: 泄露Relu激活参数         |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |                               |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
 
 注意：
@@ -166,11 +178,13 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/12/05
+日期: 2025/12/20
 ********************************************************************/
 
 
 module reg_if_for_generic_conv #(
+	parameter BN_SUPPORTED = 1'b1, // 是否支持批归一化处理
+	parameter LEAKY_RELU_SUPPORTED = 1'b1, // 是否支持Leaky-Relu激活
 	parameter INT8_SUPPORTED = 1'b0, // 是否支持INT8
 	parameter INT16_SUPPORTED = 1'b1, // 是否支持INT16
 	parameter FP16_SUPPORTED = 1'b1, // 是否支持FP16
@@ -273,10 +287,14 @@ module reg_if_for_generic_conv #(
 	output wire[7:0] kbufgrpn, // 可缓存的通道组数 - 1
 	output wire[15:0] mid_res_item_n_foreach_row, // 每个输出特征图表面行的中间结果项数 - 1
 	output wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
-	// [批归一化参数]
-	output wire[4:0] bn_fixed_point_quat_accrc, // 定点数量化精度
-	output wire bn_is_a_eq_1, // 参数A的实际值为1(标志)
-	output wire bn_is_b_eq_0, // 参数B的实际值为0(标志)
+	// [批归一化与激活参数]
+	output wire use_bn_unit, // 启用BN单元
+	output wire use_act_unit, // 启用激活单元
+	output wire[4:0] bn_fixed_point_quat_accrc, // (批归一化操作数A)定点数量化精度
+	output wire bn_is_a_eq_1, // 批归一化参数A的实际值为1(标志)
+	output wire bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
+	output wire[4:0] leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
+	output wire[31:0] leaky_relu_param_alpha, // 泄露Relu激活参数
 	
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
@@ -324,6 +342,8 @@ module reg_if_for_generic_conv #(
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
 	localparam CAL_FMT_NONE = 2'b11;
+	// 是否支持任意1种激活
+	localparam ANY_ACT_SUPPORTED = LEAKY_RELU_SUPPORTED;
 	
 	/** 寄存器配置控制 **/
 	reg[2:0] reg_cfg_sts; // 寄存器配置状态
@@ -466,8 +486,8 @@ module reg_if_for_generic_conv #(
 	wire[7:0] bn_act_prl_n_r; // BN与激活并行数 - 1
 	wire[15:0] max_kernal_n_r; // 最大的卷积核个数 - 1
 	
-	assign version_r = {4'd2, 4'd0, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.02
-	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv"
+	assign version_r = {4'd0, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.20
+	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv\0\0"
 	assign accelerator_id_r = ACCELERATOR_ID;
 	assign atomic_k_r = ATOMIC_K - 1;
 	assign atomic_c_r = ATOMIC_C - 1;
@@ -1141,41 +1161,89 @@ module reg_if_for_generic_conv #(
 	end
 	
 	/**
-	寄存器(bn_act_cfg0)
+	寄存器(bn_cfg, act_cfg0, act_cfg1)
 	
 	--------------------------------------------------------------------------------------------------------
-	| bn_act   |0x180/96 |4~0: 定点数量化精度            |      RW      |                                  |
-	| _cfg0    |         |  8: 参数A的实际值是否为1      |      RW      |                                  |
-	|          |         |  9: 参数B的实际值是否为0      |      RW      |                                  |
+	| bn_cfg   |0x180/96 |0: 启用BN单元                  |      RW      | 仅当支持批归一化处理时, 写1生效  |
+	|          |         |12~8:(批归一化操作数A)         |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	|          |         |16: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |    参数A的实际值是否为1       |              | 该字段可用                       |
+	|          |         |17: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
+	|          |         |    参数B的实际值是否为0       |              | 该字段可用                       |
+	--------------------------------------------------------------------------------------------------------
+	| act_cfg0 |0x184/97 |0: 启用激活单元                |      RW      | 仅当支持任意1种激活时, 写1生效   |
+	|          |         |12~8:(泄露Relu激活参数)        |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	--------------------------------------------------------------------------------------------------------
+	| act_cfg1 |0x188/98 |31~0: 泄露Relu激活参数         |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |                               |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
 	**/
-	reg[4:0] bn_fixed_point_quat_accrc_r; // 定点数量化精度
-	reg bn_is_a_eq_1_r; // 参数A的实际值为1(标志)
-	reg bn_is_b_eq_0_r; // 参数B的实际值为0(标志)
+	reg use_bn_unit_r; // 启用BN单元
+	reg[4:0] bn_fixed_point_quat_accrc_r; // (批归一化操作数A)定点数量化精度
+	reg bn_is_a_eq_1_r; // 批归一化参数A的实际值为1(标志)
+	reg bn_is_b_eq_0_r; // 批归一化参数B的实际值为0(标志)
+	reg use_act_unit_r; // 启用激活单元
+	reg[4:0] leaky_relu_fixed_point_quat_accrc_r; // (泄露Relu激活参数)定点数量化精度
+	reg[31:0] leaky_relu_param_alpha_r; // 泄露Relu激活参数
 	
+	assign use_bn_unit = BN_SUPPORTED & use_bn_unit_r;
 	assign bn_fixed_point_quat_accrc = bn_fixed_point_quat_accrc_r;
 	assign bn_is_a_eq_1 = bn_is_a_eq_1_r;
 	assign bn_is_b_eq_0 = bn_is_b_eq_0_r;
 	
-	// 定点数量化精度
+	assign use_act_unit = ANY_ACT_SUPPORTED & use_act_unit_r;
+	assign leaky_relu_fixed_point_quat_accrc = leaky_relu_fixed_point_quat_accrc_r;
+	assign leaky_relu_param_alpha = leaky_relu_param_alpha_r;
+	
+	// 启用BN单元
 	always @(posedge aclk)
 	begin
 		if(regs_en & regs_wen & (regs_addr == 96))
-			bn_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[4:0];
+			use_bn_unit_r <= # SIM_DELAY BN_SUPPORTED & regs_din[0];
 	end
 	
-	// 参数A的实际值为1(标志)
+	// (批归一化操作数A)定点数量化精度
 	always @(posedge aclk)
 	begin
-		if(regs_en & regs_wen & (regs_addr == 96))
-			bn_is_a_eq_1_r <= # SIM_DELAY regs_din[8];
+		if(regs_en & regs_wen & (regs_addr == 96) & BN_SUPPORTED)
+			bn_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[12:8];
 	end
 	
-	// 参数B的实际值为0(标志)
+	// 批归一化参数A的实际值为1(标志)
 	always @(posedge aclk)
 	begin
-		if(regs_en & regs_wen & (regs_addr == 96))
-			bn_is_b_eq_0_r <= # SIM_DELAY regs_din[9];
+		if(regs_en & regs_wen & (regs_addr == 96) & BN_SUPPORTED)
+			bn_is_a_eq_1_r <= # SIM_DELAY regs_din[16];
+	end
+	
+	// 批归一化参数B的实际值为0(标志)
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 96) & BN_SUPPORTED)
+			bn_is_b_eq_0_r <= # SIM_DELAY regs_din[17];
+	end
+	
+	// 启用激活单元
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 97))
+			use_act_unit_r <= # SIM_DELAY ANY_ACT_SUPPORTED & regs_din[0];
+	end
+	
+	// (泄露Relu激活参数)定点数量化精度
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 97) & LEAKY_RELU_SUPPORTED)
+			leaky_relu_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[12:8];
+	end
+	
+	// 泄露Relu激活参数
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 98) & LEAKY_RELU_SUPPORTED)
+			leaky_relu_param_alpha_r <= # SIM_DELAY regs_din[31:0];
 	end
 	
 	/** 寄存器读结果 **/
@@ -1231,7 +1299,10 @@ module reg_if_for_generic_conv #(
 				82: regs_dout <= # SIM_DELAY {8'h00, kbufgrpn_r[15:0], 4'h0, sfc_n_each_wgtblk_r[3:0]};
 				83: regs_dout <= # SIM_DELAY {8'h00, mid_res_buf_row_n_bufferable_r[7:0], mid_res_item_n_foreach_row_r[15:0]};
 				
-				96: regs_dout <= # SIM_DELAY {16'h0000, 6'd0, bn_is_b_eq_0_r, bn_is_a_eq_1_r, 3'b000, bn_fixed_point_quat_accrc_r[4:0]};
+				96: regs_dout <= # SIM_DELAY 
+					{8'h00, 6'd0, bn_is_b_eq_0_r, bn_is_a_eq_1_r, 3'b000, bn_fixed_point_quat_accrc_r[4:0], 7'd0, use_bn_unit_r};
+				97: regs_dout <= # SIM_DELAY {8'h00, 8'h00, 3'b000, leaky_relu_fixed_point_quat_accrc_r[4:0], 7'd0, use_act_unit_r};
+				98: regs_dout <= # SIM_DELAY {leaky_relu_param_alpha_r[31:0]};
 				
 				default: regs_dout <= # SIM_DELAY 32'h0000_0000;
 			endcase

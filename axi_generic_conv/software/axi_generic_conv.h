@@ -7,6 +7,9 @@
         2025.11.29 1.01 将特征图缓存可缓存行数(fmbufrown)限制到最大可缓存行数(max_fmbuf_row_n)
         2025.12.05 1.10 增加批归一化处理
         2025.12.05 1.11 增加2个加速器属性(BN与激活并行数, 最大的卷积核个数), 增加写BN参数存储器的函数
+        2025.12.09 1.12 增加配置加速器时对中间结果缓存可缓存行数的检查
+        2025.12.12 1.13 修改对"分配给特征图缓存的Bank数"的合法性判断
+        2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -89,6 +92,8 @@ typedef struct{
 	char accelerator_type[7]; // 加速器类型
 	uint8_t accelerator_id; // 加速器ID
 
+	uint8_t bn_supported; // 是否支持批归一化处理
+	uint8_t leaky_relu_supported; // 是否支持Leaky-Relu激活
 	uint8_t int8_supported; // 是否支持INT8运算数据格式
 	uint8_t int16_supported; // 是否支持INT16运算数据格式
 	uint8_t fp16_supported; // 是否支持FP16运算数据格式
@@ -180,7 +185,9 @@ typedef struct{
 
 // 结构体: 寄存器域(批归一化与激活配置)
 typedef struct{
-	uint32_t bn_act_cfg0;
+	uint32_t bn_cfg;
+	uint32_t act_cfg0;
+	uint32_t act_cfg1;
 }AxiGnrConvRegRgnBNActCfg;
 
 // 结构体: 子配置参数(计算)
@@ -220,12 +227,16 @@ typedef struct{
 	AxiGnrConvWgtblkSfcNType sfc_n_each_wgtblk; // 卷积核缓存每个权重块的表面个数的类型
 }AxiGnrConvBufferCfg;
 
-// 结构体: 子配置参数(BN)
+// 结构体: 子配置参数(BN与激活)
 typedef struct{
-	uint8_t fixed_point_quat_accrc; // 定点数量化精度
-	uint8_t is_a_eq_1; // 参数A的实际值是否为1
-	uint8_t is_b_eq_0; // 参数B的实际值是否为0
-}AxiGnrConvBNCfg;
+	uint8_t use_bn_unit; // 启用BN单元
+	uint8_t use_act_unit; // 启用激活单元
+	uint8_t bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
+	uint8_t bn_is_a_eq_1; // 批归一化参数A的实际值是否为1
+	uint8_t bn_is_b_eq_0; // 批归一化参数B的实际值是否为0
+	uint8_t leaky_relu_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
+	float leaky_relu_param_alpha; // 泄露Relu激活参数
+}AxiGnrConvBNActCfg;
 
 // 结构体: 配置参数
 typedef struct{
@@ -233,7 +244,7 @@ typedef struct{
 	AxiGnrConvFmapCfg fmap_cfg; // 子配置参数(特征图)
 	AxiGnrConvKernalCfg kernal_cfg; // 子配置参数(卷积核)
 	AxiGnrConvBufferCfg buffer_cfg; // 子配置参数(缓存)
-	AxiGnrConvBNCfg bn_cfg; // 子配置参数(BN)
+	AxiGnrConvBNActCfg bn_act_cfg; // 子配置参数(BN与激活)
 
 	uint8_t* ifmap_baseaddr; // 输入特征图基地址
 	uint8_t* ofmap_baseaddr; // 输出特征图基地址

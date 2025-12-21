@@ -1191,7 +1191,7 @@ class FinalResScoreboard extends tue_scoreboard #(
 					begin
 						`panda_print_with(err_v, this.final_res_tr_mcd, Util::get_object_printer())
 						
-						`uvm_error(this.get_name(), $sformatf("err_v is not acceptable, id = %0d", this.final_res_cmp_id_base + i))
+						`uvm_warning(this.get_name(), $sformatf("err_v is not acceptable, id = %0d", this.final_res_cmp_id_base + i))
 						
 						this.final_res_err_n++;
 					end

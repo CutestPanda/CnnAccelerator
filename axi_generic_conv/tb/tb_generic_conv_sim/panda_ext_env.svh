@@ -562,7 +562,7 @@ class GenericConvSimTestEnv extends panda_env #(
 	typedef bit[2:0] bit3;
 	typedef bit[3:0] bit4;
 	
-	uvm_analysis_export #(panda_axis_trans) final_res_export;
+	int unsigned bn_act_prl_n; // BN与激活并行数
 	
 	local virtual generic_conv_sim_cfg_if cfg_vif;
 	
@@ -601,8 +601,6 @@ class GenericConvSimTestEnv extends panda_env #(
 	
 	function void build_phase(uvm_phase phase);
 		super.build_phase(phase);
-		
-		this.final_res_export = new("final_res_export", this);
 		
 		this.final_res_tr_mcd = $fopen("final_res_tr_log.txt");
 	endfunction
@@ -674,18 +672,9 @@ class GenericConvSimTestEnv extends panda_env #(
 		
 		this.final_res_slv_cfg = panda_axis_configuration::type_id::create("final_res_slv_cfg");
 		if(!this.final_res_slv_cfg.randomize() with {
-			data_width == buf_cfg.fnl_res_data_width;
+			data_width == bn_act_prl_n*32;
 			user_width == 5;
 			
-			ready_delay.min_delay == 0;
-			ready_delay.mid_delay[0] == 1;
-			ready_delay.mid_delay[1] == 1;
-			ready_delay.max_delay == 3;
-			ready_delay.weight_zero_delay == 2;
-			ready_delay.weight_short_delay == 0;
-			ready_delay.weight_long_delay == 1;
-			
-			default_ready == 1'b1;
 			has_keep == 1'b1;
 			has_strb == 1'b0;
 			has_last == 1'b1;
@@ -747,7 +736,7 @@ class GenericConvSimTestEnv extends panda_env #(
 		this.fnl_res_trans_blk_ctrl_mst_agt.set_configuration(this.fnl_res_trans_blk_ctrl_mst_cfg);
 		
 		this.final_res_slv_agt = panda_axis_slave_agent::type_id::create("final_res_slv_agt", this);
-		this.final_res_slv_agt.active_agent();
+		this.final_res_slv_agt.passive_agent();
 		this.final_res_slv_agt.set_configuration(this.final_res_slv_cfg);
 		
 		this.dma_s2mm_cmd_slv_agt = panda_axis_slave_agent::type_id::create("dma_s2mm_cmd_slv_agt", this);
@@ -756,15 +745,12 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	function void connect_phase(uvm_phase phase);
-		this.final_res_slv_agt.item_port.connect(this.final_res_export);
-		
 		this.final_res_slv_agt.item_port.connect(this.final_res_scb.final_res_port);
 		this.final_res_scb.set_final_res_tr_mcd(this.final_res_tr_mcd);
 		
 		this.fmap_blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", ReqGenBlkCtrlDefaultSeq::type_id::get());
 		this.kernal_blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", ReqGenBlkCtrlDefaultSeq::type_id::get());
 		this.fnl_res_trans_blk_ctrl_mst_agt.sequencer.set_default_sequence("main_phase", ReqGenBlkCtrlDefaultSeq::type_id::get());
-		this.final_res_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 		this.dma_s2mm_cmd_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
 	endfunction
 	
@@ -898,6 +884,116 @@ class GenericConvSimTestEnv extends panda_env #(
 	endfunction
 	
 	`uvm_component_utils(GenericConvSimTestEnv)
+	
+endclass
+
+class DMAS2MMEnv extends panda_env #(
+	.CONFIGURATION(tue_configuration_dummy),
+	.STATUS(tue_status_dummy)
+);
+	
+	local DMAS2MMDataLenScoreboard dma_s2mm_data_len_scb;
+	
+	bit en_output_mem_bin = 1'b0; // 是否生成输出特征图BIN文件
+	
+	local FmapCfg fmap_cfg;
+	local BufferCfg buf_cfg;
+	
+	local panda_axis_slave_agent dma_s2mm_strm_slv_agt;
+	
+	local panda_axis_configuration dma_s2mm_strm_slv_cfg;
+	
+	local ConvSts pool_sts;
+	
+	function new(string name = "DMAS2MMEnv", uvm_component parent = null);
+		super.new(name, parent);
+	endfunction
+	
+	function void build_phase(uvm_phase phase);
+		super.build_phase(phase);
+	endfunction
+	
+	protected function void build_configuration();
+		if(!uvm_config_db #(FmapCfg)::get(null, "", "fmap_cfg", this.fmap_cfg))
+			`uvm_fatal(this.get_name(), "cannot get fmap_cfg!!!")
+		if(!uvm_config_db #(BufferCfg)::get(null, "", "buf_cfg", this.buf_cfg))
+			`uvm_fatal(this.get_name(), "cannot get buf_cfg!!!")
+		
+		this.dma_s2mm_strm_slv_cfg = panda_axis_configuration::type_id::create("dma_s2mm_strm_slv_cfg");
+		if(!this.dma_s2mm_strm_slv_cfg.randomize() with {
+			data_width == buf_cfg.fnl_res_data_width;
+			user_width == 0;
+			
+			ready_delay.min_delay == 0;
+			ready_delay.mid_delay[0] == 2;
+			ready_delay.mid_delay[1] == 3;
+			ready_delay.max_delay == 4;
+			ready_delay.weight_zero_delay == 2;
+			ready_delay.weight_short_delay == 1;
+			ready_delay.weight_long_delay == 1;
+			
+			default_ready == 1'b1;
+			has_keep == 1'b1;
+			has_strb == 1'b0;
+			has_last == 1'b1;
+		})
+			`uvm_fatal(this.get_name(), "cannot randomize dma_s2mm_strm_slv_cfg!")
+		
+		if(!uvm_config_db #(panda_axis_vif)::get(null, "", "dma_s2mm_strm_axis_vif", this.dma_s2mm_strm_slv_cfg.vif))
+			`uvm_fatal(this.get_name(), "virtual interface must be set for dma_s2mm_strm_axis_vif!!!")
+	endfunction
+	
+	protected function void build_status();
+		if(this.en_output_mem_bin)
+		begin
+			this.pool_sts = ConvSts::type_id::create();
+		end
+	endfunction
+	
+	protected function void build_agents();
+		this.dma_s2mm_data_len_scb = DMAS2MMDataLenScoreboard::type_id::create("dma_s2mm_data_len_scb", this);
+		
+		if(this.en_output_mem_bin)
+		begin
+			this.dma_s2mm_data_len_scb.set_status(this.pool_sts);
+			this.dma_s2mm_data_len_scb.to_upd_ofmap_mem = 1'b1;
+		end
+		
+		this.dma_s2mm_strm_slv_agt = panda_axis_slave_agent::type_id::create("dma_s2mm_strm_slv_agt", this);
+		this.dma_s2mm_strm_slv_agt.active_agent();
+		this.dma_s2mm_strm_slv_agt.set_configuration(this.dma_s2mm_strm_slv_cfg);
+	endfunction
+	
+	function void connect_s2mm_cmd_port(uvm_analysis_export #(panda_axis_trans) req_export);
+		req_export.connect(this.dma_s2mm_data_len_scb.req_port);
+	endfunction
+	
+	function void connect_phase(uvm_phase phase);
+		super.connect_phase(phase);
+		
+		this.dma_s2mm_strm_slv_agt.item_port.connect(this.dma_s2mm_data_len_scb.final_res_port);
+		
+		if(this.dma_s2mm_strm_slv_agt.is_active_agent())
+			this.dma_s2mm_strm_slv_agt.sequencer.set_default_sequence("main_phase", panda_axis_slave_default_sequence::type_id::get());
+	endfunction
+	
+	function void report_phase(uvm_phase phase);
+		super.report_phase(phase);
+		
+		if(this.en_output_mem_bin)
+		begin
+			int mem_bin_fid;
+			
+			mem_bin_fid = $fopen("out_fmap.bin", "wb");
+			
+			if(!this.pool_sts.ofmap_mem.output_to_bin(mem_bin_fid, this.fmap_cfg.ofmap_baseaddr, this.dma_s2mm_data_len_scb.total_bytes_n))
+				`uvm_error(this.get_name(), "cannot output out_fmap.bin")
+			
+			$fclose(mem_bin_fid);
+		end
+	endfunction
+	
+	`uvm_component_utils(DMAS2MMEnv)
 	
 endclass
 

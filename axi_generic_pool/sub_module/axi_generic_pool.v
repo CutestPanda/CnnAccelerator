@@ -1044,13 +1044,17 @@ module axi_generic_pool #(
 		
 		.en_bn_act_proc(en_post_mac),
 		
-		.bn_calfmt(post_mac_calfmt),
+		.calfmt(post_mac_calfmt),
+		.use_bn_unit(1'b1),
+		.use_act_unit(1'b0),
 		.bn_fixed_point_quat_accrc(post_mac_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(post_mac_is_a_eq_1),
 		.bn_is_b_eq_0(post_mac_is_b_eq_0),
 		.is_in_const_mac_mode(1'b1),
 		.param_a_in_const_mac_mode(post_mac_param_a),
 		.param_b_in_const_mac_mode(post_mac_param_b),
+		.leaky_relu_fixed_point_quat_accrc(5'dx),
+		.leaky_relu_param_alpha(32'hxxxxxxxx),
 		
 		.s_sub_row_msg_axis_data(16'hxxxx),
 		.s_sub_row_msg_axis_last(1'bx),
@@ -1087,7 +1091,12 @@ module axi_generic_pool #(
 		.mul0_op_a(post_mac_mul_op_a),
 		.mul0_op_b(post_mac_mul_op_b),
 		.mul0_ce(post_mac_mul_ce),
-		.mul0_res(post_mac_mul_res)
+		.mul0_res(post_mac_mul_res),
+		
+		.mul1_op_a(),
+		.mul1_op_b(),
+		.mul1_ce(),
+		.mul1_res({(POST_MAC_PRL_N*(INT16_SUPPORTED ? 64:50)){1'bx}})
 	);
 	
 	/** 最终结果数据收集器 **/

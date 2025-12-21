@@ -31,6 +31,13 @@ AXI-通用卷积处理单元(顶层模块)
 
 包括寄存器配置接口、控制子系统、数据枢纽、计算子系统
 
+支持普通卷积(包括全连接层)、组卷积(包括深度可分离卷积)、转置卷积(转换为合适的特征图填充与卷积步长来实现)
+支持特征图外填充与内填充
+支持卷积核膨胀
+支持计算轮次拓展
+支持批归一化处理
+支持Leaky-Relu激活
+
 注意：
 需要外接2个DMA(MM2S)通道和1个DMA(S2MM)通道
 
@@ -43,11 +50,13 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/18
+日期: 2025/12/20
 ********************************************************************/
 
 
 module axi_generic_conv #(
+	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
+	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
@@ -210,6 +219,10 @@ module axi_generic_conv #(
 	localparam integer BN_MUL_OP_WIDTH = INT8_SUPPORTED ? 4*18:(INT16_SUPPORTED ? 32:25);
 	localparam integer BN_MUL_CE_WIDTH = INT8_SUPPORTED ? 4:3;
 	localparam integer BN_MUL_RES_WIDTH = INT8_SUPPORTED ? 4*36:(INT16_SUPPORTED ? 64:50);
+	// 泄露Relu乘法器的位宽
+	localparam integer LEAKY_RELU_MUL_OP_WIDTH = INT16_SUPPORTED ? 32:25;
+	localparam integer LEAKY_RELU_MUL_CE_WIDTH = 2;
+	localparam integer LEAKY_RELU_MUL_RES_WIDTH = INT16_SUPPORTED ? 64:50;
 	
 	/** 寄存器配置接口 **/
 	// 使能信号
@@ -261,10 +274,14 @@ module axi_generic_conv #(
 	wire[7:0] kbufgrpn; // 可缓存的通道组数 - 1
 	wire[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
 	wire[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
-	// [批归一化参数]
-	wire[4:0] bn_fixed_point_quat_accrc; // 定点数量化精度
-	wire bn_is_a_eq_1; // 参数A的实际值为1(标志)
-	wire bn_is_b_eq_0; // 参数B的实际值为0(标志)
+	// [批归一化与激活参数]
+	wire use_bn_unit; // 启用BN单元
+	wire use_act_unit; // 启用激活单元
+	wire[4:0] bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
+	wire bn_is_a_eq_1; // 批归一化参数A的实际值为1(标志)
+	wire bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
+	wire[4:0] leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
+	wire[31:0] leaky_relu_param_alpha; // 泄露Relu激活参数
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
 	wire kernal_access_blk_start;
@@ -280,6 +297,8 @@ module axi_generic_conv #(
 	wire fnl_res_trans_blk_done;
 	
 	reg_if_for_generic_conv #(
+		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
+		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
 		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
 		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
 		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
@@ -368,9 +387,13 @@ module axi_generic_conv #(
 		.kbufgrpn(kbufgrpn),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.use_bn_unit(use_bn_unit),
+		.use_act_unit(use_act_unit),
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
+		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
+		.leaky_relu_param_alpha(leaky_relu_param_alpha),
 		
 		.kernal_access_blk_start(kernal_access_blk_start),
 		.kernal_access_blk_idle(kernal_access_blk_idle),
@@ -791,6 +814,11 @@ module axi_generic_conv #(
 	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_b; // 操作数B
 	wire[BN_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_ce; // 计算使能
 	wire[BN_MUL_RES_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_res; // 计算结果
+	// 泄露Relu乘法器组
+	wire[LEAKY_RELU_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_a; // 操作数A
+	wire[LEAKY_RELU_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_b; // 操作数B
+	wire[LEAKY_RELU_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_ce; // 计算使能
+	wire[LEAKY_RELU_MUL_RES_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_res; // 计算结果
 	// 中间结果缓存MEM主接口
 	wire mid_res_mem_clk_a;
 	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
@@ -872,9 +900,13 @@ module axi_generic_conv #(
 		.kernal_w_dilated(kernal_w_dilated),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.use_bn_unit(use_bn_unit),
+		.use_act_unit(use_act_unit),
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
+		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
+		.leaky_relu_param_alpha(leaky_relu_param_alpha),
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
@@ -911,6 +943,11 @@ module axi_generic_conv #(
 		.mul1_op_b(bn_mul_op_b),
 		.mul1_ce(bn_mul_ce),
 		.mul1_res(bn_mul_res),
+		
+		.mul2_op_a(leaky_relu_mul_op_a),
+		.mul2_op_b(leaky_relu_mul_op_b),
+		.mul2_ce(leaky_relu_mul_ce),
+		.mul2_res(leaky_relu_mul_res),
 		
 		.mid_res_mem_clk_a(mid_res_mem_clk_a),
 		.mid_res_mem_wen_a(mid_res_mem_wen_a),
@@ -1010,11 +1047,34 @@ module axi_generic_conv #(
 		end
 	endgenerate
 	
-	genvar bn_mul_i;
+	genvar bn_act_mul_i;
 	generate
+		for(bn_act_mul_i = 0;bn_act_mul_i < BN_ACT_PRL_N;bn_act_mul_i = bn_act_mul_i + 1)
+		begin:leaky_relu_mul_blk
+			signed_mul #(
+				.op_a_width(INT16_SUPPORTED ? 32:25),
+				.op_b_width(INT16_SUPPORTED ? 32:25),
+				.output_width(INT16_SUPPORTED ? 64:50),
+				.en_in_reg("false"),
+				.en_out_reg("true"),
+				.simulation_delay(SIM_DELAY)
+			)leaky_relu_mul_u(
+				.clk(aclk),
+				
+				.ce_in_reg(1'b0),
+				.ce_mul(leaky_relu_mul_ce[bn_act_mul_i*2+0]),
+				.ce_out_reg(leaky_relu_mul_ce[bn_act_mul_i*2+1]),
+				
+				.op_a(leaky_relu_mul_op_a[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_act_mul_i*(INT16_SUPPORTED ? 32:25)]),
+				.op_b(leaky_relu_mul_op_b[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_act_mul_i*(INT16_SUPPORTED ? 32:25)]),
+				
+				.res(leaky_relu_mul_res[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 64:50)-1:bn_act_mul_i*(INT16_SUPPORTED ? 64:50)])
+			);
+		end
+		
 		if(INT8_SUPPORTED)
-		begin:case_bn_int16_supported
-			for(bn_mul_i = 0;bn_mul_i < 4 * BN_ACT_PRL_N;bn_mul_i = bn_mul_i + 1)
+		begin:case_bn_act_int16_supported
+			for(bn_act_mul_i = 0;bn_act_mul_i < 4 * BN_ACT_PRL_N;bn_act_mul_i = bn_act_mul_i + 1)
 			begin:bn_mul_blk_a
 				signed_mul #(
 					.op_a_width(18),
@@ -1027,19 +1087,19 @@ module axi_generic_conv #(
 					.clk(aclk),
 					
 					.ce_in_reg(1'b0),
-					.ce_mul(bn_mul_ce[bn_mul_i]),
+					.ce_mul(bn_mul_ce[bn_act_mul_i]),
 					.ce_out_reg(1'b0),
 					
-					.op_a(bn_mul_op_a[(bn_mul_i+1)*18-1:bn_mul_i*18]),
-					.op_b(bn_mul_op_b[(bn_mul_i+1)*18-1:bn_mul_i*18]),
+					.op_a(bn_mul_op_a[(bn_act_mul_i+1)*18-1:bn_act_mul_i*18]),
+					.op_b(bn_mul_op_b[(bn_act_mul_i+1)*18-1:bn_act_mul_i*18]),
 					
-					.res(bn_mul_res[(bn_mul_i+1)*36-1:bn_mul_i*36])
+					.res(bn_mul_res[(bn_act_mul_i+1)*36-1:bn_act_mul_i*36])
 				);
 			end
 		end
 		else
-		begin:case_bn_int16_not_supported
-			for(bn_mul_i = 0;bn_mul_i < BN_ACT_PRL_N;bn_mul_i = bn_mul_i + 1)
+		begin:case_bn_act_int16_not_supported
+			for(bn_act_mul_i = 0;bn_act_mul_i < BN_ACT_PRL_N;bn_act_mul_i = bn_act_mul_i + 1)
 			begin:bn_mul_blk_b
 				signed_mul #(
 					.op_a_width(INT16_SUPPORTED ? 32:25),
@@ -1051,14 +1111,14 @@ module axi_generic_conv #(
 				)bn_mul_u(
 					.clk(aclk),
 					
-					.ce_in_reg(bn_mul_ce[bn_mul_i*3+0]),
-					.ce_mul(bn_mul_ce[bn_mul_i*3+1]),
-					.ce_out_reg(bn_mul_ce[bn_mul_i*3+2]),
+					.ce_in_reg(bn_mul_ce[bn_act_mul_i*3+0]),
+					.ce_mul(bn_mul_ce[bn_act_mul_i*3+1]),
+					.ce_out_reg(bn_mul_ce[bn_act_mul_i*3+2]),
 					
-					.op_a(bn_mul_op_a[(bn_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_mul_i*(INT16_SUPPORTED ? 32:25)]),
-					.op_b(bn_mul_op_b[(bn_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_mul_i*(INT16_SUPPORTED ? 32:25)]),
+					.op_a(bn_mul_op_a[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_act_mul_i*(INT16_SUPPORTED ? 32:25)]),
+					.op_b(bn_mul_op_b[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 32:25)-1:bn_act_mul_i*(INT16_SUPPORTED ? 32:25)]),
 					
-					.res(bn_mul_res[(bn_mul_i+1)*(INT16_SUPPORTED ? 64:50)-1:bn_mul_i*(INT16_SUPPORTED ? 64:50)])
+					.res(bn_mul_res[(bn_act_mul_i+1)*(INT16_SUPPORTED ? 64:50)-1:bn_act_mul_i*(INT16_SUPPORTED ? 64:50)])
 				);
 			end
 		end

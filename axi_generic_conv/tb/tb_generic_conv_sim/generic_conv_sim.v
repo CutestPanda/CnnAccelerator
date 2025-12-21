@@ -495,6 +495,11 @@ module generic_conv_sim #(
 	wire[32*BN_ACT_PRL_N-1:0] mul_bn_op_b; // 操作数B
 	wire[3*BN_ACT_PRL_N-1:0] mul_bn_ce; // 计算使能
 	wire[64*BN_ACT_PRL_N-1:0] mul_bn_res; // 计算结果
+	// 泄露Relu乘法器组
+	wire[32*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_a; // 操作数A
+	wire[32*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_b; // 操作数B
+	wire[2*BN_ACT_PRL_N-1:0] leaky_relu_mul_ce; // 计算使能
+	wire[64*BN_ACT_PRL_N-1:0] leaky_relu_mul_res; // 计算结果
 	// 中间结果缓存MEM主接口
 	wire mid_res_mem_clk_a;
 	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
@@ -576,9 +581,13 @@ module generic_conv_sim #(
 		.kernal_w_dilated(kernal_w_dilated),
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
+		.use_bn_unit(1'b1),
+		.use_act_unit(1'b0), // 后续开展激活测试时需要!!!
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
+		.leaky_relu_fixed_point_quat_accrc(), // 后续开展激活测试时需要!!!
+		.leaky_relu_param_alpha(), // 后续开展激活测试时需要!!!
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
@@ -616,6 +625,11 @@ module generic_conv_sim #(
 		.mul1_ce(mul_bn_ce),
 		.mul1_res(mul_bn_res),
 		
+		.mul2_op_a(leaky_relu_mul_op_a),
+		.mul2_op_b(leaky_relu_mul_op_b),
+		.mul2_ce(leaky_relu_mul_ce),
+		.mul2_res(leaky_relu_mul_res),
+		
 		.mid_res_mem_clk_a(mid_res_mem_clk_a),
 		.mid_res_mem_wen_a(mid_res_mem_wen_a),
 		.mid_res_mem_addr_a(mid_res_mem_addr_a),
@@ -640,34 +654,54 @@ module generic_conv_sim #(
 	);
 	
 	/** 乘法器 **/
-	genvar mul_bn_i;
+	genvar mul_bn_act_i;
 	generate
-		for(mul_bn_i = 0;mul_bn_i < BN_ACT_PRL_N;mul_bn_i = mul_bn_i + 1)
-		begin:mul_bn_blk
+		for(mul_bn_act_i = 0;mul_bn_act_i < BN_ACT_PRL_N;mul_bn_act_i = mul_bn_act_i + 1)
+		begin:mul_bn_act_blk
 			reg signed[63:0] mul_bn_res_r;
 			reg signed[63:0] mul_bn_res_r_d1;
 			reg signed[63:0] mul_bn_res_r_d2;
 			
-			assign mul_bn_res[64*(mul_bn_i+1)-1:64*mul_bn_i] = mul_bn_res_r_d2;
+			assign mul_bn_res[64*(mul_bn_act_i+1)-1:64*mul_bn_act_i] = mul_bn_res_r_d2;
 			
 			always @(posedge aclk)
 			begin
-				if(mul_bn_ce[3*mul_bn_i+0])
+				if(mul_bn_ce[3*mul_bn_act_i+0])
 					mul_bn_res_r <= # SIM_DELAY 
-						$signed(mul_bn_op_a[32*(mul_bn_i+1)-1:32*mul_bn_i]) * $signed(mul_bn_op_b[32*(mul_bn_i+1)-1:32*mul_bn_i]);
+						$signed(mul_bn_op_a[32*(mul_bn_act_i+1)-1:32*mul_bn_act_i]) * $signed(mul_bn_op_b[32*(mul_bn_act_i+1)-1:32*mul_bn_act_i]);
 			end
 			
 			always @(posedge aclk)
 			begin
-				if(mul_bn_ce[3*mul_bn_i+1])
+				if(mul_bn_ce[3*mul_bn_act_i+1])
 					mul_bn_res_r_d1 <= # SIM_DELAY mul_bn_res_r;
 			end
 			
 			always @(posedge aclk)
 			begin
-				if(mul_bn_ce[3*mul_bn_i+2])
+				if(mul_bn_ce[3*mul_bn_act_i+2])
 					mul_bn_res_r_d2 <= # SIM_DELAY mul_bn_res_r_d1;
 			end
+			
+			signed_mul #(
+				.op_a_width(32),
+				.op_b_width(32),
+				.output_width(64),
+				.en_in_reg("false"),
+				.en_out_reg("true"),
+				.simulation_delay(SIM_DELAY)
+			)leaky_relu_mul_u(
+				.clk(aclk),
+				
+				.ce_in_reg(1'b0),
+				.ce_mul(leaky_relu_mul_ce[mul_bn_act_i*2+0]),
+				.ce_out_reg(leaky_relu_mul_ce[mul_bn_act_i*2+1]),
+				
+				.op_a(leaky_relu_mul_op_a[(mul_bn_act_i+1)*32-1:mul_bn_act_i*32]),
+				.op_b(leaky_relu_mul_op_b[(mul_bn_act_i+1)*32-1:mul_bn_act_i*32]),
+				
+				.res(leaky_relu_mul_res[(mul_bn_act_i+1)*64-1:mul_bn_act_i*64])
+			);
 		end
 	endgenerate
 	
@@ -727,11 +761,15 @@ module generic_conv_sim #(
 				.op_a_width(16),
 				.op_b_width(16),
 				.output_width(32),
+				.en_in_reg("false"),
+				.en_out_reg("false"),
 				.simulation_delay(SIM_DELAY)
 			)mul_s16_s16_u(
 				.clk(aclk),
 				
-				.ce_s0_mul(mul_array_ce[mul_i/ATOMIC_C]),
+				.ce_in_reg(1'b0),
+				.ce_mul(mul_array_ce[mul_i/ATOMIC_C]),
+				.ce_out_reg(1'b0),
 				
 				.op_a(mul_array_op_a[16*mul_i+15:16*mul_i]),
 				.op_b(mul_array_op_b[16*mul_i+15:16*mul_i]),

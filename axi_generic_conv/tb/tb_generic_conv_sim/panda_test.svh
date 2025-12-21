@@ -104,7 +104,7 @@ class ConcreteFmapOutPtCalProcListener extends FmapOutPtCalProcListener;
 		int unsigned cal_rid
 	);
 		/*
-		if((kset_id == 0) && (oy == 3) && (ox == 0) && (cal_rid == 0))
+		if((kset_id == 0) && (oy == 7) && (ox == 9) && (cal_rid == 0))
 		begin
 			panda_axis_trans axis_tr;
 			FpMidResAccumInTr accum_in_tr;
@@ -145,7 +145,7 @@ class ConcreteExpFmapCalProcListener extends FmapOutPtCalProcListener;
 		int unsigned sfc_id
 	);
 		/*
-		if((kset_id == 0) && (oy == 0) && (ox == 0) && (sfc_id == 0))
+		if((kset_id == 0) && (oy == 7) && (ox == 9) && (sfc_id == 0))
 		begin
 			AbstractData data;
 			
@@ -176,8 +176,8 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	.STATUS(tue_status_dummy)
 );
 	
-	protected int unsigned ATOMIC_C = 2; // 通道并行数
 	protected int unsigned ATOMIC_K = 4; // 核并行数
+	protected int unsigned ATOMIC_C = 2; // 通道并行数
 	protected int unsigned STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	protected int unsigned FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	
@@ -188,17 +188,14 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	protected FnlResTransReqGenTestEnv fnl_res_trans_req_gen_env;
 	protected ConvDataHubTestEnv conv_data_hub_env;
 	protected GenericConvSimTestEnv top_sim_env;
+	protected DMAS2MMEnv dma_s2mm_env;
 	protected MidResAcmltCalObsvEnv mid_res_acmlt_cal_obsv_env_arr[];
-	
-	protected DMAS2MMDataLenScoreboard dma_s2mm_data_len_scb;
 	
 	protected FmapCfg fmap_cfg;
 	protected KernalCfg kernal_cfg;
 	protected ConvCalCfg conv_cal_cfg;
 	protected BufferCfg buf_cfg;
 	protected BNCfg bn_cfg;
-	
-	protected ConvSts conv_sts;
 	
 	local ConcreteFmapOutPtCalProcListener fmap_out_pt_cal_proc_listener;
 	local ConcreteExpFmapCalProcListener exp_fmap_cal_proc_listener;
@@ -324,6 +321,8 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		this.fnl_res_trans_req_gen_env = FnlResTransReqGenTestEnv::type_id::create("fnl_res_trans_req_gen_env", this);
 		this.conv_data_hub_env = ConvDataHubTestEnv::type_id::create("conv_data_hub_env", this);
 		this.top_sim_env = GenericConvSimTestEnv::type_id::create("top_sim_env", this);
+		this.dma_s2mm_env = DMAS2MMEnv::type_id::create("dma_s2mm_env", this);
+		this.dma_s2mm_env.en_output_mem_bin = this.en_output_mem_bin;
 		
 		this.mid_res_acmlt_cal_obsv_env_arr = new[this.conv_cal_cfg.atomic_k];
 		foreach(this.mid_res_acmlt_cal_obsv_env_arr[_i])
@@ -331,15 +330,6 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 				$sformatf("mid_res_acmlt_cal_obsv_env[%0d]", _i),
 				this
 			);
-		
-		this.dma_s2mm_data_len_scb = DMAS2MMDataLenScoreboard::type_id::create("dma_s2mm_data_len_scb", this);
-		
-		if(this.en_output_mem_bin)
-		begin
-			this.conv_sts = ConvSts::type_id::create();
-			this.dma_s2mm_data_len_scb.set_status(this.conv_sts);
-			this.dma_s2mm_data_len_scb.to_upd_ofmap_mem = 1'b1;
-		end
 		
 		this.exp_fmap_cal_proc_listener = ConcreteExpFmapCalProcListener::type_id::create();
 		this.top_sim_env.register_cal_proc_listener(this.exp_fmap_cal_proc_listener);
@@ -349,12 +339,11 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 	function void connect_phase(uvm_phase phase);
 		super.connect_phase(phase);
 		
-		this.fnl_res_trans_req_gen_env.req_export.connect(this.dma_s2mm_data_len_scb.req_port);
-		this.top_sim_env.final_res_export.connect(this.dma_s2mm_data_len_scb.final_res_port);
-		
 		this.fmap_out_pt_cal_proc_listener = ConcreteFmapOutPtCalProcListener::type_id::create();
 		this.mid_res_acmlt_cal_obsv_env_arr[0].register_cal_proc_listener(this.fmap_out_pt_cal_proc_listener);
 		this.fmap_out_pt_cal_proc_listener.fid = $fopen("mid_res_acmlt_cal_obsv_log.txt");
+		
+		this.dma_s2mm_env.connect_s2mm_cmd_port(this.fnl_res_trans_req_gen_env.req_export);
 		
 		$fclose(this.exp_fmap_cal_proc_listener.fid);
 	endfunction
@@ -363,18 +352,6 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		super.report_phase(phase);
 		
 		$fclose(this.fmap_out_pt_cal_proc_listener.fid);
-		
-		if(this.en_output_mem_bin)
-		begin
-			int mem_bin_fid;
-			
-			mem_bin_fid = $fopen("out_fmap.bin", "wb");
-			
-			if(!this.conv_sts.ofmap_mem.output_to_bin(mem_bin_fid, this.fmap_cfg.ofmap_baseaddr, this.dma_s2mm_data_len_scb.total_bytes_n))
-				`uvm_error(this.get_name(), "cannot output out_fmap.bin")
-			
-			$fclose(mem_bin_fid);
-		end
 	endfunction
 	
 	virtual protected function void build_test_cfg();
