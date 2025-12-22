@@ -13,6 +13,7 @@
 	parameter integer KERNAL_DILATION_SUPPORTED = 0; // 是否支持卷积核膨胀
 	parameter integer EN_PERF_MON = 1; // 是否支持性能监测
 	parameter integer ACCELERATOR_ID = 0; // 加速器ID(0~3)
+	parameter integer FP32_KEEP = 0; // 是否保持FP32输出
 	
 	parameter integer ATOMIC_K = 8; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 8; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -41,14 +42,14 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // #define TO_FLUSH_DCACHE // 是否需要刷新DCache
+// #define OUTPUT_RES_TO_SDCARD // 是否需要将结果保存到SD卡
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static int test_conv_layer(
-	char* in_fmap_filename, int in_fmap_len,
-	char* kernal_filename, int kernal_len,
-	char* bn_param_filename, void* bn_param_buf, int bn_param_n,
-	char* out_fmap_filename, int out_fmap_len, uint32_t out_fmap_sfc_row_n,
+	const char* in_fmap_filename, const char* kernal_filename, const char* bn_param_filename, const char* out_fmap_filename,
+	void* bn_param_buf,
+	int out_fmap_len, uint32_t out_fmap_sfc_row_n,
 	const AxiGnrConvCfg* conv_cfg
 );
 
@@ -58,6 +59,7 @@ static FATFS fatfs; // FAT32文件系统
 static FIL file_handler; // 文件描述符
 
 static AxiGnrConvHandler axi_generic_conv; // 通用卷积处理单元
+static AxiGnrConvPerfMonsts pm_sts; // 性能监测状态
 
 // 输入特征图(数组)
 static uint16_t in_fmap_0[640 * 640 * 3];
@@ -68,8 +70,8 @@ static uint16_t kwgt_0[3 * 3 * 3 * 16];
 static uint16_t kwgt_1[3 * 3 * 16 * 32];
 
 // 输出特征图(数组)
-static float out_fmap_0[640 * 640 * 16];
-static float out_fmap_1[320 * 320 * 32];
+static uint16_t out_fmap_0[640 * 640 * 16];
+static uint16_t out_fmap_1[320 * 320 * 32];
 
 // BN参数(数组)
 static BNParam bn_params_0[16];
@@ -108,7 +110,7 @@ int main(){
 	conv_cfg.fmap_cfg.ifmap_width = 640;
 	conv_cfg.fmap_cfg.ifmap_height = 640;
 	conv_cfg.fmap_cfg.ifmap_chn_n = 3;
-	conv_cfg.fmap_cfg.ofmap_data_type = CONV_O_4_BYTE;
+	conv_cfg.fmap_cfg.ofmap_data_type = CONV_O_2_BYTE;
 	conv_cfg.kernal_cfg.dilation_n = 0;
 	conv_cfg.kernal_cfg.kernal_chn_n = 3;
 	conv_cfg.kernal_cfg.kernal_n = 16;
@@ -123,10 +125,9 @@ int main(){
 	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.01f;
 
 	if(test_conv_layer(
-		"in_fmap_0.bin", 640 * 640 * 3 * 2,
-		"kernal_0.bin", 3 * 3 * 3 * 16 * 2,
-		"bn_0.bin", (void*)bn_params_0, 16,
-		"out_fmap_0.bin", 640 * 640 * 16 * 4, 640 * 2,
+		"in_fmap_0.bin", "kernal_0.bin", "bn_0.bin", "out_fmap_0.bin",
+		(void*)bn_params_0,
+		640 * 640 * 16 * 2, 640 * 2,
 		(const AxiGnrConvCfg*)(&conv_cfg)
 	)){
 		return -1;
@@ -150,7 +151,7 @@ int main(){
 	conv_cfg.fmap_cfg.ifmap_width = 320;
 	conv_cfg.fmap_cfg.ifmap_height = 320;
 	conv_cfg.fmap_cfg.ifmap_chn_n = 16;
-	conv_cfg.fmap_cfg.ofmap_data_type = CONV_O_4_BYTE;
+	conv_cfg.fmap_cfg.ofmap_data_type = CONV_O_2_BYTE;
 	conv_cfg.kernal_cfg.dilation_n = 0;
 	conv_cfg.kernal_cfg.kernal_chn_n = 16;
 	conv_cfg.kernal_cfg.kernal_n = 32;
@@ -165,10 +166,9 @@ int main(){
 	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.01f;
 
 	if(test_conv_layer(
-		"in_fmap_1.bin", 320 * 320 * 16 * 2,
-		"kernal_1.bin", 3 * 3 * 16 * 32 * 2,
-		"bn_1.bin", (void*)bn_params_1, 32,
-		"out_fmap_1.bin", 320 * 320 * 32 * 4, 320 * 4,
+		"in_fmap_1.bin", "kernal_1.bin", "bn_1.bin", "out_fmap_1.bin",
+		(void*)bn_params_1,
+		320 * 320 * 32 * 2, 320 * 4,
 		(const AxiGnrConvCfg*)(&conv_cfg)
 	)){
 		return -1;
@@ -180,14 +180,28 @@ int main(){
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static int test_conv_layer(
-	char* in_fmap_filename, int in_fmap_len,
-	char* kernal_filename, int kernal_len,
-	char* bn_param_filename, void* bn_param_buf, int bn_param_n,
-	char* out_fmap_filename, int out_fmap_len, uint32_t out_fmap_sfc_row_n,
+	const char* in_fmap_filename, const char* kernal_filename, const char* bn_param_filename, const char* out_fmap_filename,
+	void* bn_param_buf,
+	int out_fmap_len, uint32_t out_fmap_sfc_row_n,
 	const AxiGnrConvCfg* conv_cfg
 ){
+	int in_fmap_len = ((int)conv_cfg->fmap_cfg.ifmap_width) * ((int)conv_cfg->fmap_cfg.ifmap_height) * ((int)conv_cfg->fmap_cfg.ifmap_chn_n) * 2;
+	int kernal_len;
+	int bn_param_n = (int)conv_cfg->kernal_cfg.kernal_n;
+
+	switch(conv_cfg->kernal_cfg.kernal_shape){
+	case CONV_KRN_1x1: kernal_len = 1 * 1;break;
+	case CONV_KRN_3x3: kernal_len = 3 * 3;break;
+	case CONV_KRN_5x5: kernal_len = 5 * 5;break;
+	case CONV_KRN_7x7: kernal_len = 7 * 7;break;
+	case CONV_KRN_9x9: kernal_len = 9 * 9;break;
+	case CONV_KRN_11x11: kernal_len = 11 * 11;break;
+	}
+
+	kernal_len *= ((int)conv_cfg->kernal_cfg.kernal_chn_n) * ((int)conv_cfg->kernal_cfg.kernal_n) * 2;
+
 	// 从SD卡读取输入特征图
-	if(sd_card_fatfs_fopen(&file_handler, in_fmap_filename, FA_READ, 0)){
+	if(sd_card_fatfs_fopen(&file_handler, (char*)in_fmap_filename, FA_READ, 0)){
 		return -1;
 	}
 
@@ -199,7 +213,7 @@ static int test_conv_layer(
 	}
 
 	// 从SD卡读取卷积核权重
-	if(sd_card_fatfs_fopen(&file_handler, kernal_filename, FA_READ, 0)){
+	if(sd_card_fatfs_fopen(&file_handler, (char*)kernal_filename, FA_READ, 0)){
 		return -1;
 	}
 
@@ -211,7 +225,7 @@ static int test_conv_layer(
 	}
 
 	// 从SD卡读取BN参数
-	if(sd_card_fatfs_fopen(&file_handler, bn_param_filename, FA_READ, 0)){
+	if(sd_card_fatfs_fopen(&file_handler, (char*)bn_param_filename, FA_READ, 0)){
 		return -1;
 	}
 
@@ -258,8 +272,8 @@ static int test_conv_layer(
 	while(axi_generic_conv_get_cmd_fns_n(&axi_generic_conv, Q_CMD_FNS_N_S2MM) < out_fmap_sfc_row_n);
 
 	// 获取性能监测计数器的值
-	int pm_cnt = (int)axi_generic_conv_get_pm_cnt(&axi_generic_conv);
-	printf("pm_cnt = %d\r\n", pm_cnt);
+	axi_generic_conv_get_pm_cnt(&axi_generic_conv, &pm_sts);
+	printf("pm_cnt = %d\r\n", (int)pm_sts.cycle_n);
 
 	// 除能计算子系统
 	axi_generic_conv_disable_cal_sub_sys(&axi_generic_conv);
@@ -282,8 +296,9 @@ static int test_conv_layer(
 	Xil_DCacheFlushRange((INTPTR)conv_cfg->ofmap_baseaddr, out_fmap_len);
 #endif
 
+#ifdef OUTPUT_RES_TO_SDCARD
 	// 向SD卡写入输出特征图
-	if(sd_card_fatfs_fopen(&file_handler, out_fmap_filename, FA_WRITE | FA_CREATE_ALWAYS, 0)){
+	if(sd_card_fatfs_fopen(&file_handler, (char*)out_fmap_filename, FA_WRITE | FA_CREATE_ALWAYS, 0)){
 		return -1;
 	}
 
@@ -294,6 +309,7 @@ static int test_conv_layer(
 	if(sd_card_fatfs_fclose(&file_handler)){
 		return -1;
 	}
+#endif
 
 	return 0;
 }

@@ -10,6 +10,7 @@
         2025.12.09 1.12 增加配置加速器时对中间结果缓存可缓存行数的检查
         2025.12.12 1.13 修改对"分配给特征图缓存的Bank数"的合法性判断
         2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
+        2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -144,6 +145,9 @@ typedef struct{
 	uint32_t sts2;
 	uint32_t sts3;
 	uint32_t sts4;
+	uint32_t sts5;
+	uint32_t sts6;
+	uint32_t sts7;
 }AxiGnrConvRegRgnSts;
 
 // 结构体: 寄存器域(计算配置)
@@ -261,6 +265,14 @@ typedef struct{
 	float param_b;
 }BNParam;
 
+// 结构体: 性能监测状态
+typedef struct{
+	uint32_t cycle_n; // 运行周期数
+	uint32_t mm2s_chn0_tsf_n; // 0号MM2S通道传输字节数
+	uint32_t mm2s_chn1_tsf_n; // 1号MM2S通道传输字节数
+	uint32_t s2mm_tsf_n; // S2MM通道传输字节数
+}AxiGnrConvPerfMonsts;
+
 // 结构体: 通用卷积处理单元
 typedef struct{
 	uint32_t* reg_base_ptr; // 寄存器区基地址
@@ -299,5 +311,5 @@ void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_pa
 
 uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNQueryType query_type); // 查询DMA命令完成数
 int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNClrType clr_type); // 清除DMA命令完成数计数器
-uint32_t axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler); // 获取性能监测计数器的值
+void axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts); // 获取性能监测计数器的值
 int axi_generic_conv_clr_pm_cnt(AxiGnrConvHandler* handler); // 清除性能监测计数器

@@ -10,6 +10,7 @@
         2025.12.09 1.12 增加配置加速器时对中间结果缓存可缓存行数的检查
         2025.12.12 1.13 修改对"分配给特征图缓存的Bank数"的合法性判断
         2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
+        2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -634,10 +635,14 @@ int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsN
 @public
 @brief  获取性能监测计数器的值
 @param  handler 通用卷积处理单元(加速器句柄)
+        pm_sts 性能监测状态(句柄)
 @return 性能监测计数器的值
 *************************/
-uint32_t axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler){
-	return handler->reg_region_sts->sts4;
+void axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts){
+	pm_sts->cycle_n = handler->reg_region_sts->sts4;
+	pm_sts->mm2s_chn0_tsf_n = handler->reg_region_sts->sts5;
+	pm_sts->mm2s_chn1_tsf_n = handler->reg_region_sts->sts6;
+	pm_sts->s2mm_tsf_n = handler->reg_region_sts->sts7;
 }
 
 /*************************
@@ -653,6 +658,9 @@ int axi_generic_conv_clr_pm_cnt(AxiGnrConvHandler* handler){
 	}
 
 	handler->reg_region_sts->sts4 = 0;
+	handler->reg_region_sts->sts5 = 0;
+	handler->reg_region_sts->sts6 = 0;
+	handler->reg_region_sts->sts7 = 0;
 
 	return 0;
 }

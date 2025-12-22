@@ -32,6 +32,17 @@ SOFTWARE.
 
 进行激活处理(目前仅支持Leaky Relu)
 
+可选的舍入 -> 
+---------------------------------------
+|  待舍入数据格式  |  舍入后数据格式  |
+---------------------------------------
+|      INT16       |       INT8       |
+---------------------------------------
+|      INT32       |      INT16       |
+---------------------------------------
+|       FP32       |       FP16       |
+---------------------------------------
+
 批归一化所使用的乘法器 -> 
 ------------------------------------------------------------------------------------------------------
 | 是否支持INT16运算数据格式 | 是否支持INT32运算数据格式 |      乘法器使用情况       |   乘法器时延   |
@@ -53,7 +64,7 @@ Leaky Relu所使用的乘法器 ->
 -----------------------------------------------------------------------------
 
 使用1个真双口SRAM(位宽 = 64, 深度 = 最大的卷积核个数), 读时延 = 1clk
-使用1个简单双口SRAM(位宽 = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5, 深度 = 512), 读时延 = 1clk
+使用1个简单双口SRAM(位宽 = BN_ACT_PRL_N*(16或32)+BN_ACT_PRL_N+1+5, 深度 = 512), 读时延 = 1clk
 
 注意：
 BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
@@ -63,11 +74,12 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/20
+日期: 2025/12/22
 ********************************************************************/
 
 
 module conv_bn_act_proc #(
+	parameter FP32_KEEP = 1'b1, // 是否保持FP32输出
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter INT16_SUPPORTED = 1'b0, // 是否支持INT16运算数据格式
@@ -113,8 +125,8 @@ module conv_bn_act_proc #(
 	output wire s_axis_fnl_res_ready,
 	
 	// 经过BN与激活处理的结果(AXIS主机)
-	output wire[BN_ACT_PRL_N*32-1:0] m_axis_bn_act_res_data, // 对于BN_ACT_PRL_N个最终结果 -> {单精度浮点数或定点数(32位)}
-	output wire[BN_ACT_PRL_N*4-1:0] m_axis_bn_act_res_keep,
+	output wire[BN_ACT_PRL_N*(FP32_KEEP ? 32:16)-1:0] m_axis_bn_act_res_data, // 对于BN_ACT_PRL_N个最终结果 -> {浮点数或定点数}
+	output wire[BN_ACT_PRL_N*(FP32_KEEP ? 4:2)-1:0] m_axis_bn_act_res_keep,
 	output wire[4:0] m_axis_bn_act_res_user,
 	output wire m_axis_bn_act_res_last, // 本行最后1个处理结果(标志)
 	output wire m_axis_bn_act_res_valid,
@@ -130,10 +142,10 @@ module conv_bn_act_proc #(
 	output wire proc_res_fifo_mem_clk,
 	output wire proc_res_fifo_mem_wen_a,
 	output wire[8:0] proc_res_fifo_mem_addr_a,
-	output wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
+	output wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
 	output wire proc_res_fifo_mem_ren_b,
 	output wire[8:0] proc_res_fifo_mem_addr_b,
-	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b,
+	input wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b,
 	
 	// 外部有符号乘法器#0
 	output wire[(INT16_SUPPORTED ? 4*18:(INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul0_op_a, // 操作数A
@@ -639,52 +651,119 @@ module conv_bn_act_proc #(
 		end
 	endgenerate
 	
-	/** 处理结果fifo **/
+	/** 舍入处理 **/
+	wire[BN_ACT_PRL_N*16-1:0] round_o_res; // 计算结果
+	wire[BN_ACT_PRL_N+1+5-1:0] round_o_info_along[0:BN_ACT_PRL_N-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
+	wire[BN_ACT_PRL_N-1:0] round_o_vld;
+	
+	genvar round_i;
+	generate
+		for(round_i = 0;round_i < BN_ACT_PRL_N;round_i = round_i + 1)
+		begin:round_blk
+			out_round_cell #(
+				.INT8_SUPPORTED(INT16_SUPPORTED),
+				.INT16_SUPPORTED(INT32_SUPPORTED),
+				.FP16_SUPPORTED(FP32_SUPPORTED),
+				.INFO_ALONG_WIDTH(BN_ACT_PRL_N+1+5),
+				.SIM_DELAY(SIM_DELAY)
+			)out_round_cell_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(aclken),
+				
+				.calfmt(calfmt),
+				.fixed_point_quat_accrc(4'bxxxx), // 需要给出运行时参数!!!
+				
+				.round_i_op_x(act_grp_o_res_actual[round_i*32+31:round_i*32]),
+				.round_i_info_along(act_grp_o_info_along_actual[round_i]),
+				.round_i_vld(act_grp_o_vld_actual[round_i]),
+				
+				.round_o_res(round_o_res[round_i*16+15:round_i*16]),
+				.round_o_info_along(round_o_info_along[round_i]),
+				.round_o_vld(round_o_vld[round_i])
+			);
+		end
+	endgenerate
+	
+	/**
+	处理结果fifo
+	
+	负载数据 -> 
+		{
+			是否最后1个子行(1bit),
+			子行号(4bit),
+			计算结果(BN_ACT_PRL_N*(16或32) bit),
+			数据有效掩码(BN_ACT_PRL_N bit),
+			行内最后1个数据块标志(1bit)
+		}
+	**/
 	// [写端口]
 	wire proc_res_fifo_wen;
-	wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_din; // {是否最后1个子行(1bit), 子行号(4bit), 计算结果(BN_ACT_PRL_N*32 bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)}
+	wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_din;
 	wire proc_res_fifo_full_n;
 	wire proc_res_fifo_almost_full_n;
 	// [读端口]
 	wire proc_res_fifo_ren;
-	wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_dout; // {是否最后1个子行(1bit), 子行号(4bit), 计算结果(BN_ACT_PRL_N*32 bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)}
+	wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_dout;
 	wire proc_res_fifo_empty_n;
 	
-	assign m_axis_bn_act_res_data = proc_res_fifo_dout[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1)-1:BN_ACT_PRL_N+1];
+	assign m_axis_bn_act_res_data = 
+		proc_res_fifo_dout[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1)-1:BN_ACT_PRL_N+1];
 	
 	genvar m_axis_bn_act_res_mask_i;
 	generate
 		for(m_axis_bn_act_res_mask_i = 0;m_axis_bn_act_res_mask_i < BN_ACT_PRL_N;m_axis_bn_act_res_mask_i = m_axis_bn_act_res_mask_i + 1)
 		begin:m_axis_bn_act_res_mask_blk
-			assign m_axis_bn_act_res_keep[m_axis_bn_act_res_mask_i*4+3:m_axis_bn_act_res_mask_i*4] = 
-				{4{proc_res_fifo_dout[m_axis_bn_act_res_mask_i+1]}};
+			assign m_axis_bn_act_res_keep[(m_axis_bn_act_res_mask_i+1)*(FP32_KEEP ? 4:2)-1:m_axis_bn_act_res_mask_i*(FP32_KEEP ? 4:2)] = 
+				{(FP32_KEEP ? 4:2){proc_res_fifo_dout[m_axis_bn_act_res_mask_i+1]}};
 		end
 	endgenerate
 	
-	assign m_axis_bn_act_res_user = proc_res_fifo_dout[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:BN_ACT_PRL_N*32+BN_ACT_PRL_N+1];
-	
-	assign m_axis_bn_act_res_last = proc_res_fifo_dout[0];
-	assign m_axis_bn_act_res_valid = aclken & proc_res_fifo_empty_n;
+	assign m_axis_bn_act_res_user = 
+		proc_res_fifo_dout[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1];
+	assign m_axis_bn_act_res_last = 
+		proc_res_fifo_dout[0];
+	assign m_axis_bn_act_res_valid = 
+		aclken & proc_res_fifo_empty_n;
 	
 	assign proc_res_fifo_mem_clk = aclk;
 	
 	assign to_pass_fnl_sfc = proc_res_fifo_almost_full_n;
 	
-	assign proc_res_fifo_wen = act_grp_o_vld_actual[0];
-	assign proc_res_fifo_din = {
-		act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1+5)-1], // 是否最后1个子行(1bit)
-		act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1+4)-1:BN_ACT_PRL_N+1], // 子行号(4bit)
-		act_grp_o_res_actual[BN_ACT_PRL_N*32-1:0], // 计算结果(BN_ACT_PRL_N*32 bit)
-		act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1)-1:1], // 数据有效掩码(BN_ACT_PRL_N bit)
-		act_grp_o_info_along_actual[0][0] // 行内最后1个数据块标志(1bit)
-	};
+	generate
+		if(FP32_KEEP)
+		begin
+			assign proc_res_fifo_wen = 
+				aclken & act_grp_o_vld_actual[0];
+			assign proc_res_fifo_din = {
+				act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1+5)-1], // 是否最后1个子行(1bit)
+				act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1+4)-1:BN_ACT_PRL_N+1], // 子行号(4bit)
+				act_grp_o_res_actual[BN_ACT_PRL_N*32-1:0], // 计算结果(BN_ACT_PRL_N*32 bit)
+				act_grp_o_info_along_actual[0][(BN_ACT_PRL_N+1)-1:1], // 数据有效掩码(BN_ACT_PRL_N bit)
+				act_grp_o_info_along_actual[0][0] // 行内最后1个数据块标志(1bit)
+			};
+		end
+		else
+		begin
+			assign proc_res_fifo_wen = 
+				aclken & round_o_vld[0];
+			assign proc_res_fifo_din = {
+				round_o_info_along[0][(BN_ACT_PRL_N+1+5)-1], // 是否最后1个子行(1bit)
+				round_o_info_along[0][(BN_ACT_PRL_N+1+4)-1:BN_ACT_PRL_N+1], // 子行号(4bit)
+				round_o_res[BN_ACT_PRL_N*16-1:0], // 计算结果(BN_ACT_PRL_N*16 bit)
+				round_o_info_along[0][(BN_ACT_PRL_N+1)-1:1], // 数据有效掩码(BN_ACT_PRL_N bit)
+				round_o_info_along[0][0] // 行内最后1个数据块标志(1bit)
+			};
+		end
+	endgenerate
+	
 	assign proc_res_fifo_ren = aclken & m_axis_bn_act_res_ready;
 	
 	fifo_based_on_ram #(
 		.fwft_mode("true"),
 		.ram_read_la(1),
 		.fifo_depth(512),
-		.fifo_data_width(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5),
+		.fifo_data_width(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5),
 		.almost_full_th(480),
 		.almost_empty_th(1),
 		.simulation_delay(SIM_DELAY)

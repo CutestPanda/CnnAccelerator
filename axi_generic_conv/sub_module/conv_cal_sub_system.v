@@ -63,6 +63,7 @@ module conv_cal_sub_system #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer STREAM_DATA_WIDTH = 32, // 最终结果数据流的位宽(32 | 64 | 128 | 256)
+	parameter FP32_KEEP = 1'b1, // 是否保持FP32输出
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter EN_SMALL_FP16 = "true", // 乘加阵列是否处理极小FP16
@@ -88,6 +89,7 @@ module conv_cal_sub_system #(
 	output wire[27:0] row_n_submitted_to_mac_array, // 已向乘加阵列提交的行数
 	// [卷积乘加阵列]
 	input wire en_mac_array, // 使能乘加阵列
+	output wire[31:0] ftm_sfc_cal_n, // 已计算的特征图表面数
 	// [卷积中间结果表面行信息打包单元]
 	input wire en_packer, // 使能打包器
 	// [批归一化与激活处理单元]
@@ -189,10 +191,10 @@ module conv_cal_sub_system #(
 	output wire proc_res_fifo_mem_clk,
 	output wire proc_res_fifo_mem_wen_a, // combinational logic out
 	output wire[8:0] proc_res_fifo_mem_addr_a,
-	output wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
+	output wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
 	output wire proc_res_fifo_mem_ren_b, // combinational logic out
 	output wire[8:0] proc_res_fifo_mem_addr_b,
-	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b
+	input wire[(BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b
 );
 	
 	// 计算bit_depth的最高有效位编号(即位数-1)
@@ -315,6 +317,8 @@ module conv_cal_sub_system #(
 	wire array_i_kernal_sfc_last; // 卷积核权重块对应的最后1个表面(标志)
 	wire array_i_kernal_sfc_vld; // 有效指示
 	wire array_i_kernal_buf_full_n; // 卷积核权重缓存满(标志)
+	// [性能监测]
+	reg[31:0] ftm_sfc_cal_n_cnt; // 已计算的特征图表面数(计数器)
 	// 乘加阵列输出
 	wire[ATOMIC_K*48-1:0] array_o_res; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
 	wire[3:0] array_o_cal_round_id; // 计算轮次编号
@@ -322,6 +326,8 @@ module conv_cal_sub_system #(
 	wire[ATOMIC_K-1:0] array_o_res_mask; // 计算结果输出项掩码
 	wire array_o_res_vld; // 有效标志
 	wire array_o_res_rdy; // 就绪标志
+	
+	assign ftm_sfc_cal_n = ftm_sfc_cal_n_cnt;
 	
 	assign array_i_ftm_sfc = m_adapter_axis_data;
 	assign array_i_ftm_sfc_last = m_adapter_axis_last;
@@ -333,6 +339,19 @@ module conv_cal_sub_system #(
 	assign array_i_kernal_sfc_last = s_kwgtblk_axis_last;
 	assign array_i_kernal_sfc_vld = s_kwgtblk_axis_valid;
 	assign s_kwgtblk_axis_ready = array_i_kernal_buf_full_n;
+	
+	// 已计算的特征图表面数(计数器)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			((~en_mac_array) | (array_o_res_vld & array_o_res_rdy))
+		)
+			ftm_sfc_cal_n_cnt <= # SIM_DELAY 
+				en_mac_array ? 
+					(ftm_sfc_cal_n_cnt + 1'b1):
+					32'd0;
+	end
 	
 	conv_mac_array #(
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
@@ -587,8 +606,8 @@ module conv_cal_sub_system #(
 	wire s_axis_bn_act_valid;
 	wire s_axis_bn_act_ready;
 	// 经过BN与激活处理的结果(AXIS主机)
-	wire[BN_ACT_PRL_N*32-1:0] m_axis_bn_act_data; // 对于BN_ACT_PRL_N个最终结果 -> {单精度浮点数或定点数(32位)}
-	wire[BN_ACT_PRL_N*4-1:0] m_axis_bn_act_keep;
+	wire[BN_ACT_PRL_N*(FP32_KEEP ? 32:16)-1:0] m_axis_bn_act_data; // 对于BN_ACT_PRL_N个最终结果 -> {浮点数或定点数}
+	wire[BN_ACT_PRL_N*(FP32_KEEP ? 4:2)-1:0] m_axis_bn_act_keep;
 	wire[4:0] m_axis_bn_act_user; // {是否最后1个子行(1bit), 子行号(4bit)}
 	wire m_axis_bn_act_last; // 本行最后1个处理结果(标志)
 	wire m_axis_bn_act_valid;
@@ -602,6 +621,7 @@ module conv_cal_sub_system #(
 	assign m_axis_mid_res_buf_ready = s_axis_bn_act_ready;
 	
 	conv_bn_act_proc #(
+		.FP32_KEEP(FP32_KEEP),
 		.ATOMIC_K(ATOMIC_K),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
 		.INT16_SUPPORTED(BN_ACT_INT16_SUPPORTED),
@@ -672,8 +692,8 @@ module conv_cal_sub_system #(
 	
 	/** 最终结果数据收集器 **/
 	// 收集器输入(AXIS从机)
-	wire[BN_ACT_PRL_N*32-1:0] s_axis_collector_data;
-	wire[BN_ACT_PRL_N*4-1:0] s_axis_collector_keep;
+	wire[BN_ACT_PRL_N*(FP32_KEEP ? 32:16)-1:0] s_axis_collector_data;
+	wire[BN_ACT_PRL_N*(FP32_KEEP ? 4:2)-1:0] s_axis_collector_keep;
 	wire[4:0] s_axis_collector_user;
 	wire s_axis_collector_last;
 	wire s_axis_collector_valid;
@@ -702,8 +722,8 @@ module conv_cal_sub_system #(
 	
 	conv_final_data_collector #(
 		.IN_ITEM_WIDTH(BN_ACT_PRL_N),
-		.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/32),
-		.DATA_WIDTH_FOREACH_ITEM(32),
+		.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/(FP32_KEEP ? 32:16)),
+		.DATA_WIDTH_FOREACH_ITEM(FP32_KEEP ? 32:16),
 		.HAS_USER("true"),
 		.USER_WIDTH(5),
 		.EN_COLLECTOR_OUT_REG_SLICE("true"),

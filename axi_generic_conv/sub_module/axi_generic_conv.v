@@ -50,7 +50,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/20
+日期: 2025/12/22
 ********************************************************************/
 
 
@@ -68,6 +68,7 @@ module axi_generic_conv #(
 	parameter integer KERNAL_DILATION_SUPPORTED = 0, // 是否支持卷积核膨胀
 	parameter integer EN_PERF_MON = 1, // 是否支持性能监测
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
+	parameter integer FP32_KEEP = 0, // 是否保持FP32输出
 	parameter integer ATOMIC_K = 4, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -214,7 +215,7 @@ module axi_generic_conv #(
 	// 特征图缓存的缓存行号的位宽
 	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN);
 	// 批归一化与激活处理结果fifo的位宽
-	localparam integer BN_ACT_PROC_RES_FIFO_WIDTH = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5;
+	localparam integer BN_ACT_PROC_RES_FIFO_WIDTH = BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5;
 	// BN乘法器的位宽
 	localparam integer BN_MUL_OP_WIDTH = INT8_SUPPORTED ? 4*18:(INT16_SUPPORTED ? 32:25);
 	localparam integer BN_MUL_CE_WIDTH = INT8_SUPPORTED ? 4:3;
@@ -406,6 +407,18 @@ module axi_generic_conv #(
 		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
 		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
 		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
+		
+		.s0_mm2s_strm_axis_keep(s0_dma_strm_axis_keep),
+		.s0_mm2s_strm_axis_valid(s0_dma_strm_axis_valid),
+		.s0_mm2s_strm_axis_ready(s0_dma_strm_axis_ready),
+		
+		.s1_mm2s_strm_axis_keep(s1_dma_strm_axis_keep),
+		.s1_mm2s_strm_axis_valid(s1_dma_strm_axis_valid),
+		.s1_mm2s_strm_axis_ready(s1_dma_strm_axis_ready),
+		
+		.s_s2mm_strm_axis_keep(m_axis_fnl_res_keep),
+		.s_s2mm_strm_axis_valid(m_axis_fnl_res_valid),
+		.s_s2mm_strm_axis_ready(m_axis_fnl_res_ready),
 		
 		.mm2s_0_cmd_done(mm2s_0_cmd_done),
 		.mm2s_1_cmd_done(mm2s_1_cmd_done),
@@ -866,6 +879,7 @@ module axi_generic_conv #(
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
 		.STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
+		.FP32_KEEP(FP32_KEEP ? 1'b1:1'b0),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),
@@ -884,6 +898,7 @@ module axi_generic_conv #(
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
 		.row_n_submitted_to_mac_array(),
 		.en_mac_array(en_mac_array),
+		.ftm_sfc_cal_n(),
 		.en_packer(en_packer),
 		.en_bn_act_proc(en_bn_act_proc),
 		

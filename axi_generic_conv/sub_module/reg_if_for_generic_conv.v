@@ -85,6 +85,12 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	|  sts4    | 0x70/28 |31~0: 性能监测计数器           |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	|  sts5    | 0x74/29 |31~0: 0号MM2S通道传输字节数    |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	|  sts6    | 0x78/30 |31~0: 1号MM2S通道传输字节数    |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	|  sts7    | 0x7C/31 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
 	| cal_cfg  | 0x80/32 |2~0: 运算数据格式              |      RW      | 在写入时, 仅对支持的             |
@@ -178,7 +184,7 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/12/20
+日期: 2025/12/22
 ********************************************************************/
 
 
@@ -310,6 +316,20 @@ module reg_if_for_generic_conv #(
 	input wire fnl_res_trans_blk_idle,
 	input wire fnl_res_trans_blk_done,
 	
+	// 传输字节数监测
+	// [0号MM2S通道]
+	input wire[MM2S_STREAM_DATA_WIDTH/8-1:0] s0_mm2s_strm_axis_keep,
+	input wire s0_mm2s_strm_axis_valid,
+	input wire s0_mm2s_strm_axis_ready,
+	// [1号MM2S通道]
+	input wire[MM2S_STREAM_DATA_WIDTH/8-1:0] s1_mm2s_strm_axis_keep,
+	input wire s1_mm2s_strm_axis_valid,
+	input wire s1_mm2s_strm_axis_ready,
+	// [S2MM通道]
+	input wire[S2MM_STREAM_DATA_WIDTH/8-1:0] s_s2mm_strm_axis_keep,
+	input wire s_s2mm_strm_axis_valid,
+	input wire s_s2mm_strm_axis_ready,
+	
 	// DMA命令完成指示
 	input wire mm2s_0_cmd_done, // 0号MM2S通道命令完成(指示)
 	input wire mm2s_1_cmd_done, // 1号MM2S通道命令完成(指示)
@@ -326,6 +346,20 @@ module reg_if_for_generic_conv #(
 			for(clogb2 = -1;bit_depth > 0;clogb2 = clogb2 + 1)
 				bit_depth = bit_depth >> 1;
 		end
+    end
+    endfunction
+	
+	// 计算u32中"1"的个数
+    function [5:0] count1_of_u32(input[31:0] data);
+        integer i;
+    begin
+        count1_of_u32 = 6'd0;
+        
+        for(i = 0;i < 32;i = i + 1)
+        begin
+            if(data[i])
+                count1_of_u32 = count1_of_u32 + 6'd1;
+        end
     end
     endfunction
 	
@@ -570,7 +604,7 @@ module reg_if_for_generic_conv #(
 	end
 	
 	/**
-	寄存器(sts0, sts1, sts2, sts3, sts4)
+	寄存器(sts0, sts1, sts2, sts3, sts4, sts5, sts6, sts7)
 	
 	--------------------------------------------------------------------------------------------------------
 	|  sts0    | 0x60/24 | 0: 卷积核权重                 |      RO      |                                  |
@@ -588,6 +622,12 @@ module reg_if_for_generic_conv #(
 	--------------------------------------------------------------------------------------------------------
 	|  sts4    | 0x70/28 |31~0: 性能监测计数器           |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	|  sts5    | 0x74/29 |31~0: 0号MM2S通道传输字节数    |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	|  sts6    | 0x78/30 |31~0: 1号MM2S通道传输字节数    |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	|  sts7    | 0x7C/31 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire kernal_access_blk_idle_r; // 卷积核权重访问请求生成单元空闲标志
 	wire fmap_access_blk_idle_r; // 特征图表面行访问请求生成单元空闲标志
@@ -596,6 +636,9 @@ module reg_if_for_generic_conv #(
 	reg[31:0] dma_mm2s_1_fns_cmd_n_r; // 1号MM2S通道完成的命令数
 	reg[31:0] dma_s2mm_fns_cmd_n_r; // S2MM通道完成的命令数
 	reg[31:0] pm_cnt_r; // 性能监测计数器
+	reg[31:0] mm2s_ch0_tsf_n_r; // 0号MM2S通道传输字节数
+	reg[31:0] mm2s_ch1_tsf_n_r; // 1号MM2S通道传输字节数
+	reg[31:0] s2mm_tsf_n_r; // S2MM通道传输字节数
 	
 	assign kernal_access_blk_idle_r = kernal_access_blk_idle;
 	assign fmap_access_blk_idle_r = fmap_access_blk_idle;
@@ -662,6 +705,60 @@ module reg_if_for_generic_conv #(
 				(regs_en & regs_wen & (regs_addr == 28)) ? 
 					32'd0:
 					(pm_cnt_r + 1'b1);
+	end
+	
+	// 0号MM2S通道传输字节数
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mm2s_ch0_tsf_n_r <= 32'd0;
+		else if(
+			EN_PERF_MON & 
+			(
+				(s0_mm2s_strm_axis_valid & s0_mm2s_strm_axis_ready) | 
+				(regs_en & regs_wen & (regs_addr == 29))
+			)
+		)
+			mm2s_ch0_tsf_n_r <= # SIM_DELAY 
+				(regs_en & regs_wen & (regs_addr == 29)) ? 
+					32'd0:
+					(mm2s_ch0_tsf_n_r + count1_of_u32(s0_mm2s_strm_axis_keep | 32'd0));
+	end
+	
+	// 1号MM2S通道传输字节数
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mm2s_ch1_tsf_n_r <= 32'd0;
+		else if(
+			EN_PERF_MON & 
+			(
+				(s1_mm2s_strm_axis_valid & s1_mm2s_strm_axis_ready) | 
+				(regs_en & regs_wen & (regs_addr == 30))
+			)
+		)
+			mm2s_ch1_tsf_n_r <= # SIM_DELAY 
+				(regs_en & regs_wen & (regs_addr == 30)) ? 
+					32'd0:
+					(mm2s_ch1_tsf_n_r + count1_of_u32(s1_mm2s_strm_axis_keep | 32'd0));
+	end
+	
+	// S2MM通道传输字节数
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			s2mm_tsf_n_r <= 32'd0;
+		else if(
+			EN_PERF_MON & 
+			(
+				(s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
+				(regs_en & regs_wen & (regs_addr == 31))
+			)
+		)
+			s2mm_tsf_n_r <= # SIM_DELAY 
+				(regs_en & regs_wen & (regs_addr == 31)) ? 
+					32'd0:
+					(s2mm_tsf_n_r + count1_of_u32(s_s2mm_strm_axis_keep | 32'd0));
 	end
 	
 	/**
@@ -1267,6 +1364,9 @@ module reg_if_for_generic_conv #(
 				26: regs_dout <= # SIM_DELAY {dma_mm2s_1_fns_cmd_n_r[31:0]};
 				27: regs_dout <= # SIM_DELAY {dma_s2mm_fns_cmd_n_r[31:0]};
 				28: regs_dout <= # SIM_DELAY {pm_cnt_r[31:0]};
+				29: regs_dout <= # SIM_DELAY {mm2s_ch0_tsf_n_r[31:0]};
+				30: regs_dout <= # SIM_DELAY {mm2s_ch1_tsf_n_r[31:0]};
+				31: regs_dout <= # SIM_DELAY {s2mm_tsf_n_r[31:0]};
 				
 				32: regs_dout <= # SIM_DELAY {
 					12'd0, cal_round_r[3:0], 2'b00, conv_horizontal_stride_r[2:0], conv_vertical_stride_r[2:0], 5'd0, calfmt_r[2:0]
