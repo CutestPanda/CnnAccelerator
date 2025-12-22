@@ -11,6 +11,7 @@
         2025.12.12 1.13 修改对"分配给特征图缓存的Bank数"的合法性判断
         2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
         2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
+        2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -24,7 +25,7 @@
 #define REG_REGION_PROP_OFS 0x0000
 #define REG_REGION_CTRL_OFS 0x0040
 #define REG_REGION_STS_OFS 0x0060
-#define REG_REGION_CAL_CFG_OFS 0x0080
+#define REG_REGION_CAL_CFG_OFS 0x0090
 #define REG_REGION_GRP_CONV_CFG_OFS 0x00A0
 #define REG_REGION_FMAP_CFG_OFS 0x00C0
 #define REG_REGION_KRN_CFG_OFS 0x0100
@@ -643,6 +644,7 @@ void axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonst
 	pm_sts->mm2s_chn0_tsf_n = handler->reg_region_sts->sts5;
 	pm_sts->mm2s_chn1_tsf_n = handler->reg_region_sts->sts6;
 	pm_sts->s2mm_tsf_n = handler->reg_region_sts->sts7;
+	pm_sts->ftm_sfc_cal_n = handler->reg_region_sts->sts8;
 }
 
 /*************************

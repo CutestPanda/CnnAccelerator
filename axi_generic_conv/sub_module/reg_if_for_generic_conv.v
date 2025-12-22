@@ -91,9 +91,11 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	|  sts7    | 0x7C/31 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	|  sts8    | 0x80/32 |31~0: 已计算的特征图表面数     |      RO      | 该字段在除能计算子系统时自动清零 |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
-	| cal_cfg  | 0x80/32 |2~0: 运算数据格式              |      RW      | 在写入时, 仅对支持的             |
+	| cal_cfg  | 0x90/36 |2~0: 运算数据格式              |      RW      | 在写入时, 仅对支持的             |
 	|          |         |                               |              | 运算数据格式生效                 |
 	|          |         |10~8: 卷积垂直步长 - 1         |      RW      | 在写入时, 仅对支持的             |
 	|          |         |                               |              | 卷积垂直步长生效                 |
@@ -315,6 +317,9 @@ module reg_if_for_generic_conv #(
 	output wire fnl_res_trans_blk_start,
 	input wire fnl_res_trans_blk_idle,
 	input wire fnl_res_trans_blk_done,
+	
+	// 状态信息
+	input wire[31:0] ftm_sfc_cal_n, // 已计算的特征图表面数
 	
 	// 传输字节数监测
 	// [0号MM2S通道]
@@ -604,7 +609,7 @@ module reg_if_for_generic_conv #(
 	end
 	
 	/**
-	寄存器(sts0, sts1, sts2, sts3, sts4, sts5, sts6, sts7)
+	寄存器(sts0, sts1, sts2, sts3, sts4, sts5, sts6, sts7, sts8)
 	
 	--------------------------------------------------------------------------------------------------------
 	|  sts0    | 0x60/24 | 0: 卷积核权重                 |      RO      |                                  |
@@ -628,6 +633,8 @@ module reg_if_for_generic_conv #(
 	--------------------------------------------------------------------------------------------------------
 	|  sts7    | 0x7C/31 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	|  sts8    | 0x80/32 |31~0: 已计算的特征图表面数     |      RO      | 该字段在除能计算子系统时自动清零 |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire kernal_access_blk_idle_r; // 卷积核权重访问请求生成单元空闲标志
 	wire fmap_access_blk_idle_r; // 特征图表面行访问请求生成单元空闲标志
@@ -639,10 +646,13 @@ module reg_if_for_generic_conv #(
 	reg[31:0] mm2s_ch0_tsf_n_r; // 0号MM2S通道传输字节数
 	reg[31:0] mm2s_ch1_tsf_n_r; // 1号MM2S通道传输字节数
 	reg[31:0] s2mm_tsf_n_r; // S2MM通道传输字节数
+	wire[31:0] ftm_sfc_cal_n_r; // 已计算的特征图表面数
 	
 	assign kernal_access_blk_idle_r = kernal_access_blk_idle;
 	assign fmap_access_blk_idle_r = fmap_access_blk_idle;
 	assign fnl_res_trans_blk_idle_r = fnl_res_trans_blk_idle;
+	
+	assign ftm_sfc_cal_n_r = ftm_sfc_cal_n;
 	
 	// 0号MM2S通道完成的命令数
 	always @(posedge aclk or negedge aresetn)
@@ -765,7 +775,7 @@ module reg_if_for_generic_conv #(
 	寄存器(cal_cfg)
 	
 	--------------------------------------------------------------------------------------------------------
-	| cal_cfg  | 0x80/32 |2~0: 运算数据格式              |      RW      | 在写入时, 仅对支持的             |
+	| cal_cfg  | 0x90/36 |2~0: 运算数据格式              |      RW      | 在写入时, 仅对支持的             |
 	|          |         |                               |              | 运算数据格式生效                 |
 	|          |         |10~8: 卷积垂直步长 - 1         |      RW      | 在写入时, 仅对支持的             |
 	|          |         |                               |              | 卷积垂直步长生效                 |
@@ -800,7 +810,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			calfmt_r <= 3'b111;
 		else if(
-			regs_en & regs_wen & (regs_addr == 32) & 
+			regs_en & regs_wen & (regs_addr == 36) & 
 			(
 				((regs_din[2:0] == (CAL_FMT_INT8 | 3'b000)) & INT8_SUPPORTED) | 
 				((regs_din[2:0] == (CAL_FMT_INT16 | 3'b000)) & INT16_SUPPORTED) | 
@@ -816,7 +826,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			conv_vertical_stride_r <= 3'd0;
 		else if(
-			regs_en & regs_wen & (regs_addr == 32) & 
+			regs_en & regs_wen & (regs_addr == 36) & 
 			((regs_din[10:8] == 3'd0) | LARGE_V_STRD_SUPPORTED)
 		)
 			conv_vertical_stride_r <= # SIM_DELAY regs_din[10:8];
@@ -828,7 +838,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			conv_horizontal_stride_r <= 3'd0;
 		else if(
-			regs_en & regs_wen & (regs_addr == 32) & 
+			regs_en & regs_wen & (regs_addr == 36) & 
 			((regs_din[13:11] == 3'd0) | LARGE_H_STRD_SUPPORTED)
 		)
 			conv_horizontal_stride_r <= # SIM_DELAY regs_din[13:11];
@@ -837,7 +847,7 @@ module reg_if_for_generic_conv #(
 	// 计算轮次 - 1
 	always @(posedge aclk)
 	begin
-		if(regs_en & regs_wen & (regs_addr == 32))
+		if(regs_en & regs_wen & (regs_addr == 36))
 			cal_round_r <= # SIM_DELAY regs_din[19:16];
 	end
 	
@@ -1367,8 +1377,9 @@ module reg_if_for_generic_conv #(
 				29: regs_dout <= # SIM_DELAY {mm2s_ch0_tsf_n_r[31:0]};
 				30: regs_dout <= # SIM_DELAY {mm2s_ch1_tsf_n_r[31:0]};
 				31: regs_dout <= # SIM_DELAY {s2mm_tsf_n_r[31:0]};
+				32: regs_dout <= # SIM_DELAY {ftm_sfc_cal_n_r[31:0]};
 				
-				32: regs_dout <= # SIM_DELAY {
+				36: regs_dout <= # SIM_DELAY {
 					12'd0, cal_round_r[3:0], 2'b00, conv_horizontal_stride_r[2:0], conv_vertical_stride_r[2:0], 5'd0, calfmt_r[2:0]
 				};
 				

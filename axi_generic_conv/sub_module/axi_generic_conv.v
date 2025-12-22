@@ -296,6 +296,8 @@ module axi_generic_conv #(
 	wire fnl_res_trans_blk_start;
 	wire fnl_res_trans_blk_idle;
 	wire fnl_res_trans_blk_done;
+	// 状态信息
+	wire[31:0] ftm_sfc_cal_n; // 已计算的特征图表面数
 	
 	reg_if_for_generic_conv #(
 		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
@@ -407,6 +409,8 @@ module axi_generic_conv #(
 		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
 		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
 		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
+		
+		.ftm_sfc_cal_n(ftm_sfc_cal_n),
 		
 		.s0_mm2s_strm_axis_keep(s0_dma_strm_axis_keep),
 		.s0_mm2s_strm_axis_valid(s0_dma_strm_axis_valid),
@@ -898,7 +902,7 @@ module axi_generic_conv #(
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
 		.row_n_submitted_to_mac_array(),
 		.en_mac_array(en_mac_array),
-		.ftm_sfc_cal_n(),
+		.ftm_sfc_cal_n(ftm_sfc_cal_n),
 		.en_packer(en_packer),
 		.en_bn_act_proc(en_bn_act_proc),
 		
