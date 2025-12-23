@@ -74,7 +74,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/22
+日期: 2025/12/23
 ********************************************************************/
 
 
@@ -661,6 +661,7 @@ module conv_bn_act_proc #(
 		for(round_i = 0;round_i < BN_ACT_PRL_N;round_i = round_i + 1)
 		begin:round_blk
 			out_round_cell #(
+				.USE_EXT_CE(1'b0),
 				.INT8_SUPPORTED(INT16_SUPPORTED),
 				.INT16_SUPPORTED(INT32_SUPPORTED),
 				.FP16_SUPPORTED(FP32_SUPPORTED),
@@ -673,6 +674,9 @@ module conv_bn_act_proc #(
 				
 				.calfmt(calfmt),
 				.fixed_point_quat_accrc(4'bxxxx), // 需要给出运行时参数!!!
+				
+				.s0_ce(1'b0),
+				.s1_ce(1'b0),
 				
 				.round_i_op_x(act_grp_o_res_actual[round_i*32+31:round_i*32]),
 				.round_i_info_along(act_grp_o_info_along_actual[round_i]),

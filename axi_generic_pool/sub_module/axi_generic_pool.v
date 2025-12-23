@@ -46,7 +46,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/18
+日期: 2025/12/23
 ********************************************************************/
 
 
@@ -62,6 +62,7 @@ module axi_generic_pool #(
 	parameter integer EXT_PADDING_SUPPORTED = 1, // 是否支持外填充
 	parameter integer NON_ZERO_CONST_PADDING_SUPPORTED = 0, // 是否支持非0常量填充模式
 	parameter integer EN_PERF_MON = 1, // 是否支持性能监测
+	parameter integer KEEP_FP32_OUT = 0, // 是否保存FP32输出
 	parameter integer ATOMIC_C = 8, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer POST_MAC_PRL_N = 1, // 后乘加并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 64, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
@@ -1031,6 +1032,7 @@ module axi_generic_pool #(
 	assign s_axis_post_mac_valid = en_post_mac & m_axis_mid_res_buf_valid;
 	
 	conv_bn_act_proc #(
+		.FP32_KEEP(1'b1),
 		.ATOMIC_K(ATOMIC_C),
 		.BN_ACT_PRL_N(POST_MAC_PRL_N),
 		.INT16_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
@@ -1099,10 +1101,174 @@ module axi_generic_pool #(
 		.mul1_res({(POST_MAC_PRL_N*(INT16_SUPPORTED ? 64:50)){1'bx}})
 	);
 	
+	/** 输出数据舍入单元组 **/
+	// [舍入单元组输入]
+	wire[ATOMIC_C*32-1:0] s_axis_round_data; // ATOMIC_C个定点数或FP32
+	wire[ATOMIC_C*4-1:0] s_axis_round_keep;
+	wire s_axis_round_last; // 本行最后1个池化结果(标志)
+	wire s_axis_round_valid;
+	wire s_axis_round_ready;
+	// [舍入单元组输出]
+	wire[ATOMIC_C*(KEEP_FP32_OUT ? 32:16)-1:0] m_axis_round_data; // ATOMIC_C个定点数或浮点数
+	wire[ATOMIC_C*(KEEP_FP32_OUT ? 4:2)-1:0] m_axis_round_keep;
+	wire m_axis_round_last; // 本行最后1个池化结果(标志)
+	wire m_axis_round_valid;
+	wire m_axis_round_ready;
+	// [流水线控制]
+	// (第0级)
+	wire[ATOMIC_C-1:0] round_mask_s0;
+	wire round_last_s0;
+	wire round_valid_s0;
+	wire round_ready_s0;
+	wire[ATOMIC_C-1:0] round_ce_s0;
+	// (第1级)
+	reg[ATOMIC_C-1:0] round_mask_s1;
+	reg round_last_s1;
+	reg round_valid_s1;
+	wire round_ready_s1;
+	wire[ATOMIC_C-1:0] round_ce_s1;
+	// (第2级)
+	reg[ATOMIC_C-1:0] round_mask_s2;
+	reg round_last_s2;
+	reg round_valid_s2;
+	wire round_ready_s2;
+	
+	/**
+	使能后乘加处理   -> 后乘加处理输入
+	不使能后乘加处理 -> 舍入单元组输入
+	**/
+	assign m_axis_mid_res_buf_ready = 
+		en_post_mac ? 
+			s_axis_post_mac_ready:
+			s_axis_round_ready;
+	
+	/**
+	使能后乘加处理   -> 舍入单元组输入
+	不使能后乘加处理 -> 忽略
+	**/
+	assign m_axis_post_mac_ready = 
+		(~en_post_mac) | s_axis_round_ready;
+	
+	/**
+	使能后乘加处理   -> 经过后乘加处理的结果
+	不使能后乘加处理 -> (中间结果缓存)池化结果输出
+	**/
+	assign s_axis_round_data = 
+		en_post_mac ? 
+			(m_axis_post_mac_data | {(ATOMIC_C*32){1'b0}}):
+			m_axis_mid_res_buf_data;
+	assign s_axis_round_keep = 
+		en_post_mac ? 
+			(m_axis_post_mac_keep | {(ATOMIC_C*4){1'b0}}):
+			m_axis_mid_res_buf_keep;
+	assign s_axis_round_last = 
+		en_post_mac ? 
+			m_axis_post_mac_last:
+			m_axis_mid_res_buf_last;
+	assign s_axis_round_valid = 
+		en_post_mac ? 
+			m_axis_post_mac_valid:
+			m_axis_mid_res_buf_valid;
+	
+	assign round_last_s0 = s_axis_round_last;
+	assign round_valid_s0 = s_axis_round_valid;
+	
+	assign round_ready_s0 = (~round_valid_s1) | round_ready_s1;
+	assign round_ready_s1 = (~round_valid_s2) | round_ready_s2;
+	assign round_ready_s2 = m_axis_round_ready;
+	
+	always @(posedge aclk)
+	begin
+		if(round_valid_s0 & round_ready_s0)
+		begin
+			round_mask_s1 <= # SIM_DELAY round_mask_s0;
+			round_last_s1 <= # SIM_DELAY round_last_s0;
+		end
+	end
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			round_valid_s1 <= 1'b0;
+		else if(round_ready_s0)
+			round_valid_s1 <= # SIM_DELAY round_valid_s0;
+	end
+	
+	always @(posedge aclk)
+	begin
+		if(round_valid_s1 & round_ready_s1)
+		begin
+			round_mask_s2 <= # SIM_DELAY round_mask_s1;
+			round_last_s2 <= # SIM_DELAY round_last_s1;
+		end
+	end
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			round_valid_s2 <= 1'b0;
+		else if(round_ready_s1)
+			round_valid_s2 <= # SIM_DELAY round_valid_s1;
+	end
+	
+	genvar round_i;
+	generate
+		if(KEEP_FP32_OUT == 0)
+		begin
+			assign s_axis_round_ready = round_ready_s0;
+			
+			assign m_axis_round_last = round_last_s2;
+			assign m_axis_round_valid = round_valid_s2;
+			
+			for(round_i = 0;round_i < ATOMIC_C;round_i = round_i + 1)
+			begin:round_blk
+				assign m_axis_round_keep[round_i*2+1:round_i*2] = {2{round_mask_s2[round_i]}};
+				
+				assign round_mask_s0[round_i] = s_axis_round_keep[round_i*4];
+				
+				assign round_ce_s0[round_i] = round_valid_s0 & round_ready_s0 & round_mask_s0[round_i];
+				assign round_ce_s1[round_i] = round_valid_s1 & round_ready_s1 & round_mask_s1[round_i];
+				
+				out_round_cell #(
+					.USE_EXT_CE(1'b1),
+					.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
+					.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
+					.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
+					.INFO_ALONG_WIDTH(1),
+					.SIM_DELAY(SIM_DELAY)
+				)out_round_cell_u(
+					.aclk(aclk),
+					.aresetn(aresetn),
+					.aclken(1'b1),
+					
+					.calfmt(calfmt),
+					.fixed_point_quat_accrc(4'bxxxx), // 运行时参数需要给出!!!
+					
+					.s0_ce(round_ce_s0[round_i]),
+					.s1_ce(round_ce_s1[round_i]),
+					
+					.round_i_op_x(s_axis_round_data[round_i*32+31:round_i*32]),
+					.round_i_info_along(1'bx),
+					.round_i_vld(1'bx),
+					
+					.round_o_res(m_axis_round_data[round_i*16+15:round_i*16]),
+					.round_o_info_along(),
+					.round_o_vld()
+				);
+			end
+		end
+		else
+		begin
+			assign m_axis_round_data = s_axis_round_data;
+			assign m_axis_round_keep = s_axis_round_keep;
+			assign m_axis_round_last = s_axis_round_last;
+			assign m_axis_round_valid = s_axis_round_valid;
+			assign s_axis_round_ready = m_axis_round_ready;
+		end
+	endgenerate
+	
 	/** 最终结果数据收集器 **/
 	// 收集器输入(AXIS从机)
-	wire[ATOMIC_C*32-1:0] s_axis_collector_data;
-	wire[ATOMIC_C*4-1:0] s_axis_collector_keep;
+	wire[ATOMIC_C*(KEEP_FP32_OUT ? 32:16)-1:0] s_axis_collector_data;
+	wire[ATOMIC_C*(KEEP_FP32_OUT ? 4:2)-1:0] s_axis_collector_keep;
 	wire s_axis_collector_last;
 	wire s_axis_collector_valid;
 	wire s_axis_collector_ready;
@@ -1113,42 +1279,11 @@ module axi_generic_pool #(
 	wire m_axis_collector_valid;
 	wire m_axis_collector_ready;
 	
-	/**
-	使能后乘加处理   -> 后乘加处理输入
-	不使能后乘加处理 -> 最终结果数据收集器输入
-	**/
-	assign m_axis_mid_res_buf_ready = 
-		en_post_mac ? 
-			s_axis_post_mac_ready:
-			s_axis_collector_ready;
-	
-	/**
-	使能后乘加处理   -> 最终结果数据收集器输入
-	不使能后乘加处理 -> 忽略
-	**/
-	assign m_axis_post_mac_ready = 
-		(~en_post_mac) | s_axis_collector_ready;
-	
-	/**
-	使能后乘加处理   -> 经过后乘加处理的结果
-	不使能后乘加处理 -> (中间结果缓存)池化结果输出
-	**/
-	assign s_axis_collector_data = 
-		en_post_mac ? 
-			(m_axis_post_mac_data | {(ATOMIC_C*32){1'b0}}):
-			m_axis_mid_res_buf_data;
-	assign s_axis_collector_keep = 
-		en_post_mac ? 
-			(m_axis_post_mac_keep | {(ATOMIC_C*4){1'b0}}):
-			m_axis_mid_res_buf_keep;
-	assign s_axis_collector_last = 
-		en_post_mac ? 
-			m_axis_post_mac_last:
-			m_axis_mid_res_buf_last;
-	assign s_axis_collector_valid = 
-		en_post_mac ? 
-			m_axis_post_mac_valid:
-			m_axis_mid_res_buf_valid;
+	assign s_axis_collector_data = m_axis_round_data;
+	assign s_axis_collector_keep = m_axis_round_keep;
+	assign s_axis_collector_last = m_axis_round_last;
+	assign s_axis_collector_valid = m_axis_round_valid;
+	assign m_axis_round_ready = s_axis_collector_ready;
 	
 	assign m_axis_fnl_res_data = m_axis_collector_data;
 	assign m_axis_fnl_res_keep = m_axis_collector_keep;
@@ -1158,8 +1293,8 @@ module axi_generic_pool #(
 	
 	conv_final_data_collector #(
 		.IN_ITEM_WIDTH(ATOMIC_C),
-		.OUT_ITEM_WIDTH(S2MM_STREAM_DATA_WIDTH/32),
-		.DATA_WIDTH_FOREACH_ITEM(32),
+		.OUT_ITEM_WIDTH(S2MM_STREAM_DATA_WIDTH/(KEEP_FP32_OUT ? 32:16)),
+		.DATA_WIDTH_FOREACH_ITEM(KEEP_FP32_OUT ? 32:16),
 		.HAS_USER("false"),
 		.USER_WIDTH(1),
 		.EN_COLLECTOR_OUT_REG_SLICE("true"),

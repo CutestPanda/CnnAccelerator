@@ -50,7 +50,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/22
+日期: 2025/12/23
 ********************************************************************/
 
 
@@ -192,7 +192,6 @@ module axi_generic_conv #(
 	// 最终结果数据流(AXIS主机)
 	output wire[S2MM_STREAM_DATA_WIDTH-1:0] m_axis_fnl_res_data,
 	output wire[S2MM_STREAM_DATA_WIDTH/8-1:0] m_axis_fnl_res_keep,
-	output wire[4:0] m_axis_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
 	input wire m_axis_fnl_res_ready
@@ -215,7 +214,7 @@ module axi_generic_conv #(
 	// 特征图缓存的缓存行号的位宽
 	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN);
 	// 批归一化与激活处理结果fifo的位宽
-	localparam integer BN_ACT_PROC_RES_FIFO_WIDTH = BN_ACT_PRL_N*(FP32_KEEP ? 32:16)+BN_ACT_PRL_N+1+5;
+	localparam integer BN_ACT_PROC_RES_FIFO_WIDTH = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5;
 	// BN乘法器的位宽
 	localparam integer BN_MUL_OP_WIDTH = INT8_SUPPORTED ? 4*18:(INT16_SUPPORTED ? 32:25);
 	localparam integer BN_MUL_CE_WIDTH = INT8_SUPPORTED ? 4:3;
@@ -948,7 +947,6 @@ module axi_generic_conv #(
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
 		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
-		.m_axis_fnl_res_user(m_axis_fnl_res_user),
 		.m_axis_fnl_res_last(m_axis_fnl_res_last),
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),
