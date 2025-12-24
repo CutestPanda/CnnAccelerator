@@ -1,11 +1,3 @@
-#include "sd_card_fatfs.h"
-#include "axi_generic_pool.h"
-
-#include "xparameters.h"
-#include "xil_cache.h"
-
-#include <stdio.h>
-
 /**
 通用池化处理单元IP配置参数:
 	parameter integer ACCELERATOR_ID = 0; // 加速器ID(0~3)
@@ -19,6 +11,7 @@
 	parameter integer EXT_PADDING_SUPPORTED = 1; // 是否支持外填充
 	parameter integer NON_ZERO_CONST_PADDING_SUPPORTED = 0; // 是否支持非0常量填充模式
 	parameter integer EN_PERF_MON = 1; // 是否支持性能监测
+	parameter integer KEEP_FP32_OUT = 0; // 是否保持FP32输出
 	
 	parameter integer ATOMIC_C = 8; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer POST_MAC_PRL_N = 1; // 后乘加并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -33,13 +26,23 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define IN_FMAP_FILENAME "in_fmap.bin" // 输入特征图文件名
-#define OUT_FMAP_FILENAME "out_fmap.bin" // 输出特征图文件名
+#include "sd_card_fatfs.h"
+#include "axi_generic_pool.h"
 
-#define IN_FMAP_LEN 30 * 20 * 10 // 输入特征图数据总量
-#define OUT_FMAP_LEN 15 * 10 * 10 // 输出特征图数据总量
+#include "xparameters.h"
+#include "xil_cache.h"
 
-#define OUT_FMAP_ROW_N 10 * 2 // 输出特征图表面行总数
+#include <stdio.h>
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define IN_FMAP_FILENAME "in_fmap_max_0.bin" // 输入特征图文件名
+#define OUT_FMAP_FILENAME "out_fmap_max_0.bin" // 输出特征图文件名
+
+#define IN_FMAP_LEN 640 * 640 * 16 // 输入特征图数据总量
+#define OUT_FMAP_LEN 320 * 320 * 16 // 输出特征图数据总量
+
+#define OUT_FMAP_ROW_N 320 * 2 // 输出特征图表面行总数
 
 #define IN_DATA_LEN 2 // 输入特征图的数据大小
 #define OUT_DATA_LEN 4 // 输出特征图的数据大小
@@ -88,16 +91,16 @@ int main(){
 
 	fmap_cfg.ifmap_baseaddr = (uint8_t*)in_fmap;
 	fmap_cfg.ofmap_baseaddr = (uint8_t*)out_fmap;
-	fmap_cfg.ifmap_w = 30;
-	fmap_cfg.ifmap_h = 20;
-	fmap_cfg.ifmap_c = 10;
+	fmap_cfg.ifmap_w = 640;
+	fmap_cfg.ifmap_h = 640;
+	fmap_cfg.ifmap_c = 16;
 	fmap_cfg.external_padding_left = 0;
 	fmap_cfg.external_padding_right = 0;
 	fmap_cfg.external_padding_top = 0;
 	fmap_cfg.external_padding_bottom = 0;
 	fmap_cfg.ofmap_data_type = POOL_O_4_BYTE;
 
-	buffer_cfg.fmbufcoln = POOL_COLN_32;
+	buffer_cfg.fmbufcoln = POOL_COLN_1024;
 
 	cal_cfg.cal_fmt = POOL_FP16;
 	cal_cfg.horizontal_stride = 2;
@@ -135,7 +138,7 @@ int main(){
 		return -1;
 	}
 
-	// 等待通用卷积处理单元的数据输出完成
+	// 等待通用池化处理单元的数据输出完成
 	while(axi_generic_pool_get_cmd_fns_n(&axi_generic_pool, Q_CMD_FNS_N_S2MM) < OUT_FMAP_ROW_N);
 
 	// 获取性能监测计数器的值
@@ -176,4 +179,3 @@ int main(){
 
 	while(1);
 }
-

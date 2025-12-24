@@ -62,7 +62,7 @@ module axi_generic_pool #(
 	parameter integer EXT_PADDING_SUPPORTED = 1, // 是否支持外填充
 	parameter integer NON_ZERO_CONST_PADDING_SUPPORTED = 0, // 是否支持非0常量填充模式
 	parameter integer EN_PERF_MON = 1, // 是否支持性能监测
-	parameter integer KEEP_FP32_OUT = 0, // 是否保存FP32输出
+	parameter integer KEEP_FP32_OUT = 0, // 是否保持FP32输出
 	parameter integer ATOMIC_C = 8, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer POST_MAC_PRL_N = 1, // 后乘加并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 64, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)

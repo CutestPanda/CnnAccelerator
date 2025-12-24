@@ -5,6 +5,7 @@
 @date   2025/12/17
 @author 陈家耀
 @eidt   2025.12.17 1.00 创建了第1个正式版本
+        2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -405,7 +406,7 @@ int axi_generic_pool_cfg_in_pool_mode(
 
 	handler->reg_region_buffer_cfg->buf_cfg0 =
 		(((uint32_t)(buffer_cfg->fmbufcoln)) << 0) |
-		(((uint32_t)fmbuf_row_n) << 16);
+		(((uint32_t)(fmbuf_row_n - 1)) << 16);
 	handler->reg_region_buffer_cfg->buf_cfg1 =
 		(uint32_t)(mid_res_buf_row_n_bufferable - 1);
 
@@ -550,7 +551,7 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 
 	handler->reg_region_buffer_cfg->buf_cfg0 =
 		(((uint32_t)(buffer_cfg->fmbufcoln)) << 0) |
-		(((uint32_t)fmbuf_row_n) << 16);
+		(((uint32_t)(fmbuf_row_n - 1)) << 16);
 	handler->reg_region_buffer_cfg->buf_cfg1 =
 		(uint32_t)(mid_res_buf_row_n_bufferable - 1);
 
