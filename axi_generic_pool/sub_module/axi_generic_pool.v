@@ -46,7 +46,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/23
+日期: 2025/12/24
 ********************************************************************/
 
 
@@ -195,6 +195,7 @@ module axi_generic_pool #(
 	// [上采样参数]
 	wire[7:0] upsample_horizontal_n; // 上采样水平复制量 - 1
 	wire[7:0] upsample_vertical_n; // 上采样垂直复制量 - 1
+	// [非0常量填充]
 	wire non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	wire[15:0] const_to_fill; // 待填充的常量
 	// [特征图参数]
@@ -238,7 +239,7 @@ module axi_generic_pool #(
 		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
 		.EXT_PADDING_SUPPORTED(EXT_PADDING_SUPPORTED ? 1'b1:1'b0),
 		.NON_ZERO_CONST_PADDING_SUPPORTED(
-			(UP_SAMPLE_SUPPORTED && EXT_PADDING_SUPPORTED && NON_ZERO_CONST_PADDING_SUPPORTED) ? 
+			(EXT_PADDING_SUPPORTED && NON_ZERO_CONST_PADDING_SUPPORTED) ? 
 				1'b1:
 				1'b0
 		),

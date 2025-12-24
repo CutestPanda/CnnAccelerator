@@ -42,7 +42,7 @@ SOFTWARE.
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/12
+日期: 2025/12/24
 ********************************************************************/
 
 
@@ -70,6 +70,7 @@ module pool_sfc_row_adapter #(
 	// [上采样参数]
 	input wire[7:0] upsample_horizontal_n, // 上采样水平复制量 - 1
 	input wire[7:0] upsample_vertical_n, // 上采样垂直复制量 - 1
+	// [非0常量填充]
 	input wire non_zero_const_padding_mode, // 是否处于非0常量填充模式
 	input wire[15:0] const_to_fill, // 待填充的常量
 	
@@ -423,7 +424,7 @@ module pool_sfc_row_adapter #(
 	
 	assign m_adapter_fm_axis_data = 
 		(
-			(pool_mode == POOL_MODE_UPSP) & non_zero_const_padding_mode & 
+			non_zero_const_padding_mode & 
 			(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt)
 		) ? 
 			{ATOMIC_C{const_to_fill}}: // 填充非0常量
@@ -464,7 +465,7 @@ module pool_sfc_row_adapter #(
 		(pool_mode == POOL_MODE_UPSP);
 	// 本表面全0(标志)
 	assign m_adapter_fm_axis_user[2] = 
-		(~((pool_mode == POOL_MODE_UPSP) & non_zero_const_padding_mode)) & // 上采样模式下填充非0常量, 则本表面非0
+		(~non_zero_const_padding_mode) & // 处于非0常量填充模式
 		(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt); // 属于填充点
 	assign m_adapter_fm_axis_last = 
 		((pool_mode != POOL_MODE_UPSP) | post_buf_is_last_ups_hrzt_rpc) & // 上采样模式下需要作水平复制

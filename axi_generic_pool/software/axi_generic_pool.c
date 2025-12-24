@@ -7,6 +7,7 @@
 @eidt   2025.12.17 1.00 创建了第1个正式版本
         2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
         2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
+        2025.12.22 1.10 为最大池化增加非0常量填充模式
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -355,6 +356,16 @@ int axi_generic_pool_cfg_in_pool_mode(
 		return -2;
 	}
 
+	if(
+		cal_cfg->non_zero_const_padding_mode &&
+		(
+			(!handler->property.non_zero_const_padding_supported) ||
+			(mode == PROC_MODE_AVG)
+		)
+	){
+		return -2;
+	}
+
 	handler->reg_region_cal_cfg->cal_cfg0 =
 		(((uint32_t)mode) << 0) |
 		(((uint32_t)cal_cfg->cal_fmt) << 4) |
@@ -363,7 +374,9 @@ int axi_generic_pool_cfg_in_pool_mode(
 	handler->reg_region_cal_cfg->cal_cfg1 =
 		(((uint32_t)(cal_cfg->pool_window_w - 1)) << 0) |
 		(((uint32_t)(cal_cfg->pool_window_h - 1)) << 8);
-	handler->reg_region_cal_cfg->cal_cfg2 = 0x00000000;
+	handler->reg_region_cal_cfg->cal_cfg2 =
+		(((uint32_t)cal_cfg->non_zero_const_padding_mode) << 0) |
+		(((uint32_t)cal_cfg->const_to_fill) << 16);
 
 	if(cal_cfg->use_post_mac){
 		uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;

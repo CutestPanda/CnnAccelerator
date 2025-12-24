@@ -108,6 +108,7 @@ int main(){
 	cal_cfg.vertical_stride = 2;
 	cal_cfg.pool_window_w = 2;
 	cal_cfg.pool_window_h = 2;
+	cal_cfg.non_zero_const_padding_mode = 0;
 	cal_cfg.use_post_mac = 0;
 
 	if(axi_generic_pool_cfg_in_pool_mode(
