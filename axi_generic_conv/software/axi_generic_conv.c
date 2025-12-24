@@ -637,14 +637,20 @@ int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsN
 @brief  获取性能监测计数器的值
 @param  handler 通用卷积处理单元(加速器句柄)
         pm_sts 性能监测状态(句柄)
-@return 性能监测计数器的值
+@return 是否成功
 *************************/
-void axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts){
+int axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts){
+	if(!handler->property.performance_monitor_supported){
+		return -1;
+	}
+
 	pm_sts->cycle_n = handler->reg_region_sts->sts4;
 	pm_sts->mm2s_chn0_tsf_n = handler->reg_region_sts->sts5;
 	pm_sts->mm2s_chn1_tsf_n = handler->reg_region_sts->sts6;
 	pm_sts->s2mm_tsf_n = handler->reg_region_sts->sts7;
 	pm_sts->ftm_sfc_cal_n = handler->reg_region_sts->sts8;
+
+	return 0;
 }
 
 /*************************

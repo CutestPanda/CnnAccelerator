@@ -174,7 +174,10 @@ module axi_generic_pool #(
 	/** 寄存器配置接口 **/
 	// 控制信号
 	wire en_adapter; // 使能适配器
+	wire en_upd_grp_run_cnt; // 使能更新单元组运行周期数计数器
 	wire en_post_mac; // 使能后乘加处理
+	// 状态信息
+	wire[31:0] upd_grp_run_n; // 更新单元组运行周期数
 	// 运行时参数
 	// [计算参数]
 	wire[1:0] pool_mode; // 池化模式
@@ -272,7 +275,18 @@ module axi_generic_pool #(
 		.s_axi_lite_wready(s_axi_lite_wready),
 		
 		.en_adapter(en_adapter),
+		.en_upd_grp_run_cnt(en_upd_grp_run_cnt),
 		.en_post_mac(en_post_mac),
+		
+		.upd_grp_run_n(upd_grp_run_n),
+		
+		.s_mm2s_strm_axis_keep(s_dma_strm_axis_keep),
+		.s_mm2s_strm_axis_valid(s_dma_strm_axis_valid),
+		.s_mm2s_strm_axis_ready(s_dma_strm_axis_ready),
+		
+		.s_s2mm_strm_axis_keep(m_axis_fnl_res_keep),
+		.s_s2mm_strm_axis_valid(m_axis_fnl_res_valid),
+		.s_s2mm_strm_axis_ready(m_axis_fnl_res_ready),
 		
 		.mm2s_cmd_done(mm2s_cmd_done),
 		.s2mm_cmd_done(s2mm_cmd_done),
@@ -882,60 +896,32 @@ module axi_generic_pool #(
 	wire pool_upd_o_last_res; // 本行最后1个中间结果(标志)
 	wire pool_upd_o_to_upd_mem; // 更新缓存MEM(标志)
 	wire[ATOMIC_C-1:0] pool_upd_o_valid; // 输出有效指示
+	// [性能监测]
+	reg[31:0] upd_grp_run_cnt; // 更新单元组运行周期数(计数器)
 	
-	assign {pool_upd_o_to_upd_mem, pool_upd_o_last_grp, pool_upd_o_last_res, pool_upd_o_mask} = 
-		pool_upd_o_info_along[0];
-	
-	genvar mid_res_i;
-	generate
-		for(mid_res_i = 0;mid_res_i < ATOMIC_C;mid_res_i = mid_res_i + 1)
-		begin:mid_res_blk
-			assign s_axis_mid_res_buf_data[(mid_res_i+1)*48-1:mid_res_i*48] = 
-				{32'd0, m_adapter_fm_axis_data[(mid_res_i+1)*16-1:mid_res_i*16]};
-			
-			assign s_axis_mid_res_buf_keep[(mid_res_i+1)*6-1:mid_res_i*6] = 
-				{6{m_adapter_fm_axis_keep[mid_res_i*2]}};
-			
-			assign pool_upd_i_info_along[mid_res_i] = 
-				(mid_res_i == 0) ? 
-					{
-						((pool_mode == POOL_MODE_UPSP) | pool_upd_i_first_item) | 
-						((pool_mode == POOL_MODE_MAX) | (~pool_upd_i_is_zero_sfc)),
-						pool_upd_i_last_grp,
-						pool_upd_i_last_res,
-						pool_upd_i_mask
-					}:
-					{(3+ATOMIC_C){1'bx}};
-			
-			pool_middle_res_upd #(
-				.INFO_ALONG_WIDTH(ATOMIC_C+3),
-				.SIM_DELAY(SIM_DELAY)
-			)pool_middle_res_upd_u(
-				.aclk(aclk),
-				.aresetn(aresetn),
-				.aclken(1'b1),
-				
-				.pool_mode(pool_mode),
-				.calfmt(calfmt),
-				
-				.pool_upd_in_data(pool_upd_i_new_res[mid_res_i*48+15:mid_res_i*48]),
-				.pool_upd_in_org_mid_res(pool_upd_i_org_mid_res[mid_res_i*32+31:mid_res_i*32]),
-				.pool_upd_in_is_first_item(pool_upd_i_first_item),
-				.pool_upd_in_is_zero_sfc(pool_upd_i_is_zero_sfc),
-				.pool_upd_in_info_along(pool_upd_i_info_along[mid_res_i]),
-				.pool_upd_in_valid(pool_upd_i_valid[mid_res_i]),
-				
-				.pool_upd_out_data(pool_upd_o_data[mid_res_i*32+31:mid_res_i*32]),
-				.pool_upd_out_info_along(pool_upd_o_info_along[mid_res_i]),
-				.pool_upd_out_valid(pool_upd_o_valid[mid_res_i])
-			);
-		end
-	endgenerate
+	assign upd_grp_run_n = upd_grp_run_cnt;
 	
 	assign s_axis_mid_res_buf_user = {m_adapter_fm_axis_user[2], 1'b1, m_adapter_fm_axis_user[1:0]};
 	assign s_axis_mid_res_buf_last = m_adapter_fm_axis_last;
 	assign s_axis_mid_res_buf_valid = m_adapter_fm_axis_valid;
 	assign m_adapter_fm_axis_ready = s_axis_mid_res_buf_ready;
+	
+	assign {pool_upd_o_to_upd_mem, pool_upd_o_last_grp, pool_upd_o_last_res, pool_upd_o_mask} = 
+		pool_upd_o_info_along[0];
+	
+	// 更新单元组运行周期数(计数器)
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			upd_grp_run_cnt <= 32'd0;
+		else if(
+			(~en_upd_grp_run_cnt) | pool_upd_o_valid[0]
+		)
+			upd_grp_run_cnt <= # SIM_DELAY 
+				en_upd_grp_run_cnt ? 
+					(upd_grp_run_cnt + 1'b1):
+					32'd0;
+	end
 	
 	conv_middle_res_acmlt_buf #(
 		.ATOMIC_K(ATOMIC_C),
@@ -994,6 +980,52 @@ module axi_generic_pool #(
 		.acmlt_out_to_upd_mem(pool_upd_o_to_upd_mem),
 		.acmlt_out_valid(pool_upd_o_valid[0])
 	);
+	
+	genvar mid_res_i;
+	generate
+		for(mid_res_i = 0;mid_res_i < ATOMIC_C;mid_res_i = mid_res_i + 1)
+		begin:mid_res_blk
+			assign s_axis_mid_res_buf_data[(mid_res_i+1)*48-1:mid_res_i*48] = 
+				{32'd0, m_adapter_fm_axis_data[(mid_res_i+1)*16-1:mid_res_i*16]};
+			
+			assign s_axis_mid_res_buf_keep[(mid_res_i+1)*6-1:mid_res_i*6] = 
+				{6{m_adapter_fm_axis_keep[mid_res_i*2]}};
+			
+			assign pool_upd_i_info_along[mid_res_i] = 
+				(mid_res_i == 0) ? 
+					{
+						((pool_mode == POOL_MODE_UPSP) | pool_upd_i_first_item) | 
+						((pool_mode == POOL_MODE_MAX) | (~pool_upd_i_is_zero_sfc)),
+						pool_upd_i_last_grp,
+						pool_upd_i_last_res,
+						pool_upd_i_mask
+					}:
+					{(3+ATOMIC_C){1'bx}};
+			
+			pool_middle_res_upd #(
+				.INFO_ALONG_WIDTH(ATOMIC_C+3),
+				.SIM_DELAY(SIM_DELAY)
+			)pool_middle_res_upd_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				
+				.pool_mode(pool_mode),
+				.calfmt(calfmt),
+				
+				.pool_upd_in_data(pool_upd_i_new_res[mid_res_i*48+15:mid_res_i*48]),
+				.pool_upd_in_org_mid_res(pool_upd_i_org_mid_res[mid_res_i*32+31:mid_res_i*32]),
+				.pool_upd_in_is_first_item(pool_upd_i_first_item),
+				.pool_upd_in_is_zero_sfc(pool_upd_i_is_zero_sfc),
+				.pool_upd_in_info_along(pool_upd_i_info_along[mid_res_i]),
+				.pool_upd_in_valid(pool_upd_i_valid[mid_res_i]),
+				
+				.pool_upd_out_data(pool_upd_o_data[mid_res_i*32+31:mid_res_i*32]),
+				.pool_upd_out_info_along(pool_upd_o_info_along[mid_res_i]),
+				.pool_upd_out_valid(pool_upd_o_valid[mid_res_i])
+			);
+		end
+	endgenerate
 	
 	/** 后乘加处理 **/
 	// 池化最终结果(AXIS从机)

@@ -6,6 +6,7 @@
 @author 陈家耀
 @eidt   2025.12.17 1.00 创建了第1个正式版本
         2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
+        2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -602,10 +603,20 @@ int axi_generic_pool_clr_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCmdFnsN
 @public
 @brief  获取性能监测计数器的值
 @param  handler 通用池化处理单元(加速器句柄)
-@return 性能监测计数器的值
+        pm_sts 性能监测状态(句柄)
+@return 是否成功
 *************************/
-uint32_t axi_generic_pool_get_pm_cnt(AxiGnrPoolHandler* handler){
-	return handler->reg_region_sts->sts3;
+int axi_generic_pool_get_pm_cnt(AxiGnrPoolHandler* handler, AxiGnrPoolPerfMonsts* pm_sts){
+	if(!handler->property.performance_monitor_supported){
+		return -1;
+	}
+
+	pm_sts->cycle_n = handler->reg_region_sts->sts3;
+	pm_sts->mm2s_tsf_n = handler->reg_region_sts->sts4;
+	pm_sts->s2mm_tsf_n = handler->reg_region_sts->sts5;
+	pm_sts->upd_grp_run_n = handler->reg_region_sts->sts6;
+
+	return 0;
 }
 
 /*************************
@@ -621,6 +632,8 @@ int axi_generic_pool_clr_pm_cnt(AxiGnrPoolHandler* handler){
 	}
 
 	handler->reg_region_sts->sts3 = 0;
+	handler->reg_region_sts->sts4 = 0;
+	handler->reg_region_sts->sts5 = 0;
 
 	return 0;
 }

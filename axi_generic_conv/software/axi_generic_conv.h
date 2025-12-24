@@ -314,5 +314,5 @@ void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_pa
 
 uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNQueryType query_type); // 查询DMA命令完成数
 int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNClrType clr_type); // 清除DMA命令完成数计数器
-void axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts); // 获取性能监测计数器的值
+int axi_generic_conv_get_pm_cnt(AxiGnrConvHandler* handler, AxiGnrConvPerfMonsts* pm_sts); // 获取性能监测计数器的值
 int axi_generic_conv_clr_pm_cnt(AxiGnrConvHandler* handler); // 清除性能监测计数器

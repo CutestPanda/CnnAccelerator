@@ -71,6 +71,13 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	| sts3     | 0x6C/27 |31~0: 性能监测计数器           |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	| sts4     | 0x70/28 |31~0: MM2S通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	| sts5     | 0x74/29 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	| sts6     | 0x78/30 |31~0: 更新单元组运行周期数     |      RO      | 仅当支持性能监测时, 该字段可用   |
+	|          |         |                               |              | 除能计算子系统时, 该字段清零     |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
 	| cal_cfg0 | 0x80/32 |3~0: 处理模式                  |      RW      | 仅当写入支持的处理模式时生效     |
@@ -192,7 +199,21 @@ module reg_if_for_generic_pool #(
 	
 	// 控制信号
 	output wire en_adapter, // 使能适配器
+	output wire en_upd_grp_run_cnt, // 使能更新单元组运行周期数计数器
 	output wire en_post_mac, // 使能后乘加处理
+	
+	// 状态信息
+	input wire[31:0] upd_grp_run_n, // 更新单元组运行周期数
+	
+	// 传输字节数监测
+	// [MM2S通道]
+	input wire[MM2S_STREAM_DATA_WIDTH/8-1:0] s_mm2s_strm_axis_keep,
+	input wire s_mm2s_strm_axis_valid,
+	input wire s_mm2s_strm_axis_ready,
+	// [S2MM通道]
+	input wire[S2MM_STREAM_DATA_WIDTH/8-1:0] s_s2mm_strm_axis_keep,
+	input wire s_s2mm_strm_axis_valid,
+	input wire s_s2mm_strm_axis_ready,
 	
 	// DMA命令完成指示
 	input wire mm2s_cmd_done, // MM2S通道命令完成(指示)
@@ -259,6 +280,20 @@ module reg_if_for_generic_pool #(
 			for(clogb2 = -1;bit_depth > 0;clogb2 = clogb2 + 1)
 				bit_depth = bit_depth >> 1;
 		end
+    end
+    endfunction
+	
+	// 计算u32中"1"的个数
+    function [5:0] count1_of_u32(input[31:0] data);
+        integer i;
+    begin
+        count1_of_u32 = 6'd0;
+        
+        for(i = 0;i < 32;i = i + 1)
+        begin
+            if(data[i])
+                count1_of_u32 = count1_of_u32 + 6'd1;
+        end
     end
     endfunction
 	
@@ -447,6 +482,7 @@ module reg_if_for_generic_pool #(
 	reg en_pm_cnt_r; // 使能性能监测计数器
 	
 	assign en_adapter = en_cal_sub_sys_r;
+	assign en_upd_grp_run_cnt = en_cal_sub_sys_r & EN_PERF_MON;
 	assign en_post_mac = en_cal_sub_sys_r & to_use_post_mac_r;
 	
 	assign sfc_row_access_blk_start = sfc_row_access_blk_start_r;
@@ -477,7 +513,7 @@ module reg_if_for_generic_pool #(
 	end
 	
 	/**
-	寄存器(sts0, sts1, sts2, sts3)
+	寄存器(sts0, sts1, sts2, sts3, sts4, sts5, sts6)
 	
 	--------------------------------------------------------------------------------------------------------
 	| sts0     | 0x60/24 |0: 表面行访问请求生成单元空闲  |      RO      |                                  |
@@ -489,15 +525,26 @@ module reg_if_for_generic_pool #(
 	--------------------------------------------------------------------------------------------------------
 	| sts3     | 0x6C/27 |31~0: 性能监测计数器           |      WC      | 仅当支持性能监测时, 该字段可用   |
 	--------------------------------------------------------------------------------------------------------
+	| sts4     | 0x70/28 |31~0: MM2S通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	| sts5     | 0x74/29 |31~0: S2MM通道传输字节数       |      WC      | 仅当支持性能监测时, 该字段可用   |
+	--------------------------------------------------------------------------------------------------------
+	| sts6     | 0x78/30 |31~0: 更新单元组运行周期数     |      RO      | 仅当支持性能监测时, 该字段可用   |
+	|          |         |                               |              | 除能计算子系统时, 该字段清零     |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire sfc_row_access_blk_idle_r; // 表面行访问请求生成单元空闲
 	wire fnl_res_tr_req_gen_blk_idle_r; // 最终结果传输请求生成单元空闲
 	reg[31:0] dma_mm2s_fns_cmd_n_r; // MM2S通道完成的命令数
 	reg[31:0] dma_s2mm_fns_cmd_n_r; // S2MM通道完成的命令数
 	reg[31:0] pm_cnt_r; // 性能监测计数器
+	reg[31:0] mm2s_tsf_n_r; // MM2S通道传输字节数
+	reg[31:0] s2mm_tsf_n_r; // S2MM通道传输字节数
+	wire[31:0] upd_grp_run_n_r; // 更新单元组运行周期数
 	
 	assign sfc_row_access_blk_idle_r = sfc_row_access_blk_idle;
 	assign fnl_res_tr_req_gen_blk_idle_r = fnl_res_tr_req_gen_blk_idle;
+	assign upd_grp_run_n_r = upd_grp_run_n;
 	
 	// MM2S通道完成的命令数
 	always @(posedge aclk or negedge aresetn)
@@ -545,6 +592,42 @@ module reg_if_for_generic_pool #(
 				(regs_en & regs_wen & (regs_addr == 27)) ? 
 					32'd0:
 					(pm_cnt_r + 1'b1);
+	end
+	
+	// MM2S通道传输字节数
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mm2s_tsf_n_r <= 32'd0;
+		else if(
+			EN_PERF_MON & 
+			(
+				(s_mm2s_strm_axis_valid & s_mm2s_strm_axis_ready) | 
+				(regs_en & regs_wen & (regs_addr == 28))
+			)
+		)
+			mm2s_tsf_n_r <= # SIM_DELAY 
+				(regs_en & regs_wen & (regs_addr == 28)) ? 
+					32'd0:
+					(mm2s_tsf_n_r + count1_of_u32(s_mm2s_strm_axis_keep | 32'd0));
+	end
+	
+	// S2MM通道传输字节数
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			s2mm_tsf_n_r <= 32'd0;
+		else if(
+			EN_PERF_MON & 
+			(
+				(s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
+				(regs_en & regs_wen & (regs_addr == 29))
+			)
+		)
+			s2mm_tsf_n_r <= # SIM_DELAY 
+				(regs_en & regs_wen & (regs_addr == 29)) ? 
+					32'd0:
+					(s2mm_tsf_n_r + count1_of_u32(s_s2mm_strm_axis_keep | 32'd0));
 	end
 	
 	/**
@@ -990,6 +1073,9 @@ module reg_if_for_generic_pool #(
 				25: regs_dout <= # SIM_DELAY {dma_mm2s_fns_cmd_n_r[31:0]};
 				26: regs_dout <= # SIM_DELAY {dma_s2mm_fns_cmd_n_r[31:0]};
 				27: regs_dout <= # SIM_DELAY {pm_cnt_r[31:0]};
+				28: regs_dout <= # SIM_DELAY {mm2s_tsf_n_r[31:0]};
+				29: regs_dout <= # SIM_DELAY {s2mm_tsf_n_r[31:0]};
+				30: regs_dout <= # SIM_DELAY {upd_grp_run_n_r[31:0]};
 				
 				32: regs_dout <= # SIM_DELAY 
 					{8'd0, pool_vertical_stride_r[7:0], pool_horizontal_stride_r[7:0], calfmt_r[3:0], proc_mode_r[3:0]};

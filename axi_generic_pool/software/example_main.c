@@ -55,6 +55,7 @@ static FATFS fatfs; // FAT32文件系统
 static FIL file_handler; // 文件描述符
 
 static AxiGnrPoolHandler axi_generic_pool; // 通用池化处理单元
+static AxiGnrPoolPerfMonsts pm_sts; // 性能监测状态
 
 static uint16_t in_fmap[IN_FMAP_LEN]; // 输入特征图(数组)
 static float out_fmap[OUT_FMAP_LEN]; // 输出特征图(数组)
@@ -142,8 +143,10 @@ int main(){
 	while(axi_generic_pool_get_cmd_fns_n(&axi_generic_pool, Q_CMD_FNS_N_S2MM) < OUT_FMAP_ROW_N);
 
 	// 获取性能监测计数器的值
-	int pm_cnt = (int)axi_generic_pool_get_pm_cnt(&axi_generic_pool);
-	printf("pm_cnt = %d\r\n", pm_cnt);
+	if(axi_generic_pool_get_pm_cnt(&axi_generic_pool, &pm_sts)){
+		return -1;
+	}
+	printf("pm_cnt = %d\r\n", (int)pm_sts.cycle_n);
 
 	// 除能计算子系统
 	axi_generic_pool_disable_cal_sub_sys(&axi_generic_pool);

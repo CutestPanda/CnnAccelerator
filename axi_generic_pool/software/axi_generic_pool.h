@@ -6,6 +6,7 @@
 @author 陈家耀
 @eidt   2025.12.17 1.00 创建了第1个正式版本
         2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
+        2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -116,6 +117,9 @@ typedef struct{
 	uint32_t sts1;
 	uint32_t sts2;
 	uint32_t sts3;
+	uint32_t sts4;
+	uint32_t sts5;
+	uint32_t sts6;
 }AxiGnrPoolRegRgnSts;
 
 // 结构体: 寄存器域(计算配置)
@@ -202,6 +206,14 @@ typedef struct{
 	uint32_t post_mac_param_b; // 后乘加处理的参数B
 }AxiGnrPoolUpsModeCfg;
 
+// 结构体: 性能监测状态
+typedef struct{
+	uint32_t cycle_n; // 运行周期数
+	uint32_t mm2s_tsf_n; // MM2S通道传输字节数
+	uint32_t s2mm_tsf_n; // S2MM通道传输字节数
+	uint32_t upd_grp_run_n; // 更新单元组运行周期数
+}AxiGnrPoolPerfMonsts;
+
 // 结构体: 通用池化处理单元
 typedef struct{
 	uint32_t* reg_base_ptr; // 寄存器区基地址
@@ -243,5 +255,5 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 
 uint32_t axi_generic_pool_get_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCmdFnsNQueryType query_type); // 查询DMA命令完成数
 int axi_generic_pool_clr_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCmdFnsNClrType clr_type); // 清除DMA命令完成数计数器
-uint32_t axi_generic_pool_get_pm_cnt(AxiGnrPoolHandler* handler); // 获取性能监测计数器的值
+int axi_generic_pool_get_pm_cnt(AxiGnrPoolHandler* handler, AxiGnrPoolPerfMonsts* pm_sts); // 获取性能监测计数器的值
 int axi_generic_pool_clr_pm_cnt(AxiGnrPoolHandler* handler); // 清除性能监测计数器
