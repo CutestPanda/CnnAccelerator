@@ -53,7 +53,7 @@ BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/23
+日期: 2025/12/25
 ********************************************************************/
 
 
@@ -64,6 +64,10 @@ module conv_cal_sub_system #(
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer STREAM_DATA_WIDTH = 32, // 最终结果数据流的位宽(32 | 64 | 128 | 256)
 	parameter FP32_KEEP = 1'b1, // 是否保持FP32输出
+	parameter USE_EXT_MID_RES_BUF = "false", // 是否使用外部的中间结果缓存
+	parameter USE_EXT_BN_ACT_UNIT = "false", // 是否使用外部的BN与激活单元
+	parameter USE_EXT_FNL_RES_COLLECTOR = "false", // 是否使用外部的最终结果数据收集器
+	parameter USE_EXT_ROUND_GRP = "false", // 是否使用外部的输出数据舍入单元组
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter EN_SMALL_FP16 = "true", // 乘加阵列是否处理极小FP16
@@ -151,6 +155,62 @@ module conv_cal_sub_system #(
 	output wire m_axis_fnl_res_last, // 本行最后1个最终结果(标志)
 	output wire m_axis_fnl_res_valid,
 	input wire m_axis_fnl_res_ready,
+	
+	// 外部的中间结果缓存
+	// [中间结果(AXIS主机)]
+	output wire[ATOMIC_K*48-1:0] m_axis_ext_mid_res_data,
+	output wire[ATOMIC_K*6-1:0] m_axis_ext_mid_res_keep,
+	output wire[2:0] m_axis_ext_mid_res_user, // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	output wire m_axis_ext_mid_res_last, // 本行最后1个中间结果(标志)
+	output wire m_axis_ext_mid_res_valid,
+	input wire m_axis_ext_mid_res_ready,
+	// [最终结果(AXIS从机)]
+	input wire[ATOMIC_K*32-1:0] s_axis_ext_fnl_res_data, // ATOMIC_K个最终结果(单精度浮点数或定点数)
+	input wire[ATOMIC_K*4-1:0] s_axis_ext_fnl_res_keep,
+	input wire[4:0] s_axis_ext_fnl_res_user, // {是否最后1个子行(1bit), 子行号(4bit)}
+	input wire s_axis_ext_fnl_res_last, // 本行最后1个最终结果(标志)
+	input wire s_axis_ext_fnl_res_valid,
+	output wire s_axis_ext_fnl_res_ready,
+	
+	// 外部的BN与激活单元
+	// [卷积最终结果(AXIS主机)]
+	output wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data, // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
+	output wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep,
+	output wire[4:0] m_axis_ext_bn_act_i_user, // {是否最后1个子行(1bit), 子行号(4bit)}
+	output wire m_axis_ext_bn_act_i_last, // 本行最后1个最终结果(标志)
+	output wire m_axis_ext_bn_act_i_valid,
+	input wire m_axis_ext_bn_act_i_ready,
+	// [经过BN与激活处理的结果(AXIS从机)]
+	input wire[BN_ACT_PRL_N*32-1:0] s_axis_ext_bn_act_o_data, // 对于BN_ACT_PRL_N个最终结果 -> {浮点数或定点数}
+	input wire[BN_ACT_PRL_N*4-1:0] s_axis_ext_bn_act_o_keep,
+	input wire[4:0] s_axis_ext_bn_act_o_user, // {是否最后1个子行(1bit), 子行号(4bit)}
+	input wire s_axis_ext_bn_act_o_last, // 本行最后1个处理结果(标志)
+	input wire s_axis_ext_bn_act_o_valid,
+	output wire s_axis_ext_bn_act_o_ready,
+	
+	// 外部的输出数据舍入单元组
+	// [待舍入数据(AXIS主机)]
+	output wire[ATOMIC_K*32-1:0] m_axis_ext_round_i_data, // ATOMIC_K个定点数或FP32
+	output wire[ATOMIC_K*4-1:0] m_axis_ext_round_i_keep,
+	output wire[4:0] m_axis_ext_round_i_user,
+	output wire m_axis_ext_round_i_last,
+	output wire m_axis_ext_round_i_valid,
+	input wire m_axis_ext_round_i_ready,
+	// [舍入后数据(AXIS从机)]
+	input wire[ATOMIC_K*16-1:0] s_axis_ext_round_o_data, // ATOMIC_K个定点数或浮点数
+	input wire[ATOMIC_K*2-1:0] s_axis_ext_round_o_keep,
+	input wire[4:0] s_axis_ext_round_o_user,
+	input wire s_axis_ext_round_o_last,
+	input wire s_axis_ext_round_o_valid,
+	output wire s_axis_ext_round_o_ready,
+	
+	// 外部的最终结果数据收集器
+	// [待收集的数据流(AXIS主机)]
+	output wire[ATOMIC_K*(FP32_KEEP ? 32:16)-1:0] m_axis_ext_collector_data,
+	output wire[ATOMIC_K*(FP32_KEEP ? 4:2)-1:0] m_axis_ext_collector_keep,
+	output wire m_axis_ext_collector_last,
+	output wire m_axis_ext_collector_valid,
+	input wire m_axis_ext_collector_ready,
 	
 	// 外部有符号乘法器#0
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul0_op_a, // 操作数A
@@ -513,88 +573,154 @@ module conv_cal_sub_system #(
 					{acmlt_in_last_res, acmlt_in_last_grp, acmlt_in_mask}:
 					{(ATOMIC_K+2){1'bx}};
 			
-			conv_middle_res_accumulate #(
-				.EN_SMALL_FP32(EN_SMALL_FP32),
-				.INFO_ALONG_WIDTH(ATOMIC_K+2),
+			if(USE_EXT_MID_RES_BUF == "false")
+			begin
+				conv_middle_res_accumulate #(
+					.EN_SMALL_FP32(EN_SMALL_FP32),
+					.INFO_ALONG_WIDTH(ATOMIC_K+2),
+					.SIM_DELAY(SIM_DELAY)
+				)conv_middle_res_accumulate_u(
+					.aclk(aclk),
+					.aresetn(aresetn),
+					.aclken(aclken),
+					
+					.calfmt(calfmt),
+					
+					.acmlt_in_exp(acmlt_in_new_res[acmlt_i*48+47:acmlt_i*48+40]),
+					.acmlt_in_frac(acmlt_in_new_res[acmlt_i*48+39:acmlt_i*48+0]),
+					.acmlt_in_org_mid_res(acmlt_in_org_mid_res[acmlt_i*32+31:acmlt_i*32+0]),
+					.acmlt_in_first_item(acmlt_in_first_item),
+					.acmlt_in_info_along(acmlt_in_info_along[acmlt_i]),
+					.acmlt_in_valid(acmlt_in_valid[acmlt_i]),
+					
+					.acmlt_out_data(acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0]),
+					.acmlt_out_info_along(acmlt_out_info_along[acmlt_i]),
+					.acmlt_out_valid(acmlt_out_valid[acmlt_i])
+				);
+			end
+			else
+			begin
+				assign acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0] = 32'dx;
+				assign acmlt_out_info_along[acmlt_i] = {(ATOMIC_K+2){1'bx}};
+				assign acmlt_out_valid[acmlt_i] = 1'b0;
+			end
+		end
+	endgenerate
+	
+	generate
+		if(USE_EXT_MID_RES_BUF == "false")
+		begin
+			/**
+			不使用外部的中间结果缓存
+			
+			无效 -> 外部的中间结果缓存的中间结果(AXIS主机)
+			外部的中间结果缓存的最终结果(AXIS从机) -> 忽略
+			**/
+			assign m_axis_ext_mid_res_data = {(ATOMIC_K*48){1'bx}};
+			assign m_axis_ext_mid_res_keep = {(ATOMIC_K*6){1'bx}};
+			assign m_axis_ext_mid_res_user = 3'bxxx;
+			assign m_axis_ext_mid_res_last = 1'bx;
+			assign m_axis_ext_mid_res_valid = 1'b0;
+			
+			assign s_axis_ext_fnl_res_ready = 1'b1;
+			
+			conv_middle_res_acmlt_buf #(
+				.ATOMIC_K(ATOMIC_K),
+				.RBUF_BANK_N(RBUF_BANK_N),
+				.RBUF_DEPTH(RBUF_DEPTH),
+				.INFO_ALONG_WIDTH(1),
 				.SIM_DELAY(SIM_DELAY)
-			)conv_middle_res_accumulate_u(
+			)conv_middle_res_acmlt_buf_u(
 				.aclk(aclk),
 				.aresetn(aresetn),
 				.aclken(aclken),
 				
 				.calfmt(calfmt),
+				.row_n_bufferable(mid_res_buf_row_n_bufferable),
+				.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
+				.max_upd_latency(2 + 7),
+				.en_cal_round_ext(1'b1),
+				.ofmap_w(16'dx),
 				
-				.acmlt_in_exp(acmlt_in_new_res[acmlt_i*48+47:acmlt_i*48+40]),
-				.acmlt_in_frac(acmlt_in_new_res[acmlt_i*48+39:acmlt_i*48+0]),
-				.acmlt_in_org_mid_res(acmlt_in_org_mid_res[acmlt_i*32+31:acmlt_i*32+0]),
+				.s_axis_mid_res_data(s_axis_mid_res_buf_data),
+				.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
+				.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
+				.s_axis_mid_res_last(s_axis_mid_res_buf_last),
+				.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
+				.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
+				
+				.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
+				.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
+				.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
+				.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
+				.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
+				.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
+				
+				.mem_clk_a(mid_res_mem_clk_a),
+				.mem_wen_a(mid_res_mem_wen_a),
+				.mem_addr_a(mid_res_mem_addr_a),
+				.mem_din_a(mid_res_mem_din_a),
+				.mem_clk_b(mid_res_mem_clk_b),
+				.mem_ren_b(mid_res_mem_ren_b),
+				.mem_addr_b(mid_res_mem_addr_b),
+				.mem_dout_b(mid_res_mem_dout_b),
+				
+				.acmlt_in_new_res(acmlt_in_new_res),
+				.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+				.acmlt_in_mask(acmlt_in_mask),
 				.acmlt_in_first_item(acmlt_in_first_item),
-				.acmlt_in_info_along(acmlt_in_info_along[acmlt_i]),
-				.acmlt_in_valid(acmlt_in_valid[acmlt_i]),
+				.acmlt_in_last_grp(acmlt_in_last_grp),
+				.acmlt_in_last_res(acmlt_in_last_res),
+				.acmlt_in_info_along(),
+				.acmlt_in_valid(acmlt_in_valid),
 				
-				.acmlt_out_data(acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0]),
-				.acmlt_out_info_along(acmlt_out_info_along[acmlt_i]),
-				.acmlt_out_valid(acmlt_out_valid[acmlt_i])
+				.acmlt_out_data(acmlt_out_data),
+				.acmlt_out_mask(acmlt_out_mask),
+				.acmlt_out_last_grp(acmlt_out_last_grp),
+				.acmlt_out_last_res(acmlt_out_last_res),
+				.acmlt_out_to_upd_mem(1'b1),
+				.acmlt_out_valid(acmlt_out_valid)
 			);
 		end
+		else
+		begin
+			/**
+			使用外部的中间结果缓存
+			
+			内部的中间结果缓存的中间结果(名义AXIS主机) -> 外部的中间结果缓存的中间结果(AXIS主机)
+			外部的中间结果缓存的最终结果(AXIS从机) -> 内部的中间结果缓存的最终结果(AXIS主机)
+			**/
+			assign m_axis_ext_mid_res_data = s_axis_mid_res_buf_data;
+			assign m_axis_ext_mid_res_keep = s_axis_mid_res_buf_keep;
+			assign m_axis_ext_mid_res_user = s_axis_mid_res_buf_user;
+			assign m_axis_ext_mid_res_last = s_axis_mid_res_buf_last;
+			assign m_axis_ext_mid_res_valid = s_axis_mid_res_buf_valid;
+			assign s_axis_mid_res_buf_ready = m_axis_ext_mid_res_ready;
+			
+			assign m_axis_mid_res_buf_data = s_axis_ext_fnl_res_data;
+			assign m_axis_mid_res_buf_keep = s_axis_ext_fnl_res_keep;
+			assign m_axis_mid_res_buf_user = s_axis_ext_fnl_res_user;
+			assign m_axis_mid_res_buf_last = s_axis_ext_fnl_res_last;
+			assign m_axis_mid_res_buf_valid = s_axis_ext_fnl_res_valid;
+			assign s_axis_ext_fnl_res_ready = m_axis_mid_res_buf_ready;
+			
+			assign mid_res_mem_clk_a = 1'b0;
+			assign mid_res_mem_wen_a = {RBUF_BANK_N{1'b0}};
+			assign mid_res_mem_addr_a = {(RBUF_BANK_N*16){1'bx}};
+			assign mid_res_mem_din_a = {(RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)){1'bx}};
+			assign mid_res_mem_clk_b = 1'b0;
+			assign mid_res_mem_ren_b = {RBUF_BANK_N{1'b0}};
+			assign mid_res_mem_addr_b = {(RBUF_BANK_N*16){1'bx}};
+			
+			assign acmlt_in_new_res = {(ATOMIC_K*48){1'bx}};
+			assign acmlt_in_org_mid_res = {(ATOMIC_K*32){1'bx}};
+			assign acmlt_in_mask = {ATOMIC_K{1'bx}};
+			assign acmlt_in_first_item = 1'bx;
+			assign acmlt_in_last_grp = 1'bx;
+			assign acmlt_in_last_res = 1'bx;
+			assign acmlt_in_valid = 1'b0;
+		end
 	endgenerate
-	
-	conv_middle_res_acmlt_buf #(
-		.ATOMIC_K(ATOMIC_K),
-		.RBUF_BANK_N(RBUF_BANK_N),
-		.RBUF_DEPTH(RBUF_DEPTH),
-		.INFO_ALONG_WIDTH(1),
-		.SIM_DELAY(SIM_DELAY)
-	)conv_middle_res_acmlt_buf_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(aclken),
-		
-		.calfmt(calfmt),
-		.row_n_bufferable(mid_res_buf_row_n_bufferable),
-		.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
-		.max_upd_latency(2 + 7),
-		.en_cal_round_ext(1'b1),
-		.ofmap_w(16'dx),
-		
-		.s_axis_mid_res_data(s_axis_mid_res_buf_data),
-		.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
-		.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
-		.s_axis_mid_res_last(s_axis_mid_res_buf_last),
-		.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
-		.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
-		
-		.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
-		.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
-		.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
-		.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
-		.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
-		.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
-		
-		.mem_clk_a(mid_res_mem_clk_a),
-		.mem_wen_a(mid_res_mem_wen_a),
-		.mem_addr_a(mid_res_mem_addr_a),
-		.mem_din_a(mid_res_mem_din_a),
-		.mem_clk_b(mid_res_mem_clk_b),
-		.mem_ren_b(mid_res_mem_ren_b),
-		.mem_addr_b(mid_res_mem_addr_b),
-		.mem_dout_b(mid_res_mem_dout_b),
-		
-		.acmlt_in_new_res(acmlt_in_new_res),
-		.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
-		.acmlt_in_mask(acmlt_in_mask),
-		.acmlt_in_first_item(acmlt_in_first_item),
-		.acmlt_in_last_grp(acmlt_in_last_grp),
-		.acmlt_in_last_res(acmlt_in_last_res),
-		.acmlt_in_info_along(),
-		.acmlt_in_valid(acmlt_in_valid),
-		
-		.acmlt_out_data(acmlt_out_data),
-		.acmlt_out_mask(acmlt_out_mask),
-		.acmlt_out_last_grp(acmlt_out_last_grp),
-		.acmlt_out_last_res(acmlt_out_last_res),
-		.acmlt_out_to_upd_mem(1'b1),
-		.acmlt_out_valid(acmlt_out_valid)
-	);
 	
 	/** 批归一化与激活处理单元 **/
 	// 卷积最终结果(AXIS从机)
@@ -619,75 +745,139 @@ module conv_cal_sub_system #(
 	assign s_axis_bn_act_valid = m_axis_mid_res_buf_valid;
 	assign m_axis_mid_res_buf_ready = s_axis_bn_act_ready;
 	
-	conv_bn_act_proc #(
-		.FP32_KEEP(1'b1),
-		.ATOMIC_K(ATOMIC_K),
-		.BN_ACT_PRL_N(BN_ACT_PRL_N),
-		.INT16_SUPPORTED(BN_ACT_INT16_SUPPORTED),
-		.INT32_SUPPORTED(BN_ACT_INT32_SUPPORTED),
-		.FP32_SUPPORTED(BN_ACT_FP32_SUPPORTED),
-		.SIM_DELAY(SIM_DELAY)
-	)conv_bn_act_proc_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(aclken),
-		
-		.en_bn_act_proc(en_bn_act_proc),
-		
-		.calfmt(bn_act_calfmt),
-		.use_bn_unit(use_bn_unit),
-		.use_act_unit(use_act_unit),
-		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
-		.bn_is_a_eq_1(bn_is_a_eq_1),
-		.bn_is_b_eq_0(bn_is_b_eq_0),
-		.is_in_const_mac_mode(1'b0),
-		.param_a_in_const_mac_mode(32'hxxxxxxxx),
-		.param_b_in_const_mac_mode(32'hxxxxxxxx),
-		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
-		.leaky_relu_param_alpha(leaky_relu_param_alpha),
-		
-		.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
-		.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
-		.s_sub_row_msg_axis_valid(s_sub_row_msg_axis_valid),
-		.s_sub_row_msg_axis_ready(s_sub_row_msg_axis_ready),
-		
-		.s_axis_fnl_res_data(s_axis_bn_act_data),
-		.s_axis_fnl_res_keep(s_axis_bn_act_keep),
-		.s_axis_fnl_res_user(s_axis_bn_act_user),
-		.s_axis_fnl_res_last(s_axis_bn_act_last),
-		.s_axis_fnl_res_valid(s_axis_bn_act_valid),
-		.s_axis_fnl_res_ready(s_axis_bn_act_ready),
-		
-		.m_axis_bn_act_res_data(m_axis_bn_act_data),
-		.m_axis_bn_act_res_keep(m_axis_bn_act_keep),
-		.m_axis_bn_act_res_user(m_axis_bn_act_user),
-		.m_axis_bn_act_res_last(m_axis_bn_act_last),
-		.m_axis_bn_act_res_valid(m_axis_bn_act_valid),
-		.m_axis_bn_act_res_ready(m_axis_bn_act_ready),
-		
-		.bn_mem_clk_b(bn_mem_clk_b),
-		.bn_mem_ren_b(bn_mem_ren_b),
-		.bn_mem_addr_b(bn_mem_addr_b),
-		.bn_mem_dout_b(bn_mem_dout_b),
-		
-		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
-		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
-		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
-		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
-		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
-		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
-		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
-		
-		.mul0_op_a(mul1_op_a),
-		.mul0_op_b(mul1_op_b),
-		.mul0_ce(mul1_ce),
-		.mul0_res(mul1_res),
-		
-		.mul1_op_a(mul2_op_a),
-		.mul1_op_b(mul2_op_b),
-		.mul1_ce(mul2_ce),
-		.mul1_res(mul2_res)
-	);
+	generate
+		if(USE_EXT_BN_ACT_UNIT == "false")
+		begin
+			/**
+			不使用外部的BN与激活单元
+			
+			子表面行信息(AXIS从机) -> 内部的BN与激活单元
+			无效 -> 外部的BN与激活单元的卷积最终结果(AXIS主机)
+			外部的BN与激活单元的处理结果(AXIS从机) -> 忽略
+			**/
+			assign m_axis_ext_bn_act_i_data = {(ATOMIC_K*32){1'bx}};
+			assign m_axis_ext_bn_act_i_keep = {(ATOMIC_K*4){1'bx}};
+			assign m_axis_ext_bn_act_i_user = 5'bxxxxx;
+			assign m_axis_ext_bn_act_i_last = 1'bx;
+			assign m_axis_ext_bn_act_i_valid = 1'b0;
+			
+			assign s_axis_ext_bn_act_o_ready = 1'b1;
+			
+			conv_bn_act_proc #(
+				.FP32_KEEP(1'b1),
+				.ATOMIC_K(ATOMIC_K),
+				.BN_ACT_PRL_N(BN_ACT_PRL_N),
+				.INT16_SUPPORTED(BN_ACT_INT16_SUPPORTED),
+				.INT32_SUPPORTED(BN_ACT_INT32_SUPPORTED),
+				.FP32_SUPPORTED(BN_ACT_FP32_SUPPORTED),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_bn_act_proc_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(aclken),
+				
+				.en_bn_act_proc(en_bn_act_proc),
+				
+				.calfmt(bn_act_calfmt),
+				.use_bn_unit(use_bn_unit),
+				.use_act_unit(use_act_unit),
+				.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
+				.bn_is_a_eq_1(bn_is_a_eq_1),
+				.bn_is_b_eq_0(bn_is_b_eq_0),
+				.is_in_const_mac_mode(1'b0),
+				.param_a_in_const_mac_mode(32'hxxxxxxxx),
+				.param_b_in_const_mac_mode(32'hxxxxxxxx),
+				.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
+				.leaky_relu_param_alpha(leaky_relu_param_alpha),
+				
+				.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
+				.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
+				.s_sub_row_msg_axis_valid(s_sub_row_msg_axis_valid),
+				.s_sub_row_msg_axis_ready(s_sub_row_msg_axis_ready),
+				
+				.s_axis_fnl_res_data(s_axis_bn_act_data),
+				.s_axis_fnl_res_keep(s_axis_bn_act_keep),
+				.s_axis_fnl_res_user(s_axis_bn_act_user),
+				.s_axis_fnl_res_last(s_axis_bn_act_last),
+				.s_axis_fnl_res_valid(s_axis_bn_act_valid),
+				.s_axis_fnl_res_ready(s_axis_bn_act_ready),
+				
+				.m_axis_bn_act_res_data(m_axis_bn_act_data),
+				.m_axis_bn_act_res_keep(m_axis_bn_act_keep),
+				.m_axis_bn_act_res_user(m_axis_bn_act_user),
+				.m_axis_bn_act_res_last(m_axis_bn_act_last),
+				.m_axis_bn_act_res_valid(m_axis_bn_act_valid),
+				.m_axis_bn_act_res_ready(m_axis_bn_act_ready),
+				
+				.bn_mem_clk_b(bn_mem_clk_b),
+				.bn_mem_ren_b(bn_mem_ren_b),
+				.bn_mem_addr_b(bn_mem_addr_b),
+				.bn_mem_dout_b(bn_mem_dout_b),
+				
+				.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+				.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
+				.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
+				.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+				.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
+				.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
+				.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
+				
+				.mul0_op_a(mul1_op_a),
+				.mul0_op_b(mul1_op_b),
+				.mul0_ce(mul1_ce),
+				.mul0_res(mul1_res),
+				
+				.mul1_op_a(mul2_op_a),
+				.mul1_op_b(mul2_op_b),
+				.mul1_ce(mul2_ce),
+				.mul1_res(mul2_res)
+			);
+		end
+		else
+		begin
+			/**
+			使用外部的BN与激活单元
+			
+			子表面行信息(AXIS从机) -> 忽略
+			内部的BN与激活处理单元的卷积最终结果(名义AXIS主机) -> 外部的BN与激活单元的卷积最终结果(AXIS主机)
+			外部的BN与激活单元的处理结果(AXIS从机) -> 内部的BN与激活处理单元的处理结果(AXIS主机)
+			**/
+			assign s_sub_row_msg_axis_ready = 1'b1;
+			
+			assign m_axis_ext_bn_act_i_data = s_axis_bn_act_data;
+			assign m_axis_ext_bn_act_i_keep = s_axis_bn_act_keep;
+			assign m_axis_ext_bn_act_i_user = s_axis_bn_act_user;
+			assign m_axis_ext_bn_act_i_last = s_axis_bn_act_last;
+			assign m_axis_ext_bn_act_i_valid = s_axis_bn_act_valid;
+			assign s_axis_bn_act_ready = m_axis_ext_bn_act_i_ready;
+			
+			assign m_axis_bn_act_data = s_axis_ext_bn_act_o_data;
+			assign m_axis_bn_act_keep = s_axis_ext_bn_act_o_keep;
+			assign m_axis_bn_act_user = s_axis_ext_bn_act_o_user;
+			assign m_axis_bn_act_last = s_axis_ext_bn_act_o_last;
+			assign m_axis_bn_act_valid = s_axis_ext_bn_act_o_valid;
+			assign s_axis_ext_bn_act_o_ready = m_axis_bn_act_ready;
+			
+			assign bn_mem_clk_b = 1'b0;
+			assign bn_mem_ren_b = 1'b0;
+			assign bn_mem_addr_b = 16'dx;
+			
+			assign proc_res_fifo_mem_clk = 1'b0;
+			assign proc_res_fifo_mem_wen_a = 1'b0;
+			assign proc_res_fifo_mem_addr_a = 9'dx;
+			assign proc_res_fifo_mem_din_a = {(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5){1'bx}};
+			assign proc_res_fifo_mem_ren_b = 1'b0;
+			assign proc_res_fifo_mem_addr_b = 9'dx;
+			
+			assign mul1_op_a = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};
+			assign mul1_op_b = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};
+			assign mul1_ce = {((BN_ACT_INT16_SUPPORTED ? 4:3)*BN_ACT_PRL_N){1'b0}};
+			
+			assign mul2_op_a = {((BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N){1'bx}};
+			assign mul2_op_b = {((BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N){1'bx}};
+			assign mul2_ce = {(2*BN_ACT_PRL_N){1'b0}};
+		end
+	endgenerate
 	
 	/** 输出数据舍入单元组 **/
 	// [舍入单元组输入]
@@ -704,27 +894,6 @@ module conv_cal_sub_system #(
 	wire m_axis_round_last;
 	wire m_axis_round_valid;
 	wire m_axis_round_ready;
-	// [流水线控制]
-	// (第0级)
-	wire[ATOMIC_K-1:0] round_mask_s0;
-	wire[4:0] round_user_s0;
-	wire round_last_s0;
-	wire round_valid_s0;
-	wire round_ready_s0;
-	wire[ATOMIC_K-1:0] round_ce_s0;
-	// (第1级)
-	reg[ATOMIC_K-1:0] round_mask_s1;
-	reg[4:0] round_user_s1;
-	reg round_last_s1;
-	reg round_valid_s1;
-	wire round_ready_s1;
-	wire[ATOMIC_K-1:0] round_ce_s1;
-	// (第2级)
-	reg[ATOMIC_K-1:0] round_mask_s2;
-	reg[4:0] round_user_s2;
-	reg round_last_s2;
-	reg round_valid_s2;
-	wire round_ready_s2;
 	
 	assign s_axis_round_data = m_axis_bn_act_data | {(ATOMIC_K*32){1'b0}};
 	assign s_axis_round_keep = m_axis_bn_act_keep | {(ATOMIC_K*4){1'b0}};
@@ -733,97 +902,88 @@ module conv_cal_sub_system #(
 	assign s_axis_round_valid = m_axis_bn_act_valid;
 	assign m_axis_bn_act_ready = s_axis_round_ready;
 	
-	assign round_user_s0 = s_axis_round_user;
-	assign round_last_s0 = s_axis_round_last;
-	assign round_valid_s0 = s_axis_round_valid;
-	
-	assign round_ready_s0 = (~round_valid_s1) | round_ready_s1;
-	assign round_ready_s1 = (~round_valid_s2) | round_ready_s2;
-	assign round_ready_s2 = m_axis_round_ready;
-	
-	always @(posedge aclk)
-	begin
-		if(aclken & round_valid_s0 & round_ready_s0)
-		begin
-			round_mask_s1 <= # SIM_DELAY round_mask_s0;
-			round_user_s1 <= # SIM_DELAY round_user_s0;
-			round_last_s1 <= # SIM_DELAY round_last_s0;
-		end
-	end
-	always @(posedge aclk or negedge aresetn)
-	begin
-		if(~aresetn)
-			round_valid_s1 <= 1'b0;
-		else if(aclken & round_ready_s0)
-			round_valid_s1 <= # SIM_DELAY round_valid_s0;
-	end
-	
-	always @(posedge aclk)
-	begin
-		if(aclken & round_valid_s1 & round_ready_s1)
-		begin
-			round_mask_s2 <= # SIM_DELAY round_mask_s1;
-			round_user_s2 <= # SIM_DELAY round_user_s1;
-			round_last_s2 <= # SIM_DELAY round_last_s1;
-		end
-	end
-	always @(posedge aclk or negedge aresetn)
-	begin
-		if(~aresetn)
-			round_valid_s2 <= 1'b0;
-		else if(aclken & round_ready_s1)
-			round_valid_s2 <= # SIM_DELAY round_valid_s1;
-	end
-	
-	genvar round_i;
 	generate
 		if(FP32_KEEP == 1'b0)
 		begin
-			assign s_axis_round_ready = aclken & round_ready_s0;
-			
-			assign m_axis_round_user = round_user_s2;
-			assign m_axis_round_last = round_last_s2;
-			assign m_axis_round_valid = aclken & round_valid_s2;
-			
-			for(round_i = 0;round_i < ATOMIC_K;round_i = round_i + 1)
-			begin:round_blk
-				assign m_axis_round_keep[round_i*2+1:round_i*2] = {2{round_mask_s2[round_i]}};
+			if(USE_EXT_ROUND_GRP == "false")
+			begin
+				/**
+				不使用外部的输出数据舍入单元组
 				
-				assign round_mask_s0[round_i] = s_axis_round_keep[round_i*4];
+				无效 -> 外部的输出数据舍入单元组的待舍入数据(AXIS主机)
+				外部的输出数据舍入单元组的舍入后数据(AXIS从机) -> 忽略
+				**/
+				assign m_axis_ext_round_i_data = {(ATOMIC_K*32){1'bx}};
+				assign m_axis_ext_round_i_keep = {(ATOMIC_K*4){1'bx}};
+				assign m_axis_ext_round_i_user = 5'bxxxxx;
+				assign m_axis_ext_round_i_last = 1'bx;
+				assign m_axis_ext_round_i_valid = 1'b0;
 				
-				assign round_ce_s0[round_i] = aclken & round_valid_s0 & round_ready_s0 & round_mask_s0[round_i];
-				assign round_ce_s1[round_i] = aclken & round_valid_s1 & round_ready_s1 & round_mask_s1[round_i];
+				assign s_axis_ext_round_o_ready = 1'b1;
 				
-				out_round_cell #(
-					.USE_EXT_CE(1'b1),
-					.INT8_SUPPORTED(BN_ACT_INT16_SUPPORTED ? 1'b1:1'b0),
-					.INT16_SUPPORTED(BN_ACT_INT32_SUPPORTED ? 1'b1:1'b0),
-					.FP16_SUPPORTED(BN_ACT_FP32_SUPPORTED ? 1'b1:1'b0),
-					.INFO_ALONG_WIDTH(1),
+				out_round_group #(
+					.ATOMIC_K(ATOMIC_K),
+					.INT8_SUPPORTED(BN_ACT_INT16_SUPPORTED),
+					.INT16_SUPPORTED(BN_ACT_INT32_SUPPORTED),
+					.FP16_SUPPORTED(BN_ACT_FP32_SUPPORTED),
+					.USER_WIDTH(5),
 					.SIM_DELAY(SIM_DELAY)
-				)out_round_cell_u(
+				)out_round_group_u(
 					.aclk(aclk),
 					.aresetn(aresetn),
 					.aclken(aclken),
 					
 					.calfmt(calfmt),
-					.fixed_point_quat_accrc(4'bxxxx), // 需要给出运行时参数!!!
+					.fixed_point_quat_accrc(4'dx), // 警告: 需要给出运行时参数!!!
 					
-					.s0_ce(round_ce_s0[round_i]),
-					.s1_ce(round_ce_s1[round_i]),
+					.s_axis_round_data(s_axis_round_data),
+					.s_axis_round_keep(s_axis_round_keep),
+					.s_axis_round_user(s_axis_round_user),
+					.s_axis_round_last(s_axis_round_last),
+					.s_axis_round_valid(s_axis_round_valid),
+					.s_axis_round_ready(s_axis_round_ready),
 					
-					.round_i_op_x(s_axis_round_data[round_i*32+31:round_i*32]),
-					.round_i_info_along(1'bx),
-					.round_i_vld(1'bx),
-					
-					.round_o_res(m_axis_round_data[round_i*16+15:round_i*16]),
-					.round_o_info_along(),
-					.round_o_vld()
+					.m_axis_round_data(m_axis_round_data),
+					.m_axis_round_keep(m_axis_round_keep),
+					.m_axis_round_user(m_axis_round_user),
+					.m_axis_round_last(m_axis_round_last),
+					.m_axis_round_valid(m_axis_round_valid),
+					.m_axis_round_ready(m_axis_round_ready)
 				);
+			end
+			else
+			begin
+				/**
+				使用外部的输出数据舍入单元组
+				
+				内部的输出数据舍入单元组的输入(名义AXIS主机) -> 外部的输出数据舍入单元组的待舍入数据(AXIS主机)
+				外部的输出数据舍入单元组的舍入后数据(AXIS从机) -> 内部的输出数据舍入单元组的输出(AXIS主机)
+				**/
+				assign m_axis_ext_round_i_data = s_axis_round_data;
+				assign m_axis_ext_round_i_keep = s_axis_round_keep;
+				assign m_axis_ext_round_i_user = s_axis_round_user;
+				assign m_axis_ext_round_i_last = s_axis_round_last;
+				assign m_axis_ext_round_i_valid = s_axis_round_valid;
+				assign s_axis_round_ready = m_axis_ext_round_i_ready;
+				
+				assign m_axis_round_data = s_axis_ext_round_o_data;
+				assign m_axis_round_keep = s_axis_ext_round_o_keep;
+				assign m_axis_round_user = s_axis_ext_round_o_user;
+				assign m_axis_round_last = s_axis_ext_round_o_last;
+				assign m_axis_round_valid = s_axis_ext_round_o_valid;
+				assign s_axis_ext_round_o_ready = m_axis_round_ready;
 			end
 		end
 		else
 		begin
+			assign m_axis_ext_round_i_data = {(ATOMIC_K*32){1'bx}};
+			assign m_axis_ext_round_i_keep = {(ATOMIC_K*4){1'bx}};
+			assign m_axis_ext_round_i_user = 5'bxxxxx;
+			assign m_axis_ext_round_i_last = 1'bx;
+			assign m_axis_ext_round_i_valid = 1'b0;
+			
+			assign s_axis_ext_round_o_ready = 1'b1;
+			
 			assign m_axis_round_data = s_axis_round_data;
 			assign m_axis_round_keep = s_axis_round_keep;
 			assign m_axis_round_user = s_axis_round_user;
@@ -859,32 +1019,66 @@ module conv_cal_sub_system #(
 	assign m_axis_fnl_res_valid = m_axis_collector_valid;
 	assign m_axis_collector_ready = m_axis_fnl_res_ready;
 	
-	conv_final_data_collector #(
-		.IN_ITEM_WIDTH(ATOMIC_K),
-		.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/(FP32_KEEP ? 32:16)),
-		.DATA_WIDTH_FOREACH_ITEM(FP32_KEEP ? 32:16),
-		.HAS_USER("false"),
-		.USER_WIDTH(1),
-		.EN_COLLECTOR_OUT_REG_SLICE("true"),
-		.SIM_DELAY(SIM_DELAY)
-	)conv_final_data_collector_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(aclken),
-		
-		.s_axis_collector_data(s_axis_collector_data),
-		.s_axis_collector_keep(s_axis_collector_keep),
-		.s_axis_collector_user(1'bx),
-		.s_axis_collector_last(s_axis_collector_last),
-		.s_axis_collector_valid(s_axis_collector_valid),
-		.s_axis_collector_ready(s_axis_collector_ready),
-		
-		.m_axis_collector_data(m_axis_collector_data),
-		.m_axis_collector_keep(m_axis_collector_keep),
-		.m_axis_collector_user(),
-		.m_axis_collector_last(m_axis_collector_last),
-		.m_axis_collector_valid(m_axis_collector_valid),
-		.m_axis_collector_ready(m_axis_collector_ready)
-	);
+	generate
+		if(USE_EXT_FNL_RES_COLLECTOR == "false")
+		begin
+			/**
+			不使用外部的最终结果数据收集器
+			
+			无效 -> 外部的最终结果数据收集器的待收集的数据流(AXIS主机)
+			**/
+			assign m_axis_ext_collector_data = {(ATOMIC_K*(FP32_KEEP ? 32:16)){1'bx}};
+			assign m_axis_ext_collector_keep = {(ATOMIC_K*(FP32_KEEP ? 4:2)){1'bx}};
+			assign m_axis_ext_collector_last = 1'bx;
+			assign m_axis_ext_collector_valid = 1'b0;
+			
+			conv_final_data_collector #(
+				.IN_ITEM_WIDTH(ATOMIC_K),
+				.OUT_ITEM_WIDTH(STREAM_DATA_WIDTH/(FP32_KEEP ? 32:16)),
+				.DATA_WIDTH_FOREACH_ITEM(FP32_KEEP ? 32:16),
+				.HAS_USER("false"),
+				.USER_WIDTH(1),
+				.EN_COLLECTOR_OUT_REG_SLICE("true"),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_final_data_collector_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(aclken),
+				
+				.s_axis_collector_data(s_axis_collector_data),
+				.s_axis_collector_keep(s_axis_collector_keep),
+				.s_axis_collector_user(1'bx),
+				.s_axis_collector_last(s_axis_collector_last),
+				.s_axis_collector_valid(s_axis_collector_valid),
+				.s_axis_collector_ready(s_axis_collector_ready),
+				
+				.m_axis_collector_data(m_axis_collector_data),
+				.m_axis_collector_keep(m_axis_collector_keep),
+				.m_axis_collector_user(),
+				.m_axis_collector_last(m_axis_collector_last),
+				.m_axis_collector_valid(m_axis_collector_valid),
+				.m_axis_collector_ready(m_axis_collector_ready)
+			);
+		end
+		else
+		begin
+			/**
+			使用外部的最终结果数据收集器
+			
+			内部的最终结果数据收集器的收集器输入(名义AXIS主机) -> 外部的最终结果数据收集器的待收集的数据流(AXIS主机)
+			无效 -> 内部的最终结果数据收集器的收集器输出(AXIS主机)
+			**/
+			assign m_axis_ext_collector_data = s_axis_collector_data;
+			assign m_axis_ext_collector_keep = s_axis_collector_keep;
+			assign m_axis_ext_collector_last = s_axis_collector_last;
+			assign m_axis_ext_collector_valid = s_axis_collector_valid;
+			assign s_axis_collector_ready = m_axis_ext_collector_ready;
+			
+			assign m_axis_collector_data = {STREAM_DATA_WIDTH{1'bx}};
+			assign m_axis_collector_keep = {(STREAM_DATA_WIDTH/8){1'bx}};
+			assign m_axis_collector_last = 1'bx;
+			assign m_axis_collector_valid = 1'b0;
+		end
+	endgenerate
 	
 endmodule

@@ -24,12 +24,10 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: AXI-通用卷积处理单元
+本模块: AXI-通用卷积处理单元(顶层)
 
 描述:
-AXI-通用卷积处理单元(顶层模块)
-
-包括寄存器配置接口、控制子系统、数据枢纽、计算子系统
+包括寄存器配置接口、BN参数MEM控制器、控制子系统、数据枢纽、计算子系统
 
 支持普通卷积(包括全连接层)、组卷积(包括深度可分离卷积)、转置卷积(转换为合适的特征图填充与卷积步长来实现)
 支持特征图外填充与内填充
@@ -50,7 +48,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/23
+日期: 2025/12/25
 ********************************************************************/
 
 
@@ -224,94 +222,142 @@ module axi_generic_conv #(
 	localparam integer LEAKY_RELU_MUL_CE_WIDTH = 2;
 	localparam integer LEAKY_RELU_MUL_RES_WIDTH = INT16_SUPPORTED ? 64:50;
 	
-	/** 寄存器配置接口 **/
-	// 使能信号
-	wire en_mac_array; // 使能乘加阵列
-	wire en_packer; // 使能打包器
-	wire en_bn_act_proc; // 使能批归一化与激活处理单元
-	// 运行时参数
-	// [计算参数]
-	wire[1:0] calfmt; // 运算数据格式
-	wire[2:0] conv_vertical_stride; // 卷积垂直步长 - 1
-	wire[2:0] conv_horizontal_stride; // 卷积水平步长 - 1
-	wire[3:0] cal_round; // 计算轮次 - 1
-	// [组卷积模式]
-	wire is_grp_conv_mode; // 是否处于组卷积模式
-	wire[15:0] group_n; // 分组数 - 1
-	wire[15:0] n_foreach_group; // 每组的通道数/核数 - 1
-	wire[31:0] data_size_foreach_group; // (特征图)每组的数据量
-	// [特征图参数]
-	wire[31:0] ifmap_baseaddr; // 输入特征图基地址
-	wire[31:0] ofmap_baseaddr; // 输出特征图基地址
-	wire[15:0] ifmap_w; // 输入特征图宽度 - 1
-	wire[23:0] ifmap_size; // 输入特征图大小 - 1
-	wire[15:0] fmap_chn_n; // 特征图通道数 - 1
-	wire[15:0] fmap_ext_i_bottom; // 扩展后特征图的垂直边界
-	wire[2:0] external_padding_left; // 左部外填充数
-	wire[2:0] external_padding_top; // 上部外填充数
-	wire[2:0] inner_padding_left_right; // 左右内填充数
-	wire[2:0] inner_padding_top_bottom; // 上下内填充数
-	wire[15:0] ofmap_w; // 输出特征图宽度 - 1
-	wire[15:0] ofmap_h; // 输出特征图高度 - 1
-	wire[1:0] ofmap_data_type; // 输出特征图数据大小类型
-	// [卷积核参数]
-	wire[31:0] kernal_wgt_baseaddr; // 卷积核权重基地址
-	wire[2:0] kernal_shape; // 卷积核形状
-	wire[3:0] kernal_dilation_hzt_n; // 水平膨胀量
-	wire[4:0] kernal_w_dilated; // (膨胀后)卷积核宽度 - 1
-	wire[3:0] kernal_dilation_vtc_n; // 垂直膨胀量
-	wire[4:0] kernal_h_dilated; // (膨胀后)卷积核高度 - 1
-	wire[15:0] kernal_chn_n; // 通道数 - 1
-	wire[15:0] cgrpn_foreach_kernal_set; // 每个核组的通道组数 - 1
-	wire[15:0] kernal_num_n; // 核数 - 1
-	wire[15:0] kernal_set_n; // 核组个数 - 1
-	wire[5:0] max_wgtblk_w; // 权重块最大宽度
-	// [缓存参数]
-	wire[7:0] fmbufbankn; // 分配给特征图缓存的Bank数
-	wire[3:0] fmbufcoln; // 每个表面行的表面个数类型
-	wire[9:0] fmbufrown; // 可缓存的表面行数 - 1
-	wire[2:0] sfc_n_each_wgtblk; // 每个权重块的表面个数的类型
-	wire[7:0] kbufgrpn; // 可缓存的通道组数 - 1
-	wire[15:0] mid_res_item_n_foreach_row; // 每个输出特征图表面行的中间结果项数 - 1
-	wire[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
-	// [批归一化与激活参数]
-	wire use_bn_unit; // 启用BN单元
-	wire use_act_unit; // 启用激活单元
-	wire[4:0] bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
-	wire bn_is_a_eq_1; // 批归一化参数A的实际值为1(标志)
-	wire bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
-	wire[4:0] leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
-	wire[31:0] leaky_relu_param_alpha; // 泄露Relu激活参数
-	// 块级控制
-	// [卷积核权重访问请求生成单元]
-	wire kernal_access_blk_start;
-	wire kernal_access_blk_idle;
-	wire kernal_access_blk_done;
-	// [特征图表面行访问请求生成单元]
-	wire fmap_access_blk_start;
-	wire fmap_access_blk_idle;
-	wire fmap_access_blk_done;
-	// [最终结果传输请求生成单元]
+	/** AXI-通用卷积处理单元(核心) **/
+	// (共享)数据枢纽
+	// [运行时参数]
+	wire[3:0] data_hub_fmbufcoln; // 每个表面行的表面个数类型
+	wire[9:0] data_hub_fmbufrown; // 可缓存的表面行数 - 1
+	wire data_hub_is_grp_conv_mode; // 是否处于组卷积缓存模式
+	wire[2:0] data_hub_kernal_shape; // 卷积核形状
+	wire[2:0] data_hub_sfc_n_each_wgtblk; // 每个权重块的表面个数的类型
+	wire[7:0] data_hub_kbufgrpn; // 可缓存的通道组数 - 1
+	wire[7:0] data_hub_fmbufbankn; // 分配给特征图缓存的Bank数
+	// [特征图表面行读请求(AXIS主机)]
+	wire[103:0] m_fm_rd_req_axis_data;
+	wire m_fm_rd_req_axis_valid;
+	wire m_fm_rd_req_axis_ready;
+	// [卷积核权重块读请求(AXIS主机)]
+	wire[103:0] m_kwgtblk_rd_req_axis_data;
+	wire m_kwgtblk_rd_req_axis_valid;
+	wire m_kwgtblk_rd_req_axis_ready;
+	// [特征图表面行数据(AXIS从机)]
+	wire[ATOMIC_C*2*8-1:0] s_fm_sfc_row_axis_data;
+	wire s_fm_sfc_row_axis_last; // 标志本次读请求的最后1个表面
+	wire s_fm_sfc_row_axis_valid;
+	wire s_fm_sfc_row_axis_ready;
+	// [卷积核权重块数据(AXIS从机)]
+	wire[ATOMIC_C*2*8-1:0] s_kernal_wgtblk_axis_data;
+	wire s_kernal_wgtblk_axis_last; // 标志本次读请求的最后1个表面
+	wire s_kernal_wgtblk_axis_valid;
+	wire s_kernal_wgtblk_axis_ready;
+	// (共享)最终结果传输请求生成单元
+	// [运行时参数]
+	wire[31:0] fnl_res_tr_req_gen_ofmap_baseaddr; // 输出特征图基地址
+	wire[15:0] fnl_res_tr_req_gen_ofmap_w; // 输出特征图宽度 - 1
+	wire[15:0] fnl_res_tr_req_gen_ofmap_h; // 输出特征图高度 - 1
+	wire[1:0] fnl_res_tr_req_gen_ofmap_data_type; // 输出特征图数据大小类型
+	wire[15:0] fnl_res_tr_req_gen_kernal_num_n; // 卷积核核数 - 1
+	wire[5:0] fnl_res_tr_req_gen_max_wgtblk_w; // 权重块最大宽度
+	wire fnl_res_tr_req_gen_is_grp_conv_mode; // 是否处于组卷积模式
+	wire[15:0] fnl_res_tr_req_gen_n_foreach_group; // 每组的通道数/核数 - 1
+	// [块级控制]
 	wire fnl_res_trans_blk_start;
 	wire fnl_res_trans_blk_idle;
 	wire fnl_res_trans_blk_done;
-	// 状态信息
-	wire[31:0] ftm_sfc_cal_n; // 已计算的特征图表面数
+	// (共享)中间结果缓存
+	// [运行时参数]
+	wire[1:0] mid_res_buf_calfmt; // 运算数据格式
+	wire[3:0] mid_res_buf_row_n_bufferable_dup; // 可缓存行数 - 1
+	wire[3:0] mid_res_buf_bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
+	wire[3:0] mid_res_buf_max_upd_latency; // 最大的更新时延
+	// [中间结果(AXIS主机)]
+	wire[ATOMIC_K*48-1:0] m_axis_ext_mid_res_data;
+	wire[ATOMIC_K*6-1:0] m_axis_ext_mid_res_keep;
+	wire[2:0] m_axis_ext_mid_res_user; // {是否最后1轮计算(标志), 初始化中间结果(标志), 最后1组中间结果(标志)}
+	wire m_axis_ext_mid_res_last; // 本行最后1个中间结果(标志)
+	wire m_axis_ext_mid_res_valid;
+	wire m_axis_ext_mid_res_ready;
+	// [最终结果(AXIS从机)]
+	wire[ATOMIC_K*32-1:0] s_axis_ext_fnl_res_data; // ATOMIC_K个最终结果(单精度浮点数或定点数)
+	wire[ATOMIC_K*4-1:0] s_axis_ext_fnl_res_keep;
+	wire[4:0] s_axis_ext_fnl_res_user; // {是否最后1个子行(1bit), 子行号(4bit)}
+	wire s_axis_ext_fnl_res_last; // 本行最后1个最终结果(标志)
+	wire s_axis_ext_fnl_res_valid;
+	wire s_axis_ext_fnl_res_ready;
+	// (共享)BN与激活单元
+	// [使能信号]
+	wire en_bn_act_proc_dup; // 使能处理单元
+	// [运行时参数]
+	wire[1:0] bn_act_calfmt; // 运算数据格式
+	wire bn_act_use_bn_unit; // 启用BN单元
+	wire bn_act_use_act_unit; // 启用激活单元
+	wire[4:0] bn_act_bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
+	wire bn_act_bn_is_a_eq_1; // 批归一化参数A的实际值为1(标志)
+	wire bn_act_bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
+	wire[4:0] bn_act_leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
+	wire[31:0] bn_act_leaky_relu_param_alpha; // 泄露Relu激活参数
+	// [卷积最终结果(AXIS主机)]
+	wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data; // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
+	wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep;
+	wire[4:0] m_axis_ext_bn_act_i_user; // {是否最后1个子行(1bit), 子行号(4bit)}
+	wire m_axis_ext_bn_act_i_last; // 本行最后1个最终结果(标志)
+	wire m_axis_ext_bn_act_i_valid;
+	wire m_axis_ext_bn_act_i_ready;
+	// [经过BN与激活处理的结果(AXIS从机)]
+	wire[BN_ACT_PRL_N*32-1:0] s_axis_ext_bn_act_o_data; // 对于BN_ACT_PRL_N个最终结果 -> {浮点数或定点数}
+	wire[BN_ACT_PRL_N*4-1:0] s_axis_ext_bn_act_o_keep;
+	wire[4:0] s_axis_ext_bn_act_o_user; // {是否最后1个子行(1bit), 子行号(4bit)}
+	wire s_axis_ext_bn_act_o_last; // 本行最后1个处理结果(标志)
+	wire s_axis_ext_bn_act_o_valid;
+	wire s_axis_ext_bn_act_o_ready;
+	// [BN参数MEM接口]
+	wire bn_mem_clk_a;
+	wire bn_mem_en_a;
+	wire[7:0] bn_mem_wen_a;
+	wire[15:0] bn_mem_addr_a;
+	wire[63:0] bn_mem_din_a; // {参数B(32bit), 参数A(32bit)}
+	wire[63:0] bn_mem_dout_a; // {参数B(32bit), 参数A(32bit)}
+	// (共享)输出数据舍入单元组
+	// [运行时参数]
+	wire[1:0] round_calfmt; // 运算数据格式
+	wire[3:0] round_fixed_point_quat_accrc; // 定点数量化精度
+	// [待舍入数据(AXIS主机)]
+	wire[ATOMIC_K*32-1:0] m_axis_ext_round_i_data; // ATOMIC_K个定点数或FP32
+	wire[ATOMIC_K*4-1:0] m_axis_ext_round_i_keep;
+	wire[4:0] m_axis_ext_round_i_user;
+	wire m_axis_ext_round_i_last;
+	wire m_axis_ext_round_i_valid;
+	wire m_axis_ext_round_i_ready;
+	// [舍入后数据(AXIS从机)]
+	wire[ATOMIC_K*16-1:0] s_axis_ext_round_o_data; // ATOMIC_K个定点数或浮点数
+	wire[ATOMIC_K*2-1:0] s_axis_ext_round_o_keep;
+	wire[4:0] s_axis_ext_round_o_user;
+	wire s_axis_ext_round_o_last;
+	wire s_axis_ext_round_o_valid;
+	wire s_axis_ext_round_o_ready;
+	// (共享)最终结果数据收集器
+	// [待收集的数据流(AXIS主机)]
+	wire[ATOMIC_K*(FP32_KEEP ? 32:16)-1:0] m_axis_ext_collector_data;
+	wire[ATOMIC_K*(FP32_KEEP ? 4:2)-1:0] m_axis_ext_collector_keep;
+	wire m_axis_ext_collector_last;
+	wire m_axis_ext_collector_valid;
+	wire m_axis_ext_collector_ready;
 	
-	reg_if_for_generic_conv #(
-		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
-		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
-		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
-		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
-		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
-		.LARGE_V_STRD_SUPPORTED(LARGE_V_STRD_SUPPORTED ? 1'b1:1'b0),
-		.LARGE_H_STRD_SUPPORTED(LARGE_H_STRD_SUPPORTED ? 1'b1:1'b0),
-		.GRP_CONV_SUPPORTED(GRP_CONV_SUPPORTED ? 1'b1:1'b0),
-		.EXT_PADDING_SUPPORTED(EXT_PADDING_SUPPORTED ? 1'b1:1'b0),
-		.INNER_PADDING_SUPPORTED(INNER_PADDING_SUPPORTED ? 1'b1:1'b0),
-		.KERNAL_DILATION_SUPPORTED(KERNAL_DILATION_SUPPORTED ? 1'b1:1'b0),
-		.EN_PERF_MON(EN_PERF_MON ? 1'b1:1'b0),
+	axi_generic_conv_core #(
+		.BN_SUPPORTED(BN_SUPPORTED),
+		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
+		.INT8_SUPPORTED(INT8_SUPPORTED),
+		.INT16_SUPPORTED(INT16_SUPPORTED),
+		.FP16_SUPPORTED(FP16_SUPPORTED),
+		.LARGE_V_STRD_SUPPORTED(LARGE_V_STRD_SUPPORTED),
+		.LARGE_H_STRD_SUPPORTED(LARGE_H_STRD_SUPPORTED),
+		.GRP_CONV_SUPPORTED(GRP_CONV_SUPPORTED),
+		.EXT_PADDING_SUPPORTED(EXT_PADDING_SUPPORTED),
+		.INNER_PADDING_SUPPORTED(INNER_PADDING_SUPPORTED),
+		.KERNAL_DILATION_SUPPORTED(KERNAL_DILATION_SUPPORTED),
+		.EN_PERF_MON(EN_PERF_MON),
 		.ACCELERATOR_ID(ACCELERATOR_ID),
+		.FP32_KEEP(FP32_KEEP),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -325,9 +371,10 @@ module axi_generic_conv #(
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
 		.SIM_DELAY(SIM_DELAY)
-	)reg_if_for_generic_conv_u(
+	)axi_generic_conv_core_u(
 		.aclk(aclk),
 		.aresetn(aresetn),
+		.aclken(1'b1),
 		
 		.s_axi_lite_araddr(s_axi_lite_araddr),
 		.s_axi_lite_arvalid(s_axi_lite_arvalid),
@@ -345,140 +392,6 @@ module axi_generic_conv #(
 		.s_axi_lite_wdata(s_axi_lite_wdata),
 		.s_axi_lite_wvalid(s_axi_lite_wvalid),
 		.s_axi_lite_wready(s_axi_lite_wready),
-		
-		.en_mac_array(en_mac_array),
-		.en_packer(en_packer),
-		.en_bn_act_proc(en_bn_act_proc),
-		
-		.calfmt(calfmt),
-		.conv_vertical_stride(conv_vertical_stride),
-		.conv_horizontal_stride(conv_horizontal_stride),
-		.cal_round(cal_round),
-		.is_grp_conv_mode(is_grp_conv_mode),
-		.group_n(group_n),
-		.n_foreach_group(n_foreach_group),
-		.data_size_foreach_group(data_size_foreach_group),
-		.ifmap_baseaddr(ifmap_baseaddr),
-		.ofmap_baseaddr(ofmap_baseaddr),
-		.ifmap_w(ifmap_w),
-		.ifmap_size(ifmap_size),
-		.fmap_chn_n(fmap_chn_n),
-		.fmap_ext_i_bottom(fmap_ext_i_bottom),
-		.external_padding_left(external_padding_left),
-		.external_padding_top(external_padding_top),
-		.inner_padding_left_right(inner_padding_left_right),
-		.inner_padding_top_bottom(inner_padding_top_bottom),
-		.ofmap_w(ofmap_w),
-		.ofmap_h(ofmap_h),
-		.ofmap_data_type(ofmap_data_type),
-		.kernal_wgt_baseaddr(kernal_wgt_baseaddr),
-		.kernal_shape(kernal_shape),
-		.kernal_dilation_hzt_n(kernal_dilation_hzt_n),
-		.kernal_w_dilated(kernal_w_dilated),
-		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
-		.kernal_h_dilated(kernal_h_dilated),
-		.kernal_chn_n(kernal_chn_n),
-		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
-		.kernal_num_n(kernal_num_n),
-		.kernal_set_n(kernal_set_n),
-		.max_wgtblk_w(max_wgtblk_w),
-		.fmbufbankn(fmbufbankn),
-		.fmbufcoln(fmbufcoln),
-		.fmbufrown(fmbufrown),
-		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
-		.kbufgrpn(kbufgrpn),
-		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
-		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
-		.use_bn_unit(use_bn_unit),
-		.use_act_unit(use_act_unit),
-		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
-		.bn_is_a_eq_1(bn_is_a_eq_1),
-		.bn_is_b_eq_0(bn_is_b_eq_0),
-		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
-		.leaky_relu_param_alpha(leaky_relu_param_alpha),
-		
-		.kernal_access_blk_start(kernal_access_blk_start),
-		.kernal_access_blk_idle(kernal_access_blk_idle),
-		.kernal_access_blk_done(kernal_access_blk_done),
-		
-		.fmap_access_blk_start(fmap_access_blk_start),
-		.fmap_access_blk_idle(fmap_access_blk_idle),
-		.fmap_access_blk_done(fmap_access_blk_done),
-		
-		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
-		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
-		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
-		
-		.ftm_sfc_cal_n(ftm_sfc_cal_n),
-		
-		.s0_mm2s_strm_axis_keep(s0_dma_strm_axis_keep),
-		.s0_mm2s_strm_axis_valid(s0_dma_strm_axis_valid),
-		.s0_mm2s_strm_axis_ready(s0_dma_strm_axis_ready),
-		
-		.s1_mm2s_strm_axis_keep(s1_dma_strm_axis_keep),
-		.s1_mm2s_strm_axis_valid(s1_dma_strm_axis_valid),
-		.s1_mm2s_strm_axis_ready(s1_dma_strm_axis_ready),
-		
-		.s_s2mm_strm_axis_keep(m_axis_fnl_res_keep),
-		.s_s2mm_strm_axis_valid(m_axis_fnl_res_valid),
-		.s_s2mm_strm_axis_ready(m_axis_fnl_res_ready),
-		
-		.mm2s_0_cmd_done(mm2s_0_cmd_done),
-		.mm2s_1_cmd_done(mm2s_1_cmd_done),
-		.s2mm_cmd_done(s2mm_cmd_done)
-	);
-	
-	/** BN参数MEM控制器 **/
-	// [AXI-SRAM控制器给出的存储器接口]
-	wire axi_sram_ctrler_ram_clk;
-    wire axi_sram_ctrler_ram_rst;
-    wire axi_sram_ctrler_ram_en;
-    wire[3:0] axi_sram_ctrler_ram_wen;
-    wire[29:0] axi_sram_ctrler_ram_addr;
-    wire[31:0] axi_sram_ctrler_ram_din;
-    wire[31:0] axi_sram_ctrler_ram_dout;
-	// [BN参数MEM接口]
-	wire bn_mem_clk_a;
-	wire bn_mem_en_a;
-	wire[7:0] bn_mem_wen_a;
-	wire[15:0] bn_mem_addr_a;
-	wire[63:0] bn_mem_din_a; // {参数B(32bit), 参数A(32bit)}
-	wire[63:0] bn_mem_dout_a; // {参数B(32bit), 参数A(32bit)}
-	// [读数据重对齐]
-	reg axi_sram_ctrler_word_sel;
-	
-	assign axi_sram_ctrler_ram_dout = 
-		axi_sram_ctrler_word_sel ? 
-			bn_mem_dout_a[63:32]:
-			bn_mem_dout_a[31:0];
-	
-	assign bn_mem_clk_a = axi_sram_ctrler_ram_clk;
-	assign bn_mem_en_a = axi_sram_ctrler_ram_en;
-	assign bn_mem_wen_a = 
-		axi_sram_ctrler_ram_addr[0] ? 
-			{axi_sram_ctrler_ram_wen, 4'b0000}:
-			{4'b0000, axi_sram_ctrler_ram_wen};
-	assign bn_mem_addr_a = 
-		axi_sram_ctrler_ram_addr[16:1];
-	assign bn_mem_din_a = 
-		axi_sram_ctrler_ram_addr[0] ? 
-			{axi_sram_ctrler_ram_din, 32'dx}:
-			{32'dx, axi_sram_ctrler_ram_din};
-	
-	always @(posedge axi_sram_ctrler_ram_clk)
-	begin
-		if(axi_sram_ctrler_ram_en)
-			axi_sram_ctrler_word_sel <= # SIM_DELAY axi_sram_ctrler_ram_addr[0];
-	end
-	
-	axi_bram_ctrler #(
-		.bram_depth(MAX_KERNAL_N*2),
-		.bram_read_la(1),
-		.en_read_buf_fifo("false"),
-		.simulation_delay(SIM_DELAY)
-	)bn_param_sram_ctrler(
-		.clk(aclk),
-		.rst_n(aresetn),
 		
 		.s_axi_araddr(s_axi_araddr),
 		.s_axi_arburst(s_axi_arburst),
@@ -512,165 +425,124 @@ module axi_generic_conv #(
 		.s_axi_wvalid(s_axi_wvalid),
 		.s_axi_wready(s_axi_wready),
 		
-		.bram_clk(axi_sram_ctrler_ram_clk),
-		.bram_rst(axi_sram_ctrler_ram_rst),
-		.bram_en(axi_sram_ctrler_ram_en),
-		.bram_wen(axi_sram_ctrler_ram_wen),
-		.bram_addr(axi_sram_ctrler_ram_addr),
-		.bram_din(axi_sram_ctrler_ram_din),
-		.bram_dout(axi_sram_ctrler_ram_dout),
+		.s0_dma_strm_axis_keep(s0_dma_strm_axis_keep),
+		.s0_dma_strm_axis_valid(s0_dma_strm_axis_valid),
+		.s0_dma_strm_axis_ready(s0_dma_strm_axis_ready),
 		
-		.axi_bram_ctrler_err()
-	);
-	
-	/** 控制子系统 **/
-	// 后级计算单元控制
-	wire rst_adapter; // 重置适配器(标志)
-	wire on_incr_phy_row_traffic; // 增加1个物理特征图表面行流量(指示)
-	wire[15:0] cgrp_n_of_fmap_region_that_kernal_set_sel; // 核组所选定特征图域的通道组数 - 1
-	// 卷积核权重块读请求(AXIS主机)
-	wire[103:0] m_kwgtblk_rd_req_axis_data;
-	wire m_kwgtblk_rd_req_axis_valid;
-	wire m_kwgtblk_rd_req_axis_ready;
-	// 特征图表面行读请求(AXIS主机)
-	wire[103:0] m_fm_rd_req_axis_data;
-	wire m_fm_rd_req_axis_valid;
-	wire m_fm_rd_req_axis_ready;
-	// 特征图切块信息(AXIS主机)
-	wire[7:0] m_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
-	wire m_fm_cake_info_axis_valid;
-	wire m_fm_cake_info_axis_ready;
-	// 子表面行信息(AXIS主机)
-	wire[15:0] m_sub_row_msg_axis_data; // {输出通道号(16bit)}
-	wire m_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
-	wire m_sub_row_msg_axis_valid;
-	wire m_sub_row_msg_axis_ready;
-	// 无符号乘法器
-	// [乘法器#0(u16*u16)]
-	wire[15:0] mul0_op_a; // 操作数A
-	wire[15:0] mul0_op_b; // 操作数B
-	wire mul0_ce; // 计算使能
-	wire[31:0] mul0_res; // 计算结果
-	// [乘法器#1(u16*u24)]
-	wire[15:0] mul1_op_a; // 操作数A
-	wire[23:0] mul1_op_b; // 操作数B
-	wire mul1_ce; // 计算使能
-	wire[39:0] mul1_res; // 计算结果
-	// [乘法器#2(u16*u24)]
-	wire[15:0] mul2_op_a; // 操作数A
-	wire[23:0] mul2_op_b; // 操作数B
-	wire mul2_ce; // 计算使能
-	wire[39:0] mul2_res; // 计算结果
-	
-	conv_ctrl_sub_system #(
-		.ATOMIC_C(ATOMIC_C),
-		.ATOMIC_K(ATOMIC_K),
-		.SIM_DELAY(SIM_DELAY)
-	)conv_ctrl_sub_system_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(1'b1),
+		.s1_dma_strm_axis_keep(s1_dma_strm_axis_keep),
+		.s1_dma_strm_axis_valid(s1_dma_strm_axis_valid),
+		.s1_dma_strm_axis_ready(s1_dma_strm_axis_ready),
 		
-		.calfmt(calfmt),
-		.conv_vertical_stride(conv_vertical_stride),
-		.is_grp_conv_mode(is_grp_conv_mode),
-		.group_n(group_n),
-		.n_foreach_group(n_foreach_group),
-		.data_size_foreach_group(data_size_foreach_group),
-		.ifmap_baseaddr(ifmap_baseaddr),
-		.ofmap_baseaddr(ofmap_baseaddr),
-		.ifmap_w(ifmap_w),
-		.ifmap_size(ifmap_size),
-		.fmap_chn_n(fmap_chn_n),
-		.fmap_ext_i_bottom(fmap_ext_i_bottom),
-		.external_padding_top(external_padding_top),
-		.inner_padding_top_bottom(inner_padding_top_bottom),
-		.ofmap_w(ofmap_w),
-		.ofmap_h(ofmap_h),
-		.ofmap_data_type(ofmap_data_type),
-		.kernal_wgt_baseaddr(kernal_wgt_baseaddr),
-		.kernal_shape(kernal_shape),
-		.kernal_dilation_vtc_n(kernal_dilation_vtc_n),
-		.kernal_h_dilated(kernal_h_dilated),
-		.kernal_chn_n(kernal_chn_n),
-		.cgrpn_foreach_kernal_set(cgrpn_foreach_kernal_set),
-		.kernal_num_n(kernal_num_n),
-		.kernal_set_n(kernal_set_n),
-		.max_wgtblk_w(max_wgtblk_w),
+		.s_axis_fnl_res_keep(m_axis_fnl_res_keep),
+		.s_axis_fnl_res_valid(m_axis_fnl_res_valid),
+		.s_axis_fnl_res_ready(m_axis_fnl_res_ready),
 		
-		.kernal_access_blk_start(kernal_access_blk_start),
-		.kernal_access_blk_idle(kernal_access_blk_idle),
-		.kernal_access_blk_done(kernal_access_blk_done),
+		.data_hub_fmbufcoln(data_hub_fmbufcoln),
+		.data_hub_fmbufrown(data_hub_fmbufrown),
+		.data_hub_is_grp_conv_mode(data_hub_is_grp_conv_mode),
+		.data_hub_kernal_shape(data_hub_kernal_shape),
+		.data_hub_sfc_n_each_wgtblk(data_hub_sfc_n_each_wgtblk),
+		.data_hub_kbufgrpn(data_hub_kbufgrpn),
+		.data_hub_fmbufbankn(data_hub_fmbufbankn),
+		.m_fm_rd_req_axis_data(m_fm_rd_req_axis_data),
+		.m_fm_rd_req_axis_valid(m_fm_rd_req_axis_valid),
+		.m_fm_rd_req_axis_ready(m_fm_rd_req_axis_ready),
+		.m_kwgtblk_rd_req_axis_data(m_kwgtblk_rd_req_axis_data),
+		.m_kwgtblk_rd_req_axis_valid(m_kwgtblk_rd_req_axis_valid),
+		.m_kwgtblk_rd_req_axis_ready(m_kwgtblk_rd_req_axis_ready),
+		.s_fm_sfc_row_axis_data(s_fm_sfc_row_axis_data),
+		.s_fm_sfc_row_axis_last(s_fm_sfc_row_axis_last),
+		.s_fm_sfc_row_axis_valid(s_fm_sfc_row_axis_valid),
+		.s_fm_sfc_row_axis_ready(s_fm_sfc_row_axis_ready),
+		.s_kernal_wgtblk_axis_data(s_kernal_wgtblk_axis_data),
+		.s_kernal_wgtblk_axis_last(s_kernal_wgtblk_axis_last),
+		.s_kernal_wgtblk_axis_valid(s_kernal_wgtblk_axis_valid),
+		.s_kernal_wgtblk_axis_ready(s_kernal_wgtblk_axis_ready),
 		
-		.fmap_access_blk_start(fmap_access_blk_start),
-		.fmap_access_blk_idle(fmap_access_blk_idle),
-		.fmap_access_blk_done(fmap_access_blk_done),
-		
+		.fnl_res_tr_req_gen_ofmap_baseaddr(fnl_res_tr_req_gen_ofmap_baseaddr),
+		.fnl_res_tr_req_gen_ofmap_w(fnl_res_tr_req_gen_ofmap_w),
+		.fnl_res_tr_req_gen_ofmap_h(fnl_res_tr_req_gen_ofmap_h),
+		.fnl_res_tr_req_gen_ofmap_data_type(fnl_res_tr_req_gen_ofmap_data_type),
+		.fnl_res_tr_req_gen_kernal_num_n(fnl_res_tr_req_gen_kernal_num_n),
+		.fnl_res_tr_req_gen_max_wgtblk_w(fnl_res_tr_req_gen_max_wgtblk_w),
+		.fnl_res_tr_req_gen_is_grp_conv_mode(fnl_res_tr_req_gen_is_grp_conv_mode),
+		.fnl_res_tr_req_gen_n_foreach_group(fnl_res_tr_req_gen_n_foreach_group),
 		.fnl_res_trans_blk_start(fnl_res_trans_blk_start),
 		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
 		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
 		
-		.rst_adapter(rst_adapter),
-		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
-		.cgrp_n_of_fmap_region_that_kernal_set_sel(cgrp_n_of_fmap_region_that_kernal_set_sel),
+		.mid_res_buf_calfmt(mid_res_buf_calfmt),
+		.mid_res_buf_row_n_bufferable_dup(mid_res_buf_row_n_bufferable_dup),
+		.mid_res_buf_bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+		.mid_res_buf_max_upd_latency(mid_res_buf_max_upd_latency),
+		.m_axis_ext_mid_res_data(m_axis_ext_mid_res_data),
+		.m_axis_ext_mid_res_keep(m_axis_ext_mid_res_keep),
+		.m_axis_ext_mid_res_user(m_axis_ext_mid_res_user),
+		.m_axis_ext_mid_res_last(m_axis_ext_mid_res_last),
+		.m_axis_ext_mid_res_valid(m_axis_ext_mid_res_valid),
+		.m_axis_ext_mid_res_ready(m_axis_ext_mid_res_ready),
+		.s_axis_ext_fnl_res_data(s_axis_ext_fnl_res_data),
+		.s_axis_ext_fnl_res_keep(s_axis_ext_fnl_res_keep),
+		.s_axis_ext_fnl_res_user(s_axis_ext_fnl_res_user),
+		.s_axis_ext_fnl_res_last(s_axis_ext_fnl_res_last),
+		.s_axis_ext_fnl_res_valid(s_axis_ext_fnl_res_valid),
+		.s_axis_ext_fnl_res_ready(s_axis_ext_fnl_res_ready),
 		
-		.m_kwgtblk_rd_req_axis_data(m_kwgtblk_rd_req_axis_data),
-		.m_kwgtblk_rd_req_axis_valid(m_kwgtblk_rd_req_axis_valid),
-		.m_kwgtblk_rd_req_axis_ready(m_kwgtblk_rd_req_axis_ready),
+		.en_bn_act_proc_dup(en_bn_act_proc_dup),
+		.bn_act_calfmt(bn_act_calfmt),
+		.bn_act_use_bn_unit(bn_act_use_bn_unit),
+		.bn_act_use_act_unit(bn_act_use_act_unit),
+		.bn_act_bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
+		.bn_act_bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
+		.bn_act_bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
+		.bn_act_leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
+		.bn_act_leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
+		.m_axis_ext_bn_act_i_data(m_axis_ext_bn_act_i_data),
+		.m_axis_ext_bn_act_i_keep(m_axis_ext_bn_act_i_keep),
+		.m_axis_ext_bn_act_i_user(m_axis_ext_bn_act_i_user),
+		.m_axis_ext_bn_act_i_last(m_axis_ext_bn_act_i_last),
+		.m_axis_ext_bn_act_i_valid(m_axis_ext_bn_act_i_valid),
+		.m_axis_ext_bn_act_i_ready(m_axis_ext_bn_act_i_ready),
+		.s_axis_ext_bn_act_o_data(s_axis_ext_bn_act_o_data),
+		.s_axis_ext_bn_act_o_keep(s_axis_ext_bn_act_o_keep),
+		.s_axis_ext_bn_act_o_user(s_axis_ext_bn_act_o_user),
+		.s_axis_ext_bn_act_o_last(s_axis_ext_bn_act_o_last),
+		.s_axis_ext_bn_act_o_valid(s_axis_ext_bn_act_o_valid),
+		.s_axis_ext_bn_act_o_ready(s_axis_ext_bn_act_o_ready),
+		.bn_mem_clk_a(bn_mem_clk_a),
+		.bn_mem_en_a(bn_mem_en_a),
+		.bn_mem_wen_a(bn_mem_wen_a),
+		.bn_mem_addr_a(bn_mem_addr_a),
+		.bn_mem_din_a(bn_mem_din_a),
+		.bn_mem_dout_a(bn_mem_dout_a),
 		
-		.m_fm_rd_req_axis_data(m_fm_rd_req_axis_data),
-		.m_fm_rd_req_axis_valid(m_fm_rd_req_axis_valid),
-		.m_fm_rd_req_axis_ready(m_fm_rd_req_axis_ready),
+		.round_calfmt(round_calfmt),
+		.round_fixed_point_quat_accrc(round_fixed_point_quat_accrc),
+		.m_axis_ext_round_i_data(m_axis_ext_round_i_data),
+		.m_axis_ext_round_i_keep(m_axis_ext_round_i_keep),
+		.m_axis_ext_round_i_user(m_axis_ext_round_i_user),
+		.m_axis_ext_round_i_last(m_axis_ext_round_i_last),
+		.m_axis_ext_round_i_valid(m_axis_ext_round_i_valid),
+		.m_axis_ext_round_i_ready(m_axis_ext_round_i_ready),
+		.s_axis_ext_round_o_data(s_axis_ext_round_o_data),
+		.s_axis_ext_round_o_keep(s_axis_ext_round_o_keep),
+		.s_axis_ext_round_o_user(s_axis_ext_round_o_user),
+		.s_axis_ext_round_o_last(s_axis_ext_round_o_last),
+		.s_axis_ext_round_o_valid(s_axis_ext_round_o_valid),
+		.s_axis_ext_round_o_ready(s_axis_ext_round_o_ready),
 		
-		.m_fm_cake_info_axis_data(m_fm_cake_info_axis_data),
-		.m_fm_cake_info_axis_valid(m_fm_cake_info_axis_valid),
-		.m_fm_cake_info_axis_ready(m_fm_cake_info_axis_ready),
+		.m_axis_ext_collector_data(m_axis_ext_collector_data),
+		.m_axis_ext_collector_keep(m_axis_ext_collector_keep),
+		.m_axis_ext_collector_last(m_axis_ext_collector_last),
+		.m_axis_ext_collector_valid(m_axis_ext_collector_valid),
+		.m_axis_ext_collector_ready(m_axis_ext_collector_ready),
 		
-		.m_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
-		.m_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
-		.m_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
-		.m_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
-		
-		.m_dma_s2mm_cmd_axis_data(m_dma_s2mm_cmd_axis_data),
-		.m_dma_s2mm_cmd_axis_user(m_dma_s2mm_cmd_axis_user),
-		.m_dma_s2mm_cmd_axis_valid(m_dma_s2mm_cmd_axis_valid),
-		.m_dma_s2mm_cmd_axis_ready(m_dma_s2mm_cmd_axis_ready),
-		
-		.mul0_op_a(mul0_op_a),
-		.mul0_op_b(mul0_op_b),
-		.mul0_ce(mul0_ce),
-		.mul0_res(mul0_res),
-		
-		.mul1_op_a(mul1_op_a),
-		.mul1_op_b(mul1_op_b),
-		.mul1_ce(mul1_ce),
-		.mul1_res(mul1_res),
-		
-		.mul2_op_a(mul2_op_a),
-		.mul2_op_b(mul2_op_b),
-		.mul2_ce(mul2_ce),
-		.mul2_res(mul2_res)
+		.mm2s_0_cmd_done(mm2s_0_cmd_done),
+		.mm2s_1_cmd_done(mm2s_1_cmd_done),
+		.s2mm_cmd_done(s2mm_cmd_done)
 	);
 	
 	/** 卷积数据枢纽 **/
-	// 特征图表面行读请求(AXIS从机)
-	wire[103:0] s_fm_rd_req_axis_data;
-	wire s_fm_rd_req_axis_valid;
-	wire s_fm_rd_req_axis_ready;
-	// 卷积核权重块读请求(AXIS从机)
-	wire[103:0] s_kwgtblk_rd_req_axis_data;
-	wire s_kwgtblk_rd_req_axis_valid;
-	wire s_kwgtblk_rd_req_axis_ready;
-	// 特征图表面行数据输出(AXIS主机)
-	wire[ATOMIC_C*2*8-1:0] m_fm_fout_axis_data;
-	wire m_fm_fout_axis_last; // 标志本次读请求的最后1个表面
-	wire m_fm_fout_axis_valid;
-	wire m_fm_fout_axis_ready;
-	// 卷积核权重块数据输出(AXIS主机)
-	wire[ATOMIC_C*2*8-1:0] m_kout_wgtblk_axis_data;
-	wire m_kout_wgtblk_axis_last; // 标志本次读请求的最后1个表面
-	wire m_kout_wgtblk_axis_valid;
-	wire m_kout_wgtblk_axis_ready;
 	// 实际表面行号映射表MEM主接口
 	wire actual_rid_mp_tb_mem_clk;
 	wire actual_rid_mp_tb_mem_wen_a;
@@ -695,14 +567,6 @@ module axi_generic_conv #(
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a;
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a;
 	
-	assign s_fm_rd_req_axis_data = m_fm_rd_req_axis_data;
-	assign s_fm_rd_req_axis_valid = m_fm_rd_req_axis_valid;
-	assign m_fm_rd_req_axis_ready = s_fm_rd_req_axis_ready;
-	
-	assign s_kwgtblk_rd_req_axis_data = m_kwgtblk_rd_req_axis_data;
-	assign s_kwgtblk_rd_req_axis_valid = m_kwgtblk_rd_req_axis_valid;
-	assign m_kwgtblk_rd_req_axis_ready = s_kwgtblk_rd_req_axis_ready;
-	
 	conv_data_hub #(
 		.STREAM_DATA_WIDTH(MM2S_STREAM_DATA_WIDTH),
 		.ATOMIC_C(ATOMIC_C),
@@ -720,37 +584,37 @@ module axi_generic_conv #(
 		.aresetn(aresetn),
 		.aclken(1'b1),
 		
-		.fmbufcoln(fmbufcoln),
-		.fmbufrown(fmbufrown),
+		.fmbufcoln(data_hub_fmbufcoln),
+		.fmbufrown(data_hub_fmbufrown),
 		.fmrow_random_rd_mode(1'b0),
-		.grp_conv_buf_mode(is_grp_conv_mode),
-		.kbufgrpsz(kernal_shape),
-		.sfc_n_each_wgtblk(sfc_n_each_wgtblk),
-		.kbufgrpn(kbufgrpn),
-		.fmbufbankn(fmbufbankn),
+		.grp_conv_buf_mode(data_hub_is_grp_conv_mode),
+		.kbufgrpsz(data_hub_kernal_shape),
+		.sfc_n_each_wgtblk(data_hub_sfc_n_each_wgtblk),
+		.kbufgrpn(data_hub_kbufgrpn),
+		.fmbufbankn(data_hub_fmbufbankn),
 		
-		.s_fm_rd_req_axis_data(s_fm_rd_req_axis_data),
-		.s_fm_rd_req_axis_valid(s_fm_rd_req_axis_valid),
-		.s_fm_rd_req_axis_ready(s_fm_rd_req_axis_ready),
+		.s_fm_rd_req_axis_data(m_fm_rd_req_axis_data),
+		.s_fm_rd_req_axis_valid(m_fm_rd_req_axis_valid),
+		.s_fm_rd_req_axis_ready(m_fm_rd_req_axis_ready),
 		
 		.s_fm_random_rd_axis_data(16'dx),
 		.s_fm_random_rd_axis_last(1'bx),
 		.s_fm_random_rd_axis_valid(1'b0),
 		.s_fm_random_rd_axis_ready(),
 		
-		.s_kwgtblk_rd_req_axis_data(s_kwgtblk_rd_req_axis_data),
-		.s_kwgtblk_rd_req_axis_valid(s_kwgtblk_rd_req_axis_valid),
-		.s_kwgtblk_rd_req_axis_ready(s_kwgtblk_rd_req_axis_ready),
+		.s_kwgtblk_rd_req_axis_data(m_kwgtblk_rd_req_axis_data),
+		.s_kwgtblk_rd_req_axis_valid(m_kwgtblk_rd_req_axis_valid),
+		.s_kwgtblk_rd_req_axis_ready(m_kwgtblk_rd_req_axis_ready),
 		
-		.m_fm_fout_axis_data(m_fm_fout_axis_data),
-		.m_fm_fout_axis_last(m_fm_fout_axis_last),
-		.m_fm_fout_axis_valid(m_fm_fout_axis_valid),
-		.m_fm_fout_axis_ready(m_fm_fout_axis_ready),
+		.m_fm_fout_axis_data(s_fm_sfc_row_axis_data),
+		.m_fm_fout_axis_last(s_fm_sfc_row_axis_last),
+		.m_fm_fout_axis_valid(s_fm_sfc_row_axis_valid),
+		.m_fm_fout_axis_ready(s_fm_sfc_row_axis_ready),
 		
-		.m_kout_wgtblk_axis_data(m_kout_wgtblk_axis_data),
-		.m_kout_wgtblk_axis_last(m_kout_wgtblk_axis_last),
-		.m_kout_wgtblk_axis_valid(m_kout_wgtblk_axis_valid),
-		.m_kout_wgtblk_axis_ready(m_kout_wgtblk_axis_ready),
+		.m_kout_wgtblk_axis_data(s_kernal_wgtblk_axis_data),
+		.m_kout_wgtblk_axis_last(s_kernal_wgtblk_axis_last),
+		.m_kout_wgtblk_axis_valid(s_kernal_wgtblk_axis_valid),
+		.m_kout_wgtblk_axis_ready(s_kernal_wgtblk_axis_ready),
 		
 		.m0_dma_cmd_axis_data(m0_dma_cmd_axis_data),
 		.m0_dma_cmd_axis_user(m0_dma_cmd_axis_user),
@@ -800,31 +664,283 @@ module axi_generic_conv #(
 		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a)
 	);
 	
-	/** 计算子系统 **/
-	// 特征图切块信息(AXIS从机)
-	wire[7:0] s_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
-	wire s_fm_cake_info_axis_valid;
-	wire s_fm_cake_info_axis_ready;
-	// 子表面行信息(AXIS从机)
-	wire[15:0] s_sub_row_msg_axis_data; // {输出通道号(16bit)}
-	wire s_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
-	wire s_sub_row_msg_axis_valid;
-	wire s_sub_row_msg_axis_ready;
-	// 物理特征图表面行数据(AXIS从机)
-	wire[ATOMIC_C*2*8-1:0] s_fmap_row_axis_data;
-	wire s_fmap_row_axis_last; // 标志物理特征图行的最后1个表面
-	wire s_fmap_row_axis_valid;
-	wire s_fmap_row_axis_ready;
-	// 卷积核权重块数据(AXIS从机)
-	wire[ATOMIC_C*2*8-1:0] s_kwgtblk_axis_data;
-	wire s_kwgtblk_axis_last; // 标志卷积核权重块的最后1个表面
-	wire s_kwgtblk_axis_valid;
-	wire s_kwgtblk_axis_ready;
-	// (卷积乘加)有符号乘法器阵列
-	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_a; // 操作数A
-	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_b; // 操作数B
-	wire[ATOMIC_K-1:0] mul_array_ce; // 计算使能
-	wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_array_res; // 计算结果
+	/** 卷积中间结果累加与缓存 **/
+	// 中间结果缓存MEM主接口
+	wire mid_res_mem_clk_a;
+	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
+	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_a;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_din_a;
+	wire mid_res_mem_clk_b;
+	wire[RBUF_BANK_N-1:0] mid_res_mem_ren_b;
+	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b;
+	// 中间结果累加单元组
+	// [累加单元组输入]
+	wire[ATOMIC_K*48-1:0] acmlt_in_new_res; // 新结果
+	wire[ATOMIC_K*32-1:0] acmlt_in_org_mid_res; // 原中间结果
+	wire[ATOMIC_K+2-1:0] acmlt_in_info_along[0:ATOMIC_K-1]; // 随路数据
+	wire[ATOMIC_K-1:0] acmlt_in_mask; // 项掩码
+	wire acmlt_in_first_item; // 是否第1项(标志)
+	wire acmlt_in_last_grp; // 是否最后1组(标志)
+	wire acmlt_in_last_res; // 本行最后1个中间结果(标志)
+	wire[ATOMIC_K-1:0] acmlt_in_valid; // 输入有效指示
+	// [累加单元组输出]
+	wire[ATOMIC_K*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
+	wire[ATOMIC_K+2-1:0] acmlt_out_info_along[0:ATOMIC_K-1]; // 随路数据
+	wire[ATOMIC_K-1:0] acmlt_out_mask; // 输出项掩码
+	wire acmlt_out_last_grp; // 是否最后1组(标志)
+	wire acmlt_out_last_res; // 本行最后1个中间结果(标志)
+	wire[ATOMIC_K-1:0] acmlt_out_valid; // 输出有效指示
+	
+	assign {acmlt_out_last_res, acmlt_out_last_grp, acmlt_out_mask} = acmlt_out_info_along[0];
+	
+	genvar acmlt_i;
+	generate
+		for(acmlt_i = 0;acmlt_i < ATOMIC_K;acmlt_i = acmlt_i + 1)
+		begin:acmlt_blk
+			assign acmlt_in_info_along[acmlt_i] = 
+				(acmlt_i == 0) ? 
+					{acmlt_in_last_res, acmlt_in_last_grp, acmlt_in_mask}:
+					{(ATOMIC_K+2){1'bx}};
+			
+			conv_middle_res_accumulate #(
+				.EN_SMALL_FP32("true"),
+				.INFO_ALONG_WIDTH(ATOMIC_K+2),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_middle_res_accumulate_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				
+				.calfmt(mid_res_buf_calfmt),
+				
+				.acmlt_in_exp(acmlt_in_new_res[acmlt_i*48+47:acmlt_i*48+40]),
+				.acmlt_in_frac(acmlt_in_new_res[acmlt_i*48+39:acmlt_i*48+0]),
+				.acmlt_in_org_mid_res(acmlt_in_org_mid_res[acmlt_i*32+31:acmlt_i*32+0]),
+				.acmlt_in_first_item(acmlt_in_first_item),
+				.acmlt_in_info_along(acmlt_in_info_along[acmlt_i]),
+				.acmlt_in_valid(acmlt_in_valid[acmlt_i]),
+				
+				.acmlt_out_data(acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0]),
+				.acmlt_out_info_along(acmlt_out_info_along[acmlt_i]),
+				.acmlt_out_valid(acmlt_out_valid[acmlt_i])
+			);
+		end
+	endgenerate
+	
+	conv_middle_res_acmlt_buf #(
+		.ATOMIC_K(ATOMIC_K),
+		.RBUF_BANK_N(RBUF_BANK_N),
+		.RBUF_DEPTH(RBUF_DEPTH),
+		.INFO_ALONG_WIDTH(1),
+		.SIM_DELAY(SIM_DELAY)
+	)conv_middle_res_acmlt_buf_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(1'b1),
+		
+		.calfmt(mid_res_buf_calfmt),
+		.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
+		.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+		.max_upd_latency(mid_res_buf_max_upd_latency),
+		.en_cal_round_ext(1'b1),
+		.ofmap_w(16'dx),
+		
+		.s_axis_mid_res_data(m_axis_ext_mid_res_data),
+		.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
+		.s_axis_mid_res_user({1'b0, m_axis_ext_mid_res_user}),
+		.s_axis_mid_res_last(m_axis_ext_mid_res_last),
+		.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
+		.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
+		
+		.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
+		.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
+		.m_axis_fnl_res_user(s_axis_ext_fnl_res_user),
+		.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
+		.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
+		.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
+		
+		.mem_clk_a(mid_res_mem_clk_a),
+		.mem_wen_a(mid_res_mem_wen_a),
+		.mem_addr_a(mid_res_mem_addr_a),
+		.mem_din_a(mid_res_mem_din_a),
+		.mem_clk_b(mid_res_mem_clk_b),
+		.mem_ren_b(mid_res_mem_ren_b),
+		.mem_addr_b(mid_res_mem_addr_b),
+		.mem_dout_b(mid_res_mem_dout_b),
+		
+		.acmlt_in_new_res(acmlt_in_new_res),
+		.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+		.acmlt_in_mask(acmlt_in_mask),
+		.acmlt_in_first_item(acmlt_in_first_item),
+		.acmlt_in_last_grp(acmlt_in_last_grp),
+		.acmlt_in_last_res(acmlt_in_last_res),
+		.acmlt_in_info_along(),
+		.acmlt_in_valid(acmlt_in_valid),
+		
+		.acmlt_out_data(acmlt_out_data),
+		.acmlt_out_mask(acmlt_out_mask),
+		.acmlt_out_last_grp(acmlt_out_last_grp),
+		.acmlt_out_last_res(acmlt_out_last_res),
+		.acmlt_out_to_upd_mem(1'b1),
+		.acmlt_out_valid(acmlt_out_valid)
+	);
+	
+	/** 最终结果传输请求生成单元 **/
+	// 子表面行信息(AXIS主机)
+	wire[15:0] m_sub_row_msg_axis_data; // {输出通道号(16bit)}
+	wire m_sub_row_msg_axis_last; // 整个输出特征图的最后1个子表面行(标志)
+	wire m_sub_row_msg_axis_valid;
+	wire m_sub_row_msg_axis_ready;
+	// DMA命令(AXIS主机)
+	wire[55:0] m_dma_cmd_axis_data; // {待传输字节数(24bit), 传输首地址(32bit)}
+	wire[24:0] m_dma_cmd_axis_user; // {命令ID(24bit), 固定(1'b1)/递增(1'b0)传输(1bit)}
+	wire m_dma_cmd_axis_valid;
+	wire m_dma_cmd_axis_ready;
+	// (共享)无符号乘法器#0
+	// [计算输入]
+	wire[15:0] fnl_res_trans_mul0_op_a; // 操作数A
+	wire[23:0] fnl_res_trans_mul0_op_b; // 操作数B
+	wire[3:0] fnl_res_trans_mul0_tid; // 操作ID
+	wire fnl_res_trans_mul0_req;
+	wire fnl_res_trans_mul0_grant;
+	// [计算结果]
+	wire[39:0] fnl_res_trans_mul0_res;
+	wire[3:0] fnl_res_trans_mul0_oid;
+	wire fnl_res_trans_mul0_ovld;
+	// (共享)无符号乘法器#1
+	// [计算输入]
+	wire[15:0] fnl_res_trans_mul1_op_a; // 操作数A
+	wire[23:0] fnl_res_trans_mul1_op_b; // 操作数B
+	wire[3:0] fnl_res_trans_mul1_tid; // 操作ID
+	wire fnl_res_trans_mul1_req;
+	wire fnl_res_trans_mul1_grant;
+	// [计算结果]
+	wire[39:0] fnl_res_trans_mul1_res;
+	wire[3:0] fnl_res_trans_mul1_oid;
+	wire fnl_res_trans_mul1_ovld;
+	// 乘法器(u16*u24)
+	// [计算端口]
+	wire[15:0] mul2_op_a; // 操作数A
+	wire[23:0] mul2_op_b; // 操作数B
+	wire mul2_ce; // 计算使能
+	wire[39:0] mul2_res; // 计算结果
+	// [延迟1clk的乘法器输入]
+	reg[15:0] fnl_res_trans_shared_mul_op_a_d1;
+	reg[23:0] fnl_res_trans_shared_mul_op_b_d1;
+	reg[3:0] fnl_res_trans_shared_mul_tid_d1;
+	reg fnl_res_trans_shared_mul_req_d1;
+	// [延迟2clk的乘法器输入]
+	reg[3:0] fnl_res_trans_shared_mul_tid_d2;
+	reg fnl_res_trans_shared_mul_req_d2;
+	
+	assign m_dma_s2mm_cmd_axis_data = m_dma_cmd_axis_data;
+	assign m_dma_s2mm_cmd_axis_user = m_dma_cmd_axis_user[0];
+	assign m_dma_s2mm_cmd_axis_valid = m_dma_cmd_axis_valid;
+	assign m_dma_cmd_axis_ready = m_dma_s2mm_cmd_axis_ready;
+	
+	assign mul2_op_a = fnl_res_trans_shared_mul_op_a_d1;
+	assign mul2_op_b = fnl_res_trans_shared_mul_op_b_d1;
+	assign mul2_ce = fnl_res_trans_shared_mul_req_d1;
+	
+	assign fnl_res_trans_mul0_grant = fnl_res_trans_mul0_req;
+	assign fnl_res_trans_mul0_res = mul2_res;
+	assign fnl_res_trans_mul0_oid = fnl_res_trans_shared_mul_tid_d2;
+	assign fnl_res_trans_mul0_ovld = fnl_res_trans_shared_mul_req_d2;
+	
+	assign fnl_res_trans_mul1_grant = (~fnl_res_trans_mul0_req) & fnl_res_trans_mul1_req;
+	assign fnl_res_trans_mul1_res = mul2_res;
+	assign fnl_res_trans_mul1_oid = fnl_res_trans_shared_mul_tid_d2;
+	assign fnl_res_trans_mul1_ovld = fnl_res_trans_shared_mul_req_d2;
+	
+	always @(posedge aclk)
+	begin
+		if(fnl_res_trans_mul0_req | fnl_res_trans_mul1_req)
+			{
+				fnl_res_trans_shared_mul_op_a_d1,
+				fnl_res_trans_shared_mul_op_b_d1,
+				fnl_res_trans_shared_mul_tid_d1
+			} <= # SIM_DELAY 
+				fnl_res_trans_mul0_req ? 
+					{
+						fnl_res_trans_mul0_op_a,
+						fnl_res_trans_mul0_op_b,
+						fnl_res_trans_mul0_tid
+					}:
+					{
+						fnl_res_trans_mul1_op_a,
+						fnl_res_trans_mul1_op_b,
+						fnl_res_trans_mul1_tid
+					};
+	end
+	
+	always @(posedge aclk)
+	begin
+		if(fnl_res_trans_shared_mul_req_d1)
+			fnl_res_trans_shared_mul_tid_d2 <= # SIM_DELAY fnl_res_trans_shared_mul_tid_d1;
+	end
+	
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			{fnl_res_trans_shared_mul_req_d2, fnl_res_trans_shared_mul_req_d1} <= 2'b00;
+		else
+			{fnl_res_trans_shared_mul_req_d2, fnl_res_trans_shared_mul_req_d1} <= # SIM_DELAY 
+				{fnl_res_trans_shared_mul_req_d1, fnl_res_trans_mul0_req | fnl_res_trans_mul1_req};
+	end
+	
+	fnl_res_trans_req_gen #(
+		.ATOMIC_K(ATOMIC_K),
+		.SIM_DELAY(SIM_DELAY)
+	)fnl_res_trans_req_gen_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(1'b1),
+		
+		.ofmap_baseaddr(fnl_res_tr_req_gen_ofmap_baseaddr),
+		.ofmap_w(fnl_res_tr_req_gen_ofmap_w),
+		.ofmap_h(fnl_res_tr_req_gen_ofmap_h),
+		.ofmap_data_type(fnl_res_tr_req_gen_ofmap_data_type),
+		.kernal_num_n(fnl_res_tr_req_gen_kernal_num_n),
+		.max_wgtblk_w(fnl_res_tr_req_gen_max_wgtblk_w),
+		.is_grp_conv_mode(fnl_res_tr_req_gen_is_grp_conv_mode),
+		.n_foreach_group(fnl_res_tr_req_gen_n_foreach_group),
+		.en_send_sub_row_msg(1'b1),
+		
+		.blk_start(fnl_res_trans_blk_start),
+		.blk_idle(fnl_res_trans_blk_idle),
+		.blk_done(fnl_res_trans_blk_done),
+		
+		.m_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
+		.m_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
+		.m_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
+		.m_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
+		
+		.m_dma_cmd_axis_data(m_dma_cmd_axis_data),
+		.m_dma_cmd_axis_user(m_dma_cmd_axis_user),
+		.m_dma_cmd_axis_valid(m_dma_cmd_axis_valid),
+		.m_dma_cmd_axis_ready(m_dma_cmd_axis_ready),
+		
+		.mul0_op_a(fnl_res_trans_mul0_op_a),
+		.mul0_op_b(fnl_res_trans_mul0_op_b),
+		.mul0_tid(fnl_res_trans_mul0_tid),
+		.mul0_req(fnl_res_trans_mul0_req),
+		.mul0_grant(fnl_res_trans_mul0_grant),
+		.mul0_res(fnl_res_trans_mul0_res),
+		.mul0_oid(fnl_res_trans_mul0_oid),
+		.mul0_ovld(fnl_res_trans_mul0_ovld),
+		
+		.mul1_op_a(fnl_res_trans_mul1_op_a),
+		.mul1_op_b(fnl_res_trans_mul1_op_b),
+		.mul1_tid(fnl_res_trans_mul1_tid),
+		.mul1_req(fnl_res_trans_mul1_req),
+		.mul1_grant(fnl_res_trans_mul1_grant),
+		.mul1_res(fnl_res_trans_mul1_res),
+		.mul1_oid(fnl_res_trans_mul1_oid),
+		.mul1_ovld(fnl_res_trans_mul1_ovld)
+	);
+	
+	/** BN与激活单元 **/
 	// BN乘法器组
 	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_a; // 操作数A
 	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_b; // 操作数B
@@ -835,15 +951,6 @@ module axi_generic_conv #(
 	wire[LEAKY_RELU_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_b; // 操作数B
 	wire[LEAKY_RELU_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_ce; // 计算使能
 	wire[LEAKY_RELU_MUL_RES_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_res; // 计算结果
-	// 中间结果缓存MEM主接口
-	wire mid_res_mem_clk_a;
-	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
-	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_a;
-	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_din_a;
-	wire mid_res_mem_clk_b;
-	wire[RBUF_BANK_N-1:0] mid_res_mem_ren_b;
-	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
-	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b;
 	// BN参数MEM主接口
 	wire bn_mem_clk_b;
 	wire bn_mem_ren_b;
@@ -858,122 +965,51 @@ module axi_generic_conv #(
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
 	
-	assign s_fm_cake_info_axis_data = m_fm_cake_info_axis_data;
-	assign s_fm_cake_info_axis_valid = m_fm_cake_info_axis_valid;
-	assign m_fm_cake_info_axis_ready = s_fm_cake_info_axis_ready;
-	
-	assign s_sub_row_msg_axis_data = m_sub_row_msg_axis_data;
-	assign s_sub_row_msg_axis_last = m_sub_row_msg_axis_last;
-	assign s_sub_row_msg_axis_valid = m_sub_row_msg_axis_valid;
-	assign m_sub_row_msg_axis_ready = s_sub_row_msg_axis_ready;
-	
-	assign s_fmap_row_axis_data = m_fm_fout_axis_data;
-	assign s_fmap_row_axis_last = m_fm_fout_axis_last;
-	assign s_fmap_row_axis_valid = m_fm_fout_axis_valid;
-	assign m_fm_fout_axis_ready = s_fmap_row_axis_ready;
-	
-	assign s_kwgtblk_axis_data = m_kout_wgtblk_axis_data;
-	assign s_kwgtblk_axis_last = m_kout_wgtblk_axis_last;
-	assign s_kwgtblk_axis_valid = m_kout_wgtblk_axis_valid;
-	assign m_kout_wgtblk_axis_ready = s_kwgtblk_axis_ready;
-	
-	conv_cal_sub_system #(
+	conv_bn_act_proc #(
+		.FP32_KEEP(1'b1),
 		.ATOMIC_K(ATOMIC_K),
-		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
-		.STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
-		.FP32_KEEP(FP32_KEEP ? 1'b1:1'b0),
-		.MAX_CAL_ROUND(MAX_CAL_ROUND),
-		.EN_SMALL_FP16("true"),
-		.EN_SMALL_FP32("true"),
-		.BN_ACT_INT16_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
-		.BN_ACT_INT32_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
-		.BN_ACT_FP32_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
-		.RBUF_BANK_N(RBUF_BANK_N),
-		.RBUF_DEPTH(RBUF_DEPTH),
+		.INT16_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
+		.INT32_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
+		.FP32_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
 		.SIM_DELAY(SIM_DELAY)
-	)conv_cal_sub_system_u(
+	)conv_bn_act_proc_u(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
 		
-		.rst_adapter(rst_adapter),
-		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
-		.row_n_submitted_to_mac_array(),
-		.en_mac_array(en_mac_array),
-		.ftm_sfc_cal_n(ftm_sfc_cal_n),
-		.en_packer(en_packer),
-		.en_bn_act_proc(en_bn_act_proc),
+		.en_bn_act_proc(en_bn_act_proc_dup),
 		
-		.conv_horizontal_stride(conv_horizontal_stride),
-		.calfmt(calfmt),
-		.cal_round(cal_round),
-		.external_padding_left(external_padding_left),
-		.inner_padding_left_right(inner_padding_left_right),
-		.ifmap_w(ifmap_w),
-		.ofmap_w(ofmap_w),
-		.cgrp_n_of_fmap_region_that_kernal_set_sel(cgrp_n_of_fmap_region_that_kernal_set_sel),
-		.kernal_shape(kernal_shape),
-		.kernal_dilation_hzt_n(kernal_dilation_hzt_n),
-		.kernal_w_dilated(kernal_w_dilated),
-		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
-		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
-		.use_bn_unit(use_bn_unit),
-		.use_act_unit(use_act_unit),
-		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
-		.bn_is_a_eq_1(bn_is_a_eq_1),
-		.bn_is_b_eq_0(bn_is_b_eq_0),
-		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
-		.leaky_relu_param_alpha(leaky_relu_param_alpha),
+		.calfmt(bn_act_calfmt),
+		.use_bn_unit(bn_act_use_bn_unit),
+		.use_act_unit(bn_act_use_act_unit),
+		.bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
+		.bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
+		.bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
+		.is_in_const_mac_mode(1'b0),
+		.param_a_in_const_mac_mode(32'hxxxxxxxx),
+		.param_b_in_const_mac_mode(32'hxxxxxxxx),
+		.leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
+		.leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
 		
-		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
-		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
-		.s_fm_cake_info_axis_ready(s_fm_cake_info_axis_ready),
+		.s_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
+		.s_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
+		.s_sub_row_msg_axis_valid(m_sub_row_msg_axis_valid),
+		.s_sub_row_msg_axis_ready(m_sub_row_msg_axis_ready),
 		
-		.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
-		.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
-		.s_sub_row_msg_axis_valid(s_sub_row_msg_axis_valid),
-		.s_sub_row_msg_axis_ready(s_sub_row_msg_axis_ready),
+		.s_axis_fnl_res_data(m_axis_ext_bn_act_i_data),
+		.s_axis_fnl_res_keep(m_axis_ext_bn_act_i_keep),
+		.s_axis_fnl_res_user(m_axis_ext_bn_act_i_user),
+		.s_axis_fnl_res_last(m_axis_ext_bn_act_i_last),
+		.s_axis_fnl_res_valid(m_axis_ext_bn_act_i_valid),
+		.s_axis_fnl_res_ready(m_axis_ext_bn_act_i_ready),
 		
-		.s_fmap_row_axis_data(s_fmap_row_axis_data),
-		.s_fmap_row_axis_last(s_fmap_row_axis_last),
-		.s_fmap_row_axis_valid(s_fmap_row_axis_valid),
-		.s_fmap_row_axis_ready(s_fmap_row_axis_ready),
-		
-		.s_kwgtblk_axis_data(s_kwgtblk_axis_data),
-		.s_kwgtblk_axis_last(s_kwgtblk_axis_last),
-		.s_kwgtblk_axis_valid(s_kwgtblk_axis_valid),
-		.s_kwgtblk_axis_ready(s_kwgtblk_axis_ready),
-		
-		.m_axis_fnl_res_data(m_axis_fnl_res_data),
-		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
-		.m_axis_fnl_res_last(m_axis_fnl_res_last),
-		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
-		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),
-		
-		.mul0_op_a(mul_array_op_a),
-		.mul0_op_b(mul_array_op_b),
-		.mul0_ce(mul_array_ce),
-		.mul0_res(mul_array_res),
-		
-		.mul1_op_a(bn_mul_op_a),
-		.mul1_op_b(bn_mul_op_b),
-		.mul1_ce(bn_mul_ce),
-		.mul1_res(bn_mul_res),
-		
-		.mul2_op_a(leaky_relu_mul_op_a),
-		.mul2_op_b(leaky_relu_mul_op_b),
-		.mul2_ce(leaky_relu_mul_ce),
-		.mul2_res(leaky_relu_mul_res),
-		
-		.mid_res_mem_clk_a(mid_res_mem_clk_a),
-		.mid_res_mem_wen_a(mid_res_mem_wen_a),
-		.mid_res_mem_addr_a(mid_res_mem_addr_a),
-		.mid_res_mem_din_a(mid_res_mem_din_a),
-		.mid_res_mem_clk_b(mid_res_mem_clk_b),
-		.mid_res_mem_ren_b(mid_res_mem_ren_b),
-		.mid_res_mem_addr_b(mid_res_mem_addr_b),
-		.mid_res_mem_dout_b(mid_res_mem_dout_b),
+		.m_axis_bn_act_res_data(s_axis_ext_bn_act_o_data),
+		.m_axis_bn_act_res_keep(s_axis_ext_bn_act_o_keep),
+		.m_axis_bn_act_res_user(s_axis_ext_bn_act_o_user),
+		.m_axis_bn_act_res_last(s_axis_ext_bn_act_o_last),
+		.m_axis_bn_act_res_valid(s_axis_ext_bn_act_o_valid),
+		.m_axis_bn_act_res_ready(s_axis_ext_bn_act_o_ready),
 		
 		.bn_mem_clk_b(bn_mem_clk_b),
 		.bn_mem_ren_b(bn_mem_ren_b),
@@ -986,42 +1022,80 @@ module axi_generic_conv #(
 		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
-		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b)
+		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
+		
+		.mul0_op_a(bn_mul_op_a),
+		.mul0_op_b(bn_mul_op_b),
+		.mul0_ce(bn_mul_ce),
+		.mul0_res(bn_mul_res),
+		
+		.mul1_op_a(leaky_relu_mul_op_a),
+		.mul1_op_b(leaky_relu_mul_op_b),
+		.mul1_ce(leaky_relu_mul_ce),
+		.mul1_res(leaky_relu_mul_res)
+	);
+	
+	/** 输出数据舍入单元组 **/
+	out_round_group #(
+		.ATOMIC_K(ATOMIC_K),
+		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
+		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
+		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
+		.USER_WIDTH(5),
+		.SIM_DELAY(SIM_DELAY)
+	)out_round_group_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(1'b1),
+		
+		.calfmt(round_calfmt),
+		.fixed_point_quat_accrc(round_fixed_point_quat_accrc),
+		
+		.s_axis_round_data(m_axis_ext_round_i_data),
+		.s_axis_round_keep(m_axis_ext_round_i_keep),
+		.s_axis_round_user(m_axis_ext_round_i_user),
+		.s_axis_round_last(m_axis_ext_round_i_last),
+		.s_axis_round_valid(m_axis_ext_round_i_valid),
+		.s_axis_round_ready(m_axis_ext_round_i_ready),
+		
+		.m_axis_round_data(s_axis_ext_round_o_data),
+		.m_axis_round_keep(s_axis_ext_round_o_keep),
+		.m_axis_round_user(s_axis_ext_round_o_user),
+		.m_axis_round_last(s_axis_ext_round_o_last),
+		.m_axis_round_valid(s_axis_ext_round_o_valid),
+		.m_axis_round_ready(s_axis_ext_round_o_ready)
+	);
+	
+	/** 最终结果数据收集器 **/
+	conv_final_data_collector #(
+		.IN_ITEM_WIDTH(ATOMIC_K),
+		.OUT_ITEM_WIDTH(S2MM_STREAM_DATA_WIDTH/(FP32_KEEP ? 32:16)),
+		.DATA_WIDTH_FOREACH_ITEM(FP32_KEEP ? 32:16),
+		.HAS_USER("false"),
+		.USER_WIDTH(1),
+		.EN_COLLECTOR_OUT_REG_SLICE("true"),
+		.SIM_DELAY(SIM_DELAY)
+	)conv_final_data_collector_u(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(1'b1),
+		
+		.s_axis_collector_data(m_axis_ext_collector_data),
+		.s_axis_collector_keep(m_axis_ext_collector_keep),
+		.s_axis_collector_user(1'bx),
+		.s_axis_collector_last(m_axis_ext_collector_last),
+		.s_axis_collector_valid(m_axis_ext_collector_valid),
+		.s_axis_collector_ready(m_axis_ext_collector_ready),
+		
+		.m_axis_collector_data(m_axis_fnl_res_data),
+		.m_axis_collector_keep(m_axis_fnl_res_keep),
+		.m_axis_collector_user(),
+		.m_axis_collector_last(m_axis_fnl_res_last),
+		.m_axis_collector_valid(m_axis_fnl_res_valid),
+		.m_axis_collector_ready(m_axis_fnl_res_ready)
 	);
 	
 	/** 乘法器 **/
-	unsigned_mul #(
-		.op_a_width(16),
-		.op_b_width(16),
-		.output_width(32),
-		.simulation_delay(SIM_DELAY)
-	)mul_u16_u16_u0(
-		.clk(aclk),
-		
-		.ce_s0_mul(mul0_ce),
-		
-		.op_a(mul0_op_a),
-		.op_b(mul0_op_b),
-		
-		.res(mul0_res)
-	);
-	
-	unsigned_mul #(
-		.op_a_width(16),
-		.op_b_width(24),
-		.output_width(40),
-		.simulation_delay(SIM_DELAY)
-	)mul_u16_u24_u0(
-		.clk(aclk),
-		
-		.ce_s0_mul(mul1_ce),
-		
-		.op_a(mul1_op_a),
-		.op_b(mul1_op_b),
-		
-		.res(mul1_res)
-	);
-	
 	unsigned_mul #(
 		.op_a_width(16),
 		.op_b_width(24),
@@ -1037,32 +1111,6 @@ module axi_generic_conv #(
 		
 		.res(mul2_res)
 	);
-	
-	genvar conv_mac_mul_i;
-	generate
-		for(conv_mac_mul_i = 0;conv_mac_mul_i < ATOMIC_K*ATOMIC_C;conv_mac_mul_i = conv_mac_mul_i + 1)
-		begin:mul_blk
-			signed_mul #(
-				.op_a_width(16),
-				.op_b_width(16),
-				.output_width(32),
-				.en_in_reg("false"),
-				.en_out_reg("false"),
-				.simulation_delay(SIM_DELAY)
-			)mul_s16_s16_u(
-				.clk(aclk),
-				
-				.ce_in_reg(1'b0),
-				.ce_mul(mul_array_ce[conv_mac_mul_i/ATOMIC_C]),
-				.ce_out_reg(1'b0),
-				
-				.op_a(mul_array_op_a[16*conv_mac_mul_i+15:16*conv_mac_mul_i]),
-				.op_b(mul_array_op_b[16*conv_mac_mul_i+15:16*conv_mac_mul_i]),
-				
-				.res(mul_array_res[32*conv_mac_mul_i+31:32*conv_mac_mul_i])
-			);
-		end
-	endgenerate
 	
 	genvar bn_act_mul_i;
 	generate
@@ -1150,7 +1198,7 @@ module axi_generic_conv #(
 				.style("LOW_LATENCY"),
 				.mem_width(ATOMIC_K*4*8+ATOMIC_K),
 				.mem_depth(RBUF_DEPTH),
-				.INIT_FILE("default"),
+				.INIT_FILE("no_init"),
 				.simulation_delay(SIM_DELAY)
 			)mid_res_ram_u(
 				.clk(mid_res_mem_clk_a),
@@ -1170,7 +1218,7 @@ module axi_generic_conv #(
 		.style("LOW_LATENCY"),
 		.mem_width(LG_FMBUF_BUFFER_RID_WIDTH),
 		.mem_depth(4096),
-		.INIT_FILE("random"),
+		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
 	)actual_rid_mp_tb_ram_u(
 		.clk(actual_rid_mp_tb_mem_clk),
@@ -1188,7 +1236,7 @@ module axi_generic_conv #(
 		.style("LOW_LATENCY"),
 		.mem_width(12),
 		.mem_depth(2 ** LG_FMBUF_BUFFER_RID_WIDTH),
-		.INIT_FILE("random"),
+		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
 	)buffer_rid_mp_tb_ram_u(
 		.clk(buffer_rid_mp_tb_mem_clk),
