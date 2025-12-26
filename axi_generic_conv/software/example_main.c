@@ -89,6 +89,11 @@ int main(){
 	if(axi_generic_conv_init(&axi_generic_conv, XPAR_AXI_GENERIC_CONV_0_BASEADDR)){
 		return -1;
 	}
+	
+	// 使能加速器
+	if(axi_generic_conv_enable(&axi_generic_conv)){
+		return -1;
+	}
 
 	AxiGnrConvCfg conv_cfg;
 
@@ -269,7 +274,7 @@ static int test_conv_layer(
 	}
 
 	// 等待通用卷积处理单元的数据输出完成
-	while(axi_generic_conv_get_cmd_fns_n(&axi_generic_conv, Q_CMD_FNS_N_S2MM) < out_fmap_sfc_row_n);
+	while(axi_generic_conv_get_cmd_fns_n(&axi_generic_conv, CONV_Q_CMD_FNS_N_S2MM) < out_fmap_sfc_row_n);
 
 	// 获取性能监测计数器的值
 	axi_generic_conv_get_pm_cnt(&axi_generic_conv, &pm_sts);
@@ -283,7 +288,7 @@ static int test_conv_layer(
 	axi_generic_conv_disable_pm_cnt(&axi_generic_conv);
 
 	// 清除DMA命令完成数
-	if(axi_generic_conv_clr_cmd_fns_n(&axi_generic_conv, C_ALL)){
+	if(axi_generic_conv_clr_cmd_fns_n(&axi_generic_conv, CONV_C_ALL)){
 		return -1;
 	}
 	// 清除性能监测计数器

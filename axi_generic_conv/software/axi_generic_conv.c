@@ -12,6 +12,7 @@
         2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
         2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
+        2025.12.26 1.23 修改ctrl0寄存器
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -160,8 +161,8 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	}
 
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000002;
-	if(handler->reg_region_ctrl->ctrl0 & 0x00000002){
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000004;
+	if(handler->reg_region_ctrl->ctrl0 & 0x00000004){
 		handler->property.performance_monitor_supported = 1;
 	}else{
 		handler->property.performance_monitor_supported = 0;
@@ -191,6 +192,34 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 /*************************
 @ctrl
 @public
+@brief  使能加速器
+@param  handler 通用卷积处理单元(加速器句柄)
+@return 是否成功
+*************************/
+int axi_generic_conv_enable(AxiGnrConvHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000001;
+
+	return 0;
+}
+
+/*************************
+@ctrl
+@public
+@brief  除能加速器
+@param  handler 通用卷积处理单元(加速器句柄)
+@return none
+*************************/
+void axi_generic_conv_disable(AxiGnrConvHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000001);
+}
+
+/*************************
+@ctrl
+@public
 @brief  使能计算子系统
 @param  handler 通用卷积处理单元(加速器句柄)
 @return 是否成功
@@ -198,7 +227,7 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 int axi_generic_conv_enable_cal_sub_sys(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000001;
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000002;
 
 	return 0;
 }
@@ -213,7 +242,7 @@ int axi_generic_conv_enable_cal_sub_sys(AxiGnrConvHandler* handler){
 void axi_generic_conv_disable_cal_sub_sys(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000001);
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000002);
 }
 
 /*************************
@@ -230,7 +259,7 @@ int axi_generic_conv_enable_pm_cnt(AxiGnrConvHandler* handler){
 
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000002;
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000004;
 
 	return 0;
 }
@@ -245,7 +274,7 @@ int axi_generic_conv_enable_pm_cnt(AxiGnrConvHandler* handler){
 void axi_generic_conv_disable_pm_cnt(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000002);
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000004);
 }
 
 /*************************
@@ -258,7 +287,7 @@ void axi_generic_conv_disable_pm_cnt(AxiGnrConvHandler* handler){
 int axi_generic_conv_enable_bn_act_proc(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000004;
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | 0x00000008;
 
 	return 0;
 }
@@ -273,7 +302,7 @@ int axi_generic_conv_enable_bn_act_proc(AxiGnrConvHandler* handler){
 void axi_generic_conv_disable_bn_act_proc(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000004);
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~0x00000008);
 }
 
 /*************************
@@ -286,7 +315,7 @@ void axi_generic_conv_disable_bn_act_proc(AxiGnrConvHandler* handler){
 int axi_generic_conv_start(AxiGnrConvHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	if(!(pre_ctrl0 & 0x00000001)){
+	if(!(pre_ctrl0 & 0x00000002)){
 		return -1;
 	}
 
@@ -596,11 +625,11 @@ void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_pa
 *************************/
 uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNQueryType query_type){
 	switch(query_type){
-	case Q_CMD_FNS_N_MM2S_0:
+	case CONV_Q_CMD_FNS_N_MM2S_0:
 		return handler->reg_region_sts->sts1;
-	case Q_CMD_FNS_N_MM2S_1:
+	case CONV_Q_CMD_FNS_N_MM2S_1:
 		return handler->reg_region_sts->sts2;
-	case Q_CMD_FNS_N_S2MM:
+	case CONV_Q_CMD_FNS_N_S2MM:
 		return handler->reg_region_sts->sts3;
 	}
 
@@ -616,15 +645,15 @@ uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCm
 @return 是否成功
 *************************/
 int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNClrType clr_type){
-	if(clr_type == C_CMD_FNS_N_MM2S_0 || clr_type == C_ALL){
+	if(clr_type == CONV_C_CMD_FNS_N_MM2S_0 || clr_type == CONV_C_ALL){
 		handler->reg_region_sts->sts1 = 0;
 	}
 
-	if(clr_type == C_CMD_FNS_N_MM2S_1 || clr_type == C_ALL){
+	if(clr_type == CONV_C_CMD_FNS_N_MM2S_1 || clr_type == CONV_C_ALL){
 		handler->reg_region_sts->sts2 = 0;
 	}
 
-	if(clr_type == C_CMD_FNS_N_S2MM || clr_type == C_ALL){
+	if(clr_type == CONV_C_CMD_FNS_N_S2MM || clr_type == CONV_C_ALL){
 		handler->reg_region_sts->sts3 = 0;
 	}
 

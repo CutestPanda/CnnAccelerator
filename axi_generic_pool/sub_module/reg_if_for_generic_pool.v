@@ -56,9 +56,10 @@ SOFTWARE.
 	|          |         |                               |              | 表面行访问请求生成单元           |
 	|          |         |1: 启动最终结果传输请求生成单元|      WO      | 向该字段写1以启动                |
 	|          |         |                               |              | 最终结果传输请求生成单元         |
-	|          |         |8: 使能计算子系统              |      RW      |                                  |
-	|          |         |9: 启用后乘加处理              |      RW      | 仅当支持后乘加处理时可写1        |
-	|          |         |10: 使能性能监测计数器         |      RW      | 仅当支持性能监测时可写1          |
+	|          |         |8: 使能加速器                  |      RW      |                                  |
+	|          |         |9: 使能计算子系统              |      RW      |                                  |
+	|          |         |10: 启用后乘加处理             |      RW      | 仅当支持后乘加处理时可写1        |
+	|          |         |11: 使能性能监测计数器         |      RW      | 仅当支持性能监测时可写1          |
 	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
@@ -143,7 +144,7 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/12/24
+日期: 2025/12/26
 ********************************************************************/
 
 
@@ -198,6 +199,7 @@ module reg_if_for_generic_pool #(
     output wire s_axi_lite_wready,
 	
 	// 控制信号
+	output wire en_accelerator, // 使能加速器
 	output wire en_adapter, // 使能适配器
 	output wire en_upd_grp_run_cnt, // 使能更新单元组运行周期数计数器
 	output wire en_post_mac, // 使能后乘加处理
@@ -450,7 +452,7 @@ module reg_if_for_generic_pool #(
 	wire[15:0] mid_res_buf_bank_n_r; // 中间结果缓存BANK数
 	wire[15:0] mid_res_buf_bank_depth_r; // 中间结果每个BANK的深度
 	
-	assign version_r = {4'd7, 4'd1, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.17
+	assign version_r = {4'd6, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.26
 	assign acc_type_r = {5'd26, 5'd26, 5'd11, 5'd14, 5'd14, 5'd15}; // "pool\0\0"
 	assign acc_id_r = ACCELERATOR_ID;
 	assign atomic_c_r = ATOMIC_C;
@@ -471,17 +473,20 @@ module reg_if_for_generic_pool #(
 	|          |         |                               |              | 表面行访问请求生成单元           |
 	|          |         |1: 启动最终结果传输请求生成单元|      WO      | 向该字段写1以启动                |
 	|          |         |                               |              | 最终结果传输请求生成单元         |
-	|          |         |8: 使能计算子系统              |      RW      |                                  |
-	|          |         |9: 启用后乘加处理              |      RW      | 仅当支持后乘加处理时可写1        |
-	|          |         |10: 使能性能监测计数器         |      RW      | 仅当支持性能监测时可写1          |
+	|          |         |8: 使能加速器                  |      RW      |                                  |
+	|          |         |9: 使能计算子系统              |      RW      |                                  |
+	|          |         |10: 启用后乘加处理             |      RW      | 仅当支持后乘加处理时可写1        |
+	|          |         |11: 使能性能监测计数器         |      RW      | 仅当支持性能监测时可写1          |
 	--------------------------------------------------------------------------------------------------------
 	**/
 	reg sfc_row_access_blk_start_r; // 启动表面行访问请求生成单元(指示)
 	reg fnl_res_tr_req_gen_blk_start_r; // 启动最终结果传输请求生成单元(指示)
+	reg en_accelerator_r; // 使能加速器
 	reg en_cal_sub_sys_r; // 使能计算子系统
 	reg to_use_post_mac_r; // 启用后乘加处理
 	reg en_pm_cnt_r; // 使能性能监测计数器
 	
+	assign en_accelerator = en_accelerator_r;
 	assign en_adapter = en_cal_sub_sys_r;
 	assign en_upd_grp_run_cnt = en_cal_sub_sys_r & EN_PERF_MON;
 	assign en_post_mac = en_cal_sub_sys_r & to_use_post_mac_r;
@@ -499,16 +504,17 @@ module reg_if_for_generic_pool #(
 				{2{regs_en & regs_wen & (regs_addr == 16)}} & regs_din[1:0];
 	end
 	
-	// 使能计算子系统, 启用后乘加处理, 使能性能监测计数器
+	// 使能加速器, 使能计算子系统, 启用后乘加处理, 使能性能监测计数器
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
-			{en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r} <= 3'b000;
+			{en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r, en_accelerator_r} <= 4'b0000;
 		else if(regs_en & regs_wen & (regs_addr == 16))
-			{en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r} <= # SIM_DELAY 
+			{en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r, en_accelerator_r} <= # SIM_DELAY 
 				{
-					regs_din[10] & EN_PERF_MON,
-					regs_din[9] & POST_MAC_SUPPORTED,
+					regs_din[11] & EN_PERF_MON,
+					regs_din[10] & POST_MAC_SUPPORTED,
+					regs_din[9],
 					regs_din[8]
 				};
 	end
@@ -553,7 +559,7 @@ module reg_if_for_generic_pool #(
 		if(~aresetn)
 			dma_mm2s_fns_cmd_n_r <= 32'd0;
 		else if(
-			mm2s_cmd_done | 
+			(en_accelerator_r & mm2s_cmd_done) | 
 			(regs_en & regs_wen & (regs_addr == 25))
 		)
 			dma_mm2s_fns_cmd_n_r <= # SIM_DELAY 
@@ -568,7 +574,7 @@ module reg_if_for_generic_pool #(
 		if(~aresetn)
 			dma_s2mm_fns_cmd_n_r <= 32'd0;
 		else if(
-			s2mm_cmd_done | 
+			(en_accelerator_r & s2mm_cmd_done) | 
 			(regs_en & regs_wen & (regs_addr == 26))
 		)
 			dma_s2mm_fns_cmd_n_r <= # SIM_DELAY 
@@ -585,7 +591,7 @@ module reg_if_for_generic_pool #(
 		else if(
 			EN_PERF_MON & 
 			(
-				en_pm_cnt_r | 
+				(en_accelerator_r & en_pm_cnt_r) | 
 				(regs_en & regs_wen & (regs_addr == 27))
 			)
 		)
@@ -603,7 +609,7 @@ module reg_if_for_generic_pool #(
 		else if(
 			EN_PERF_MON & 
 			(
-				(s_mm2s_strm_axis_valid & s_mm2s_strm_axis_ready) | 
+				(en_accelerator_r & s_mm2s_strm_axis_valid & s_mm2s_strm_axis_ready) | 
 				(regs_en & regs_wen & (regs_addr == 28))
 			)
 		)
@@ -621,7 +627,7 @@ module reg_if_for_generic_pool #(
 		else if(
 			EN_PERF_MON & 
 			(
-				(s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
+				(en_accelerator_r & s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
 				(regs_en & regs_wen & (regs_addr == 29))
 			)
 		)
@@ -1068,7 +1074,7 @@ module reg_if_for_generic_pool #(
 				4: regs_dout <= # SIM_DELAY {phy_buffer_bank_depth_r[15:0], phy_buffer_bank_n_r[15:0]};
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
 				
-				16: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 5'd0, en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r, 8'd0};
+				16: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 4'd0, en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r, en_accelerator_r, 8'd0};
 				
 				24: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 8'd0, 6'd0, fnl_res_tr_req_gen_blk_idle_r, sfc_row_access_blk_idle_r};
 				25: regs_dout <= # SIM_DELAY {dma_mm2s_fns_cmd_n_r[31:0]};

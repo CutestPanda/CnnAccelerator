@@ -84,6 +84,11 @@ int main(){
 	if(axi_generic_pool_init(&axi_generic_pool, XPAR_AXI_GENERIC_POOL_0_BASEADDR)){
 		return -1;
 	}
+	
+	// 使能加速器
+	if(axi_generic_pool_enable(&axi_generic_pool)){
+		return -1;
+	}
 
 	// 配置上采样层参数
 	AxiGnrPoolFmapCfg fmap_cfg;
@@ -141,7 +146,7 @@ int main(){
 	}
 
 	// 等待通用池化处理单元的数据输出完成
-	while(axi_generic_pool_get_cmd_fns_n(&axi_generic_pool, Q_CMD_FNS_N_S2MM) < OUT_FMAP_ROW_N);
+	while(axi_generic_pool_get_cmd_fns_n(&axi_generic_pool, POOL_Q_CMD_FNS_N_S2MM) < OUT_FMAP_ROW_N);
 
 	// 获取性能监测计数器的值
 	if(axi_generic_pool_get_pm_cnt(&axi_generic_pool, &pm_sts)){
@@ -155,7 +160,7 @@ int main(){
 	axi_generic_pool_disable_pm_cnt(&axi_generic_pool);
 
 	// 清除DMA命令完成数
-	if(axi_generic_pool_clr_cmd_fns_n(&axi_generic_pool, C_ALL)){
+	if(axi_generic_pool_clr_cmd_fns_n(&axi_generic_pool, POOL_C_ALL)){
 		return -1;
 	}
 	// 清除性能监测计数器

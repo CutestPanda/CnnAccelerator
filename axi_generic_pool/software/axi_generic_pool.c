@@ -8,6 +8,7 @@
         2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
         2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
         2025.12.22 1.10 为最大池化增加非0常量填充模式
+        2025.12.26 1.11 修改ctrl0寄存器
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -140,8 +141,8 @@ int axi_generic_pool_init(AxiGnrPoolHandler* handler, uint32_t baseaddr){
 		handler->property.non_zero_const_padding_supported = 0;
 	}
 
-	handler->reg_region_ctrl->ctrl0 = (0x00000001 << 10);
-	if(handler->reg_region_ctrl->ctrl0 & (0x00000001 << 10)){
+	handler->reg_region_ctrl->ctrl0 = (0x00000001 << 11);
+	if(handler->reg_region_ctrl->ctrl0 & (0x00000001 << 11)){
 		handler->property.performance_monitor_supported = 1;
 	}else{
 		handler->property.performance_monitor_supported = 0;
@@ -154,6 +155,34 @@ int axi_generic_pool_init(AxiGnrPoolHandler* handler, uint32_t baseaddr){
 /*************************
 @ctrl
 @public
+@brief  使能加速器
+@param  handler 通用池化处理单元(加速器句柄)
+@return 是否成功
+*************************/
+int axi_generic_pool_enable(AxiGnrPoolHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 8);
+
+	return 0;
+}
+
+/*************************
+@ctrl
+@public
+@brief  除能加速器
+@param  handler 通用池化处理单元(加速器句柄)
+@return none
+*************************/
+void axi_generic_pool_disable(AxiGnrPoolHandler* handler){
+	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
+
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 8));
+}
+
+/*************************
+@ctrl
+@public
 @brief  使能计算子系统
 @param  handler 通用池化处理单元(加速器句柄)
 @return 是否成功
@@ -161,7 +190,7 @@ int axi_generic_pool_init(AxiGnrPoolHandler* handler, uint32_t baseaddr){
 int axi_generic_pool_enable_cal_sub_sys(AxiGnrPoolHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 8);
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 9);
 
 	return 0;
 }
@@ -176,7 +205,7 @@ int axi_generic_pool_enable_cal_sub_sys(AxiGnrPoolHandler* handler){
 void axi_generic_pool_disable_cal_sub_sys(AxiGnrPoolHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 8));
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 9));
 }
 
 /*************************
@@ -193,7 +222,7 @@ int axi_generic_pool_enable_pm_cnt(AxiGnrPoolHandler* handler){
 
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 10);
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 11);
 
 	return 0;
 }
@@ -208,7 +237,7 @@ int axi_generic_pool_enable_pm_cnt(AxiGnrPoolHandler* handler){
 void axi_generic_pool_disable_pm_cnt(AxiGnrPoolHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 10));
+	handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 11));
 }
 
 /*************************
@@ -221,7 +250,7 @@ void axi_generic_pool_disable_pm_cnt(AxiGnrPoolHandler* handler){
 int axi_generic_pool_start(AxiGnrPoolHandler* handler){
 	uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-	if(!(pre_ctrl0 & (0x00000001 << 8))){
+	if(!(pre_ctrl0 & (0x00000001 << 9))){
 		return -1;
 	}
 
@@ -381,7 +410,7 @@ int axi_generic_pool_cfg_in_pool_mode(
 	if(cal_cfg->use_post_mac){
 		uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 9);
+		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 10);
 
 		handler->reg_region_cal_cfg->cal_cfg3 =
 			(((uint32_t)cal_cfg->post_mac_is_a_eq_1) << 0) |
@@ -394,7 +423,7 @@ int axi_generic_pool_cfg_in_pool_mode(
 	}else{
 		uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 9));
+		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 10));
 	}
 
 	handler->reg_region_fmap_cfg->fmap_cfg0 =
@@ -526,7 +555,7 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 	if(cal_cfg->use_post_mac){
 		uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 9);
+		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 | (0x00000001 << 10);
 
 		handler->reg_region_cal_cfg->cal_cfg3 =
 			(((uint32_t)cal_cfg->post_mac_is_a_eq_1) << 0) |
@@ -539,7 +568,7 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 	}else{
 		uint32_t pre_ctrl0 = handler->reg_region_ctrl->ctrl0;
 
-		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 9));
+		handler->reg_region_ctrl->ctrl0 = pre_ctrl0 & (~(0x00000001 << 10));
 	}
 
 	handler->reg_region_fmap_cfg->fmap_cfg0 =
@@ -582,9 +611,9 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 *************************/
 uint32_t axi_generic_pool_get_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCmdFnsNQueryType query_type){
 	switch(query_type){
-	case Q_CMD_FNS_N_MM2S:
+	case POOL_Q_CMD_FNS_N_MM2S:
 		return handler->reg_region_sts->sts1;
-	case Q_CMD_FNS_N_S2MM:
+	case POOL_Q_CMD_FNS_N_S2MM:
 		return handler->reg_region_sts->sts2;
 	}
 
@@ -600,11 +629,11 @@ uint32_t axi_generic_pool_get_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCm
 @return 是否成功
 *************************/
 int axi_generic_pool_clr_cmd_fns_n(AxiGnrPoolHandler* handler, AxiGnrPoolCmdFnsNClrType clr_type){
-	if(clr_type == C_CMD_FNS_N_MM2S || clr_type == C_ALL){
+	if(clr_type == POOL_C_CMD_FNS_N_MM2S || clr_type == POOL_C_ALL){
 		handler->reg_region_sts->sts1 = 0;
 	}
 
-	if(clr_type == C_CMD_FNS_N_S2MM || clr_type == C_ALL){
+	if(clr_type == POOL_C_CMD_FNS_N_S2MM || clr_type == POOL_C_ALL){
 		handler->reg_region_sts->sts2 = 0;
 	}
 

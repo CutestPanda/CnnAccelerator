@@ -8,6 +8,7 @@
         2025.12.24 1.01 修复BUG: 向buf_cfg0寄存器的[31:16]应写入"特征图缓存可缓存的表面行数 - 1"
         2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
         2025.12.22 1.10 为最大池化增加非0常量填充模式
+        2025.12.26 1.11 修改ctrl0寄存器
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -18,15 +19,15 @@
 
 // 枚举类型: DMA命令完成数查询类别
 typedef enum{
-	Q_CMD_FNS_N_MM2S,
-	Q_CMD_FNS_N_S2MM
+	POOL_Q_CMD_FNS_N_MM2S,
+	POOL_Q_CMD_FNS_N_S2MM
 }AxiGnrPoolCmdFnsNQueryType;
 
 // 枚举类型: DMA命令完成数(计数器)清除类别
 typedef enum{
-	C_CMD_FNS_N_MM2S,
-	C_CMD_FNS_N_S2MM,
-	C_ALL
+	POOL_C_CMD_FNS_N_MM2S,
+	POOL_C_CMD_FNS_N_S2MM,
+	POOL_C_ALL
 }AxiGnrPoolCmdFnsNClrType;
 
 // 枚举类型: 处理模式
@@ -237,6 +238,8 @@ typedef struct{
 
 int axi_generic_pool_init(AxiGnrPoolHandler* handler, uint32_t baseaddr); // 初始化通用池化处理单元
 
+int axi_generic_pool_enable(AxiGnrPoolHandler* handler); // 使能加速器
+void axi_generic_pool_disable(AxiGnrPoolHandler* handler); // 除能加速器
 int axi_generic_pool_enable_cal_sub_sys(AxiGnrPoolHandler* handler); // 使能计算子系统
 void axi_generic_pool_disable_cal_sub_sys(AxiGnrPoolHandler* handler); // 除能计算子系统
 int axi_generic_pool_enable_pm_cnt(AxiGnrPoolHandler* handler); // 使能性能监测计数器

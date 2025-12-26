@@ -78,6 +78,9 @@ module axi_generic_pool_core #(
 	input wire aresetn,
 	input wire aclken,
 	
+	// 使能信号
+	output wire en_accelerator, // 使能加速器
+	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
     input wire[31:0] s_axi_lite_araddr,
@@ -363,6 +366,7 @@ module axi_generic_pool_core #(
 		.s_axi_lite_wvalid(s_axi_lite_wvalid),
 		.s_axi_lite_wready(s_axi_lite_wready),
 		
+		.en_accelerator(en_accelerator),
 		.en_adapter(en_adapter),
 		.en_upd_grp_run_cnt(en_upd_grp_run_cnt),
 		.en_post_mac(en_post_mac),

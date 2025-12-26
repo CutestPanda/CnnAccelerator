@@ -12,6 +12,7 @@
         2025.12.20 1.20 修改批归一化与激活配置, 增加Leaky-Relu激活配置
         2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
+        2025.12.26 1.23 修改ctrl0寄存器
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -22,17 +23,17 @@
 
 // 枚举类型: DMA命令完成数查询类别
 typedef enum{
-	Q_CMD_FNS_N_MM2S_0,
-	Q_CMD_FNS_N_MM2S_1,
-	Q_CMD_FNS_N_S2MM
+	CONV_Q_CMD_FNS_N_MM2S_0,
+	CONV_Q_CMD_FNS_N_MM2S_1,
+	CONV_Q_CMD_FNS_N_S2MM
 }AxiGnrConvCmdFnsNQueryType;
 
 // 枚举类型: DMA命令完成数(计数器)清除类别
 typedef enum{
-	C_CMD_FNS_N_MM2S_0,
-	C_CMD_FNS_N_MM2S_1,
-	C_CMD_FNS_N_S2MM,
-	C_ALL
+	CONV_C_CMD_FNS_N_MM2S_0,
+	CONV_C_CMD_FNS_N_MM2S_1,
+	CONV_C_CMD_FNS_N_S2MM,
+	CONV_C_ALL
 }AxiGnrConvCmdFnsNClrType;
 
 // 枚举类型: 运算数据格式
@@ -300,6 +301,8 @@ typedef struct{
 
 int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr); // 初始化通用卷积处理单元
 
+int axi_generic_conv_enable(AxiGnrConvHandler* handler); // 使能加速器
+void axi_generic_conv_disable(AxiGnrConvHandler* handler); // 除能加速器
 int axi_generic_conv_enable_cal_sub_sys(AxiGnrConvHandler* handler); // 使能计算子系统
 void axi_generic_conv_disable_cal_sub_sys(AxiGnrConvHandler* handler); // 除能计算子系统
 int axi_generic_conv_enable_pm_cnt(AxiGnrConvHandler* handler); // 使能性能监测计数器

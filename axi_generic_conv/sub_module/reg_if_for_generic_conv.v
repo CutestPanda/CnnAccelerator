@@ -58,9 +58,10 @@ SOFTWARE.
 	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
-	|  ctrl0   | 0x40/16 | 0: 使能计算子系统             |      RW      |                                  |
-	|          |         | 1: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
-	|          |         | 2: 使能批归一化与激活处理单元 |      RW      |                                  |
+	|  ctrl0   | 0x40/16 | 0: 使能加速器                 |      RW      |                                  |
+	|          |         | 1: 使能计算子系统             |      RW      |                                  |
+	|          |         | 2: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
+	|          |         | 3: 使能批归一化与激活处理单元 |      RW      |                                  |
 	|          |         | 8: 启动卷积核权重             |      WO      | 向该位写1会向卷积核权重          |
 	|          |         |    访问请求生成单元           |              | 访问请求生成单元发送start信号    |
 	|          |         | 9: 启动特征图表面行           |      WO      | 向该位写1会向特征图表面行        |
@@ -186,7 +187,7 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/12/22
+日期: 2025/12/26
 ********************************************************************/
 
 
@@ -246,6 +247,7 @@ module reg_if_for_generic_conv #(
     output wire s_axi_lite_wready,
 	
 	// 使能信号
+	output wire en_accelerator, // 使能加速器
 	output wire en_mac_array, // 使能乘加阵列
 	output wire en_packer, // 使能打包器
 	output wire en_bn_act_proc, // 使能批归一化与激活处理单元
@@ -525,7 +527,7 @@ module reg_if_for_generic_conv #(
 	wire[7:0] bn_act_prl_n_r; // BN与激活并行数 - 1
 	wire[15:0] max_kernal_n_r; // 最大的卷积核个数 - 1
 	
-	assign version_r = {4'd0, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.20
+	assign version_r = {4'd6, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.26
 	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv\0\0"
 	assign accelerator_id_r = ACCELERATOR_ID;
 	assign atomic_k_r = ATOMIC_K - 1;
@@ -545,9 +547,10 @@ module reg_if_for_generic_conv #(
 	寄存器(ctrl0)
 	
 	--------------------------------------------------------------------------------------------------------
-	|  ctrl0   | 0x40/16 | 0: 使能计算子系统             |      RW      |                                  |
-	|          |         | 1: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
-	|          |         | 2: 使能批归一化与激活处理单元 |      RW      |                                  |
+	|  ctrl0   | 0x40/16 | 0: 使能加速器                 |      RW      |                                  |
+	|          |         | 1: 使能计算子系统             |      RW      |                                  |
+	|          |         | 2: 使能性能监测计数器         |      RW      | 仅当支持性能监测时, 写1生效      |
+	|          |         | 3: 使能批归一化与激活处理单元 |      RW      |                                  |
 	|          |         | 8: 启动卷积核权重             |      WO      | 向该位写1会向卷积核权重          |
 	|          |         |    访问请求生成单元           |              | 访问请求生成单元发送start信号    |
 	|          |         | 9: 启动特征图表面行           |      WO      | 向该位写1会向特征图表面行        |
@@ -556,6 +559,7 @@ module reg_if_for_generic_conv #(
 	|          |         |    传输请求生成单元           |              | 传输请求生成单元发送start信号    |
 	--------------------------------------------------------------------------------------------------------
 	**/
+	reg en_accelerator_r; // 使能加速器
 	reg en_cal_sub_sys_r; // 使能计算子系统
 	reg en_pm_cnt_r; // 使能性能监测计数器
 	reg en_bn_act_proc_r; // 使能批归一化与激活处理单元
@@ -563,6 +567,7 @@ module reg_if_for_generic_conv #(
 	reg fmap_access_blk_start_r; // 启动特征图表面行访问请求生成单元(指示)
 	reg fnl_res_trans_blk_start_r; // 启动最终结果传输请求生成单元(指示)
 	
+	assign en_accelerator = en_accelerator_r;
 	assign en_mac_array = en_cal_sub_sys_r;
 	assign en_packer = en_cal_sub_sys_r;
 	assign en_bn_act_proc = en_bn_act_proc_r;
@@ -571,13 +576,22 @@ module reg_if_for_generic_conv #(
 	assign fmap_access_blk_start = fmap_access_blk_start_r;
 	assign fnl_res_trans_blk_start = fnl_res_trans_blk_start_r;
 	
+	// 使能加速器
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			en_accelerator_r <= 1'b0;
+		else if(regs_en & regs_wen & (regs_addr == 16))
+			en_accelerator_r <= # SIM_DELAY regs_din[0];
+	end
+	
 	// 使能计算子系统
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
 			en_cal_sub_sys_r <= 1'b0;
 		else if(regs_en & regs_wen & (regs_addr == 16))
-			en_cal_sub_sys_r <= # SIM_DELAY regs_din[0];
+			en_cal_sub_sys_r <= # SIM_DELAY regs_din[1];
 	end
 	
 	// 使能性能监测计数器
@@ -585,8 +599,8 @@ module reg_if_for_generic_conv #(
 	begin
 		if(~aresetn)
 			en_pm_cnt_r <= 1'b0;
-		else if(regs_en & regs_wen & (regs_addr == 16) & ((~regs_din[1]) | EN_PERF_MON))
-			en_pm_cnt_r <= # SIM_DELAY regs_din[1];
+		else if(regs_en & regs_wen & (regs_addr == 16) & ((~regs_din[2]) | EN_PERF_MON))
+			en_pm_cnt_r <= # SIM_DELAY regs_din[2];
 	end
 	
 	// 使能批归一化与激活处理单元
@@ -595,7 +609,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			en_bn_act_proc_r <= 1'b0;
 		else if(regs_en & regs_wen & (regs_addr == 16))
-			en_bn_act_proc_r <= # SIM_DELAY regs_din[2];
+			en_bn_act_proc_r <= # SIM_DELAY regs_din[3];
 	end
 	
 	// 启动卷积核权重访问请求生成单元(指示), 启动特征图表面行访问请求生成单元(指示), 启动最终结果传输请求生成单元(指示)
@@ -660,7 +674,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			dma_mm2s_0_fns_cmd_n_r <= 32'd0;
 		else if(
-			mm2s_0_cmd_done | 
+			(en_accelerator_r & mm2s_0_cmd_done) | 
 			(regs_en & regs_wen & (regs_addr == 25))
 		)
 			dma_mm2s_0_fns_cmd_n_r <= # SIM_DELAY 
@@ -675,7 +689,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			dma_mm2s_1_fns_cmd_n_r <= 32'd0;
 		else if(
-			mm2s_1_cmd_done | 
+			(en_accelerator_r & mm2s_1_cmd_done) | 
 			(regs_en & regs_wen & (regs_addr == 26))
 		)
 			dma_mm2s_1_fns_cmd_n_r <= # SIM_DELAY 
@@ -690,7 +704,7 @@ module reg_if_for_generic_conv #(
 		if(~aresetn)
 			dma_s2mm_fns_cmd_n_r <= 32'd0;
 		else if(
-			s2mm_cmd_done | 
+			(en_accelerator_r & s2mm_cmd_done) | 
 			(regs_en & regs_wen & (regs_addr == 27))
 		)
 			dma_s2mm_fns_cmd_n_r <= # SIM_DELAY 
@@ -707,7 +721,7 @@ module reg_if_for_generic_conv #(
 		else if(
 			EN_PERF_MON & 
 			(
-				en_pm_cnt_r | 
+				(en_accelerator_r & en_pm_cnt_r) | 
 				(regs_en & regs_wen & (regs_addr == 28))
 			)
 		)
@@ -725,7 +739,7 @@ module reg_if_for_generic_conv #(
 		else if(
 			EN_PERF_MON & 
 			(
-				(s0_mm2s_strm_axis_valid & s0_mm2s_strm_axis_ready) | 
+				(en_accelerator_r & s0_mm2s_strm_axis_valid & s0_mm2s_strm_axis_ready) | 
 				(regs_en & regs_wen & (regs_addr == 29))
 			)
 		)
@@ -743,7 +757,7 @@ module reg_if_for_generic_conv #(
 		else if(
 			EN_PERF_MON & 
 			(
-				(s1_mm2s_strm_axis_valid & s1_mm2s_strm_axis_ready) | 
+				(en_accelerator_r & s1_mm2s_strm_axis_valid & s1_mm2s_strm_axis_ready) | 
 				(regs_en & regs_wen & (regs_addr == 30))
 			)
 		)
@@ -761,7 +775,7 @@ module reg_if_for_generic_conv #(
 		else if(
 			EN_PERF_MON & 
 			(
-				(s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
+				(en_accelerator_r & s_s2mm_strm_axis_valid & s_s2mm_strm_axis_ready) | 
 				(regs_en & regs_wen & (regs_addr == 31))
 			)
 		)
@@ -1367,7 +1381,7 @@ module reg_if_for_generic_conv #(
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
 				6: regs_dout <= # SIM_DELAY {max_kernal_n_r[15:0], 8'd0, bn_act_prl_n_r[7:0]};
 				
-				16: regs_dout <= # SIM_DELAY {29'd0, en_bn_act_proc_r, en_pm_cnt_r, en_cal_sub_sys_r};
+				16: regs_dout <= # SIM_DELAY {28'd0, en_bn_act_proc_r, en_pm_cnt_r, en_cal_sub_sys_r, en_accelerator_r};
 				
 				24: regs_dout <= # SIM_DELAY {29'd0, fnl_res_trans_blk_idle_r, fmap_access_blk_idle_r, kernal_access_blk_idle_r};
 				25: regs_dout <= # SIM_DELAY {dma_mm2s_0_fns_cmd_n_r[31:0]};

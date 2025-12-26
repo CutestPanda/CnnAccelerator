@@ -46,7 +46,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/25
+日期: 2025/12/26
 ********************************************************************/
 
 
@@ -83,6 +83,9 @@ module axi_generic_conv_core #(
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	
+	// 使能信号
+	output wire en_accelerator, // 使能卷积加速器
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -439,6 +442,7 @@ module axi_generic_conv_core #(
 		.s_axi_lite_wvalid(s_axi_lite_wvalid),
 		.s_axi_lite_wready(s_axi_lite_wready),
 		
+		.en_accelerator(en_accelerator),
 		.en_mac_array(en_mac_array),
 		.en_packer(en_packer),
 		.en_bn_act_proc(en_bn_act_proc),
