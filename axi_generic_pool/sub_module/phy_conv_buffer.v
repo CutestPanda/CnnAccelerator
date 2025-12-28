@@ -37,7 +37,7 @@ ICB SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/03/28
+日期: 2025/12/28
 ********************************************************************/
 
 
@@ -51,6 +51,7 @@ module phy_conv_buffer #(
 	parameter EN_ICB1_FMBUF_REG_SLICE = "true", // 是否在特征图缓存1号ICB插入AXIS寄存器片
 	parameter EN_ICB0_KBUF_REG_SLICE = "true", // 是否在卷积核缓存0号ICB插入AXIS寄存器片
 	parameter EN_ICB1_KBUF_REG_SLICE = "true", // 是否在卷积核缓存1号ICB插入AXIS寄存器片
+	parameter USE_TRUE_DUAL_PORT_SRAM = "false", // 是否使用真双口RAM
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -123,7 +124,13 @@ module phy_conv_buffer #(
 	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] mem_wen_a,
 	output wire[CBUF_BANK_N*16-1:0] mem_addr_a,
 	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_din_a,
-	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_a
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_a,
+	output wire mem_clk_b,
+	output wire[CBUF_BANK_N-1:0] mem_en_b,
+	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] mem_wen_b,
+	output wire[CBUF_BANK_N*16-1:0] mem_addr_b,
+	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_din_b,
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_b
 );
 	
 	/** 卷积私有缓存(核心) **/
@@ -186,6 +193,7 @@ module phy_conv_buffer #(
 		.CBUF_DEPTH_FOREACH_BANK(CBUF_DEPTH_FOREACH_BANK),
 		.EN_EXCEED_BD_PROTECT(EN_EXCEED_BD_PROTECT),
 		.EN_HP_ICB(EN_HP_ICB),
+		.USE_TRUE_DUAL_PORT_SRAM(USE_TRUE_DUAL_PORT_SRAM),
 		.SIM_DELAY(SIM_DELAY)
 	)phy_conv_buffer_core_u(
 		.aclk(aclk),
@@ -243,7 +251,13 @@ module phy_conv_buffer #(
 		.mem_wen_a(mem_wen_a),
 		.mem_addr_a(mem_addr_a),
 		.mem_din_a(mem_din_a),
-		.mem_dout_a(mem_dout_a)
+		.mem_dout_a(mem_dout_a),
+		.mem_clk_b(mem_clk_b),
+		.mem_en_b(mem_en_b),
+		.mem_wen_b(mem_wen_b),
+		.mem_addr_b(mem_addr_b),
+		.mem_din_b(mem_din_b),
+		.mem_dout_b(mem_dout_b)
 	);
 	
 	/** 特征图缓存ICB从机#0 **/

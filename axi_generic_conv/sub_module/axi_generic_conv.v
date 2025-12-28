@@ -48,7 +48,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/25
+日期: 2025/12/28
 ********************************************************************/
 
 
@@ -73,6 +73,7 @@ module axi_generic_conv #(
 	parameter integer MAX_CAL_ROUND = 2, // 最大的计算轮次(1~16)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 64, // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer S2MM_STREAM_DATA_WIDTH = 64, // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer PHY_BUF_USE_TRUE_DUAL_PORT_SRAM = 0, // 物理缓存是否使用真双口RAM
 	parameter integer CBUF_BANK_N = 16, // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 1024, // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512, // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
@@ -566,6 +567,12 @@ module axi_generic_conv #(
 	wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_a;
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a;
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a;
+	wire phy_conv_buf_mem_clk_b;
+	wire[CBUF_BANK_N-1:0] phy_conv_buf_mem_en_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_b;
+	wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_b;
 	
 	conv_data_hub #(
 		.STREAM_DATA_WIDTH(MM2S_STREAM_DATA_WIDTH),
@@ -578,6 +585,7 @@ module axi_generic_conv #(
 		.LG_FMBUF_BUFFER_RID_WIDTH(LG_FMBUF_BUFFER_RID_WIDTH),
 		.EN_REG_SLICE_IN_FM_RD_REQ("true"),
 		.EN_REG_SLICE_IN_KWGTBLK_RD_REQ("true"),
+		.PHY_BUF_USE_TRUE_DUAL_PORT_SRAM(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM ? "true":"false"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_data_hub_u(
 		.aclk(aclk),
@@ -661,7 +669,13 @@ module axi_generic_conv #(
 		.phy_conv_buf_mem_wen_a(phy_conv_buf_mem_wen_a),
 		.phy_conv_buf_mem_addr_a(phy_conv_buf_mem_addr_a),
 		.phy_conv_buf_mem_din_a(phy_conv_buf_mem_din_a),
-		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a)
+		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a),
+		.phy_conv_buf_mem_clk_b(phy_conv_buf_mem_clk_b),
+		.phy_conv_buf_mem_en_b(phy_conv_buf_mem_en_b),
+		.phy_conv_buf_mem_wen_b(phy_conv_buf_mem_wen_b),
+		.phy_conv_buf_mem_addr_b(phy_conv_buf_mem_addr_b),
+		.phy_conv_buf_mem_din_b(phy_conv_buf_mem_din_b),
+		.phy_conv_buf_mem_dout_b(phy_conv_buf_mem_dout_b)
 	);
 	
 	/** 卷积中间结果累加与缓存 **/
@@ -1254,23 +1268,54 @@ module axi_generic_conv #(
 	generate
 		for(phy_conv_buf_mem_i = 0;phy_conv_buf_mem_i < CBUF_BANK_N;phy_conv_buf_mem_i = phy_conv_buf_mem_i + 1)
 		begin:phy_conv_buf_mem_blk
-			bram_single_port #(
-				.style("LOW_LATENCY"),
-				.rw_mode("read_first"),
-				.mem_width(ATOMIC_C*2*8),
-				.mem_depth(CBUF_DEPTH_FOREACH_BANK),
-				.INIT_FILE("no_init"),
-				.byte_write_mode("true"),
-				.simulation_delay(SIM_DELAY)
-			)phy_conv_buf_ram_u(
-				.clk(phy_conv_buf_mem_clk_a),
+			if(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM)
+			begin
+				bram_true_dual_port #(
+					.mem_width(ATOMIC_C*2*8),
+					.mem_depth(CBUF_DEPTH_FOREACH_BANK),
+					.INIT_FILE("no_init"),
+					.read_write_mode("read_first"),
+					.use_output_register("false"),
+					.en_byte_write("true"),
+					.simulation_delay(SIM_DELAY)
+				)phy_conv_buf_ram_u(
+					.clk(phy_conv_buf_mem_clk_a),
+					
+					.ena(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
+					.wea(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addra(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.dina(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.douta(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					
+					.enb(phy_conv_buf_mem_en_b[phy_conv_buf_mem_i]),
+					.web(phy_conv_buf_mem_wen_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addrb(phy_conv_buf_mem_addr_b[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.dinb(phy_conv_buf_mem_din_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.doutb(phy_conv_buf_mem_dout_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
+				);
+			end
+			else
+			begin
+				assign phy_conv_buf_mem_dout_b = {(CBUF_BANK_N*ATOMIC_C*2*8){1'bx}};
 				
-				.en(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
-				.wen(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
-				.addr(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
-				.din(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
-				.dout(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
-			);
+				bram_single_port #(
+					.style("LOW_LATENCY"),
+					.rw_mode("read_first"),
+					.mem_width(ATOMIC_C*2*8),
+					.mem_depth(CBUF_DEPTH_FOREACH_BANK),
+					.INIT_FILE("no_init"),
+					.byte_write_mode("true"),
+					.simulation_delay(SIM_DELAY)
+				)phy_conv_buf_ram_u(
+					.clk(phy_conv_buf_mem_clk_a),
+					
+					.en(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
+					.wen(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addr(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.din(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.dout(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
+				);
+			end
 		end
 	endgenerate
 	

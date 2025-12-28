@@ -27,7 +27,7 @@ SOFTWARE.
 本模块: (物理)卷积私有缓存(核心)
 
 描述:
-使用CBUF_BANK_N个单口SRAM作为特征图和卷积核缓存
+使用CBUF_BANK_N个单口/真双口SRAM作为特征图和卷积核缓存
 
 提供2个特征图缓存ICB从机, 带有Bank冲突仲裁逻辑
 提供2个卷积核缓存ICB从机, 带有Bank冲突仲裁逻辑
@@ -46,7 +46,7 @@ ICB SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/10
+日期: 2025/12/28
 ********************************************************************/
 
 
@@ -56,6 +56,7 @@ module phy_conv_buffer_core #(
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 512, // 每片缓存MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter EN_EXCEED_BD_PROTECT = "true", // 是否启用逻辑地址越界保护
 	parameter EN_HP_ICB = "true", // 是否启用高性能ICB从机
+	parameter USE_TRUE_DUAL_PORT_SRAM = "false", // 是否使用真双口RAM
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -128,7 +129,13 @@ module phy_conv_buffer_core #(
 	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] mem_wen_a,
 	output wire[CBUF_BANK_N*16-1:0] mem_addr_a,
 	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_din_a,
-	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_a
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_a,
+	output wire mem_clk_b,
+	output wire[CBUF_BANK_N-1:0] mem_en_b,
+	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] mem_wen_b,
+	output wire[CBUF_BANK_N*16-1:0] mem_addr_b,
+	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_din_b,
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] mem_dout_b
 );
 	
 	// 计算bit_depth的最高有效位编号(即位数-1)
@@ -149,8 +156,13 @@ module phy_conv_buffer_core #(
 	wire[15:0] mem_addr_a_arr[0:CBUF_BANK_N-1];
 	wire[ATOMIC_C*2*8-1:0] mem_din_a_arr[0:CBUF_BANK_N-1];
 	wire[ATOMIC_C*2*8-1:0] mem_dout_a_arr[0:CBUF_BANK_N-1];
+	wire[ATOMIC_C*2-1:0] mem_wen_b_arr[0:CBUF_BANK_N-1];
+	wire[15:0] mem_addr_b_arr[0:CBUF_BANK_N-1];
+	wire[ATOMIC_C*2*8-1:0] mem_din_b_arr[0:CBUF_BANK_N-1];
+	wire[ATOMIC_C*2*8-1:0] mem_dout_b_arr[0:CBUF_BANK_N-1];
 	
 	assign mem_clk_a = aclk;
+	assign mem_clk_b = aclk;
 	
 	genvar mem_i;
 	generate
@@ -160,6 +172,11 @@ module phy_conv_buffer_core #(
 			assign mem_addr_a[mem_i*16+15:mem_i*16] = mem_addr_a_arr[mem_i];
 			assign mem_din_a[(mem_i+1)*ATOMIC_C*2*8-1:mem_i*ATOMIC_C*2*8] = mem_din_a_arr[mem_i];
 			assign mem_dout_a_arr[mem_i] = mem_dout_a[(mem_i+1)*ATOMIC_C*2*8-1:mem_i*ATOMIC_C*2*8];
+			
+			assign mem_wen_b[(mem_i+1)*ATOMIC_C*2-1:mem_i*ATOMIC_C*2] = mem_wen_b_arr[mem_i];
+			assign mem_addr_b[mem_i*16+15:mem_i*16] = mem_addr_b_arr[mem_i];
+			assign mem_din_b[(mem_i+1)*ATOMIC_C*2*8-1:mem_i*ATOMIC_C*2*8] = mem_din_b_arr[mem_i];
+			assign mem_dout_b_arr[mem_i] = mem_dout_b[(mem_i+1)*ATOMIC_C*2*8-1:mem_i*ATOMIC_C*2*8];
 		end
 	endgenerate
 	
@@ -270,16 +287,22 @@ module phy_conv_buffer_core #(
 	wire[clogb2(CBUF_BANK_N-1):0] kbuf_access_bid[0:1]; // 卷积核缓存访问Bank号
 	wire[clogb2(CBUF_DEPTH_FOREACH_BANK-1):0] fmbuf_access_pgaddr[0:1]; // 特征图缓存访问Bank内地址
 	wire[clogb2(CBUF_DEPTH_FOREACH_BANK-1):0] kbuf_access_pgaddr[0:1]; // 卷积核缓存访问Bank内地址
-	reg buf_mem_access_pending[0:CBUF_BANK_N-1]; // 缓存MEM访问等待(标志)
+	reg buf_mem_port_a_access_pending[0:CBUF_BANK_N-1]; // 缓存MEM端口A访问等待(标志)
+	reg buf_mem_port_b_access_pending[0:CBUF_BANK_N-1]; // 缓存MEM端口B访问等待(标志)
 	/*
 	4'b0001 -> 特征图缓存ICB从机#0, 4'b0010 -> 特征图缓存ICB从机#1, 
 	4'b0100 -> 卷积核缓存ICB从机#0, 4'b1000 -> 卷积核缓存ICB从机#1
 	*/
-	reg[3:0] buf_mem_rsp_sid[0:CBUF_BANK_N-1]; // 缓存MEM响应选择的从机号
-	wire buf_mem_rsp_slave_ready[0:CBUF_BANK_N-1]; // 缓存MEM响应选择的从机是否就绪(标志)
-	wire buf_mem_rsp_to_pass[0:CBUF_BANK_N-1]; // 缓存MEM允许传递响应(标志)
-	wire[3:0] buf_mem_access_by_slave[0:CBUF_BANK_N-1]; // 缓存MEM被从机访问(指示向量)
-	wire buf_mem_rsp_accepted[0:CBUF_BANK_N-1]; // 缓存MEM响应被接受(指示)
+	reg[3:0] buf_mem_port_a_rsp_sid[0:CBUF_BANK_N-1]; // 缓存MEM端口A响应选择的从机号
+	reg[3:0] buf_mem_port_b_rsp_sid[0:CBUF_BANK_N-1]; // 缓存MEM端口B响应选择的从机号
+	wire buf_mem_port_a_rsp_slave_ready[0:CBUF_BANK_N-1]; // 缓存MEM端口A响应选择的从机是否就绪(标志)
+	wire buf_mem_port_b_rsp_slave_ready[0:CBUF_BANK_N-1]; // 缓存MEM端口B响应选择的从机是否就绪(标志)
+	wire buf_mem_port_a_rsp_to_pass[0:CBUF_BANK_N-1]; // 缓存MEM端口A允许传递响应(标志)
+	wire buf_mem_port_b_rsp_to_pass[0:CBUF_BANK_N-1]; // 缓存MEM端口B允许传递响应(标志)
+	wire[3:0] buf_mem_port_a_access_by_slave[0:CBUF_BANK_N-1]; // 缓存MEM端口A被从机访问(指示向量)
+	wire[3:0] buf_mem_port_b_access_by_slave[0:CBUF_BANK_N-1]; // 缓存MEM端口B被从机访问(指示向量)
+	wire buf_mem_port_a_rsp_accepted[0:CBUF_BANK_N-1]; // 缓存MEM端口A响应被接受(指示)
+	wire buf_mem_port_b_rsp_accepted[0:CBUF_BANK_N-1]; // 缓存MEM端口B响应被接受(指示)
 	
 	/*
 	在ICB从机的响应端无需检查缓存MEM响应选择的从机号, 这是因为对于某个Bank来说, 不同ICB从机对它的访问必定是按序进行的, 
@@ -289,33 +312,52 @@ module phy_conv_buffer_core #(
 	assign s0_fmbuf_rsp_err = (EN_EXCEED_BD_PROTECT == "true") & fmbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N)];
 	assign s0_fmbuf_rsp_valid = 
 		aclken & 
-		fmbuf_access_msg_fifo_empty_n[0] & (
+		fmbuf_access_msg_fifo_empty_n[0] & 
+		(
 			((EN_EXCEED_BD_PROTECT == "true") & fmbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N)]) | 
-			buf_mem_access_pending[fmbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N-1):0]]
+			buf_mem_port_a_access_pending[fmbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N-1):0]]
 		);
-	assign s1_fmbuf_rsp_rdata = mem_dout_a_arr[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]];
+	
+	assign s1_fmbuf_rsp_rdata = 
+		(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+			mem_dout_a_arr[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]:
+			mem_dout_b_arr[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]];
 	assign s1_fmbuf_rsp_err = (EN_EXCEED_BD_PROTECT == "true") & fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N)];
 	assign s1_fmbuf_rsp_valid = 
 		aclken & 
-		fmbuf_access_msg_fifo_empty_n[1] & (
+		fmbuf_access_msg_fifo_empty_n[1] & 
+		(
 			((EN_EXCEED_BD_PROTECT == "true") & fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N)]) | 
-			buf_mem_access_pending[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]
+			(
+				(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+					buf_mem_port_a_access_pending[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]:
+					buf_mem_port_b_access_pending[fmbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]
+			)
 		);
+	
 	assign s0_kbuf_rsp_rdata = mem_dout_a_arr[kbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N-1):0]];
 	assign s0_kbuf_rsp_err = (EN_EXCEED_BD_PROTECT == "true") & kbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N)];
 	assign s0_kbuf_rsp_valid = 
 		aclken & 
 		kbuf_access_msg_fifo_empty_n[0] & (
 			((EN_EXCEED_BD_PROTECT == "true") & kbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N)]) | 
-			buf_mem_access_pending[kbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N-1):0]]
+			buf_mem_port_a_access_pending[kbuf_access_msg_fifo_dout[0][clogb2(CBUF_BANK_N-1):0]]
 		);
-	assign s1_kbuf_rsp_rdata = mem_dout_a_arr[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]];
+	
+	assign s1_kbuf_rsp_rdata = 
+		(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+			mem_dout_a_arr[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]:
+			mem_dout_b_arr[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]];
 	assign s1_kbuf_rsp_err = (EN_EXCEED_BD_PROTECT == "true") & kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N)];
 	assign s1_kbuf_rsp_valid = 
 		aclken & 
 		kbuf_access_msg_fifo_empty_n[1] & (
 			((EN_EXCEED_BD_PROTECT == "true") & kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N)]) | 
-			buf_mem_access_pending[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]
+			(
+				(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+					buf_mem_port_a_access_pending[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]:
+					buf_mem_port_b_access_pending[kbuf_access_msg_fifo_dout[1][clogb2(CBUF_BANK_N-1):0]]
+			)
 		);
 	
 	assign fmbuf_access_msg_fifo_ren[0] = s0_fmbuf_rsp_valid & s0_fmbuf_rsp_ready;
@@ -370,100 +412,231 @@ module phy_conv_buffer_core #(
 		begin:buf_mem_ctrl_blk
 			assign mem_en_a[buf_mem_ctrl_i] = aclken & (
 				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
-					(buf_mem_access_by_slave[buf_mem_ctrl_i][0] | buf_mem_access_by_slave[buf_mem_ctrl_i][1]):
-					(buf_mem_access_by_slave[buf_mem_ctrl_i][2] | buf_mem_access_by_slave[buf_mem_ctrl_i][3])
+					(buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][0] | buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][1]):
+					(buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][2] | buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][3])
 			);
 			assign mem_wen_a_arr[buf_mem_ctrl_i] = 
 				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
 					(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][0] ? 
 							({(ATOMIC_C*2){~s0_fmbuf_cmd_read}} & s0_fmbuf_cmd_wmask):
 							({(ATOMIC_C*2){~s1_fmbuf_cmd_read}} & s1_fmbuf_cmd_wmask)
 					):(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][2] ? 
 							({(ATOMIC_C*2){~s0_kbuf_cmd_read}} & s0_kbuf_cmd_wmask):
 							({(ATOMIC_C*2){~s1_kbuf_cmd_read}} & s1_kbuf_cmd_wmask)
 					);
 			assign mem_addr_a_arr[buf_mem_ctrl_i] = 
 				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
 					(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][0] ? 
 							(16'h0000 | fmbuf_access_pgaddr[0]):
 							(16'h0000 | fmbuf_access_pgaddr[1])
 					):(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][2] ? 
 							(16'h0000 | kbuf_access_pgaddr[0]):
 							(16'h0000 | kbuf_access_pgaddr[1])
 					);
 			assign mem_din_a_arr[buf_mem_ctrl_i] = 
 				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
 					(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][0] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][0] ? 
 							s0_fmbuf_cmd_wdata:
 							s1_fmbuf_cmd_wdata
 					):(
-						buf_mem_access_by_slave[buf_mem_ctrl_i][2] ? 
+						buf_mem_port_a_access_by_slave[buf_mem_ctrl_i][2] ? 
 							s0_kbuf_cmd_wdata:
 							s1_kbuf_cmd_wdata
 					);
 			
-			assign buf_mem_rsp_slave_ready[buf_mem_ctrl_i] = 
-				(EN_HP_ICB == "true") & (
-					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
-						(
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & s0_fmbuf_rsp_ready) | 
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & s1_fmbuf_rsp_ready)
-						):(
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & s0_kbuf_rsp_ready) | 
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & s1_kbuf_rsp_ready)
-						)
-				);
-			assign buf_mem_rsp_to_pass[buf_mem_ctrl_i] = 
+			assign mem_en_b[buf_mem_ctrl_i] = aclken & (
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][0] | buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][1]):
+					(buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][2] | buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][3])
+			);
+			assign mem_wen_b_arr[buf_mem_ctrl_i] = 
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][0] ? 
+							({(ATOMIC_C*2){~s0_fmbuf_cmd_read}} & s0_fmbuf_cmd_wmask):
+							({(ATOMIC_C*2){~s1_fmbuf_cmd_read}} & s1_fmbuf_cmd_wmask)
+					):(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][2] ? 
+							({(ATOMIC_C*2){~s0_kbuf_cmd_read}} & s0_kbuf_cmd_wmask):
+							({(ATOMIC_C*2){~s1_kbuf_cmd_read}} & s1_kbuf_cmd_wmask)
+					);
+			assign mem_addr_b_arr[buf_mem_ctrl_i] = 
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][0] ? 
+							(16'h0000 | fmbuf_access_pgaddr[0]):
+							(16'h0000 | fmbuf_access_pgaddr[1])
+					):(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][2] ? 
+							(16'h0000 | kbuf_access_pgaddr[0]):
+							(16'h0000 | kbuf_access_pgaddr[1])
+					);
+			assign mem_din_b_arr[buf_mem_ctrl_i] = 
+				(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+					(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][0] ? 
+							s0_fmbuf_cmd_wdata:
+							s1_fmbuf_cmd_wdata
+					):(
+						buf_mem_port_b_access_by_slave[buf_mem_ctrl_i][2] ? 
+							s0_kbuf_cmd_wdata:
+							s1_kbuf_cmd_wdata
+					);
+			
+			assign buf_mem_port_a_rsp_slave_ready[buf_mem_ctrl_i] = 
 				(EN_HP_ICB == "true") & 
 				(
 					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
 						(
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][0] & 
-								fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][1] & 
-								fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
+							(buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][0] & s0_fmbuf_rsp_ready) | 
+							(buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][1] & s1_fmbuf_rsp_ready)
 						):(
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][2] & 
-								kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)) | 
-							(buf_mem_rsp_sid[buf_mem_ctrl_i][3] & 
-								kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i))
+							(buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][2] & s0_kbuf_rsp_ready) | 
+							(buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][3] & s1_kbuf_rsp_ready)
+						)
+				);
+			assign buf_mem_port_b_rsp_slave_ready[buf_mem_ctrl_i] = 
+				(EN_HP_ICB == "true") & 
+				(
+					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+						(
+							(buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][0] & s0_fmbuf_rsp_ready) | 
+							(buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][1] & s1_fmbuf_rsp_ready)
+						):(
+							(buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][2] & s0_kbuf_rsp_ready) | 
+							(buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][3] & s1_kbuf_rsp_ready)
+						)
+				);
+			assign buf_mem_port_a_rsp_to_pass[buf_mem_ctrl_i] = 
+				(EN_HP_ICB == "true") & 
+				(
+					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+						(
+							(
+								buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][0] & 
+								fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)
+							) | 
+							(
+								buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][1] & 
+								fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i)
+							)
+						):(
+							(
+								buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][2] & 
+								kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)
+							) | 
+							(
+								buf_mem_port_a_rsp_sid[buf_mem_ctrl_i][3] & 
+								kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i)
+							)
+						)
+				);
+			assign buf_mem_port_b_rsp_to_pass[buf_mem_ctrl_i] = 
+				(EN_HP_ICB == "true") & 
+				(
+					(buf_mem_ctrl_i < fmbufbankn[clogb2(CBUF_BANK_N):0]) ? 
+						(
+							(
+								buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][0] & 
+								fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)
+							) | 
+							(
+								buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][1] & 
+								fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i)
+							)
+						):(
+							(
+								buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][2] & 
+								kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i)
+							) | 
+							(
+								buf_mem_port_b_rsp_sid[buf_mem_ctrl_i][3] & 
+								kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i)
+							)
 						)
 				);
 			// 断言: 缓存MEM被从机访问(指示向量)要么是4'b0000, 要么是独热码!
-			assign buf_mem_access_by_slave[buf_mem_ctrl_i] = {
-				s1_kbuf_cmd_valid & s1_kbuf_cmd_ready & (kbuf_access_bid[1] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[1]), 
-				s0_kbuf_cmd_valid & s0_kbuf_cmd_ready & (kbuf_access_bid[0] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[0]), 
-				s1_fmbuf_cmd_valid & s1_fmbuf_cmd_ready & (fmbuf_access_bid[1] == buf_mem_ctrl_i) & (~fmbuf_addr_exceed_bd[1]), 
+			assign buf_mem_port_a_access_by_slave[buf_mem_ctrl_i] = 
+			(
+				(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+					4'b1111:
+					4'b0101
+			) & 
+			{
+				s1_kbuf_cmd_valid & s1_kbuf_cmd_ready & (kbuf_access_bid[1] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[1]),
+				s0_kbuf_cmd_valid & s0_kbuf_cmd_ready & (kbuf_access_bid[0] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[0]),
+				s1_fmbuf_cmd_valid & s1_fmbuf_cmd_ready & (fmbuf_access_bid[1] == buf_mem_ctrl_i) & (~fmbuf_addr_exceed_bd[1]),
 				s0_fmbuf_cmd_valid & s0_fmbuf_cmd_ready & (fmbuf_access_bid[0] == buf_mem_ctrl_i) & (~fmbuf_addr_exceed_bd[0])
 			};
-			assign buf_mem_rsp_accepted[buf_mem_ctrl_i] = 
-				buf_mem_access_pending[buf_mem_ctrl_i] & 
-				(|(buf_mem_rsp_sid[buf_mem_ctrl_i] & {
-					kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_kbuf_rsp_ready, 
-					kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_kbuf_rsp_ready, 
-					fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_fmbuf_rsp_ready, 
-					fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_fmbuf_rsp_ready
-				}));
+			// 断言: 缓存MEM被从机访问(指示向量)要么是4'b0000, 要么是独热码!
+			assign buf_mem_port_b_access_by_slave[buf_mem_ctrl_i] = 
+			(
+				(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+					4'b1111:
+					4'b1010
+			) & 
+			{
+				s1_kbuf_cmd_valid & s1_kbuf_cmd_ready & (kbuf_access_bid[1] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[1]),
+				s0_kbuf_cmd_valid & s0_kbuf_cmd_ready & (kbuf_access_bid[0] == buf_mem_ctrl_i) & (~kbuf_addr_exceed_bd[0]),
+				s1_fmbuf_cmd_valid & s1_fmbuf_cmd_ready & (fmbuf_access_bid[1] == buf_mem_ctrl_i) & (~fmbuf_addr_exceed_bd[1]),
+				s0_fmbuf_cmd_valid & s0_fmbuf_cmd_ready & (fmbuf_access_bid[0] == buf_mem_ctrl_i) & (~fmbuf_addr_exceed_bd[0])
+			};
+			assign buf_mem_port_a_rsp_accepted[buf_mem_ctrl_i] = 
+				buf_mem_port_a_access_pending[buf_mem_ctrl_i] & 
+				(|(
+					buf_mem_port_a_rsp_sid[buf_mem_ctrl_i] & 
+					{
+						kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_kbuf_rsp_ready, 
+						kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_kbuf_rsp_ready, 
+						fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_fmbuf_rsp_ready, 
+						fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_fmbuf_rsp_ready
+					}
+				));
+			assign buf_mem_port_b_rsp_accepted[buf_mem_ctrl_i] = 
+				buf_mem_port_b_access_pending[buf_mem_ctrl_i] & 
+				(|(
+					buf_mem_port_b_rsp_sid[buf_mem_ctrl_i] & 
+					{
+						kbuf_access_msg_fifo_empty_n[1] & (kbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_kbuf_rsp_ready, 
+						kbuf_access_msg_fifo_empty_n[0] & (kbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_kbuf_rsp_ready, 
+						fmbuf_access_msg_fifo_empty_n[1] & (fmbuf_access_msg_fifo_dout[1] == buf_mem_ctrl_i) & s1_fmbuf_rsp_ready, 
+						fmbuf_access_msg_fifo_empty_n[0] & (fmbuf_access_msg_fifo_dout[0] == buf_mem_ctrl_i) & s0_fmbuf_rsp_ready
+					}
+				));
 			
-			// 缓存MEM访问等待(标志)
+			// 缓存MEM端口A访问等待(标志)
 			always @(posedge aclk or negedge aresetn)
 			begin
 				if(~aresetn)
-					buf_mem_access_pending[buf_mem_ctrl_i] <= 1'b0;
-				else if(mem_en_a[buf_mem_ctrl_i] ^ buf_mem_rsp_accepted[buf_mem_ctrl_i])
-					buf_mem_access_pending[buf_mem_ctrl_i] <= # SIM_DELAY mem_en_a[buf_mem_ctrl_i];
+					buf_mem_port_a_access_pending[buf_mem_ctrl_i] <= 1'b0;
+				else if(mem_en_a[buf_mem_ctrl_i] ^ buf_mem_port_a_rsp_accepted[buf_mem_ctrl_i])
+					buf_mem_port_a_access_pending[buf_mem_ctrl_i] <= # SIM_DELAY mem_en_a[buf_mem_ctrl_i];
+			end
+			// 缓存MEM端口B访问等待(标志)
+			always @(posedge aclk or negedge aresetn)
+			begin
+				if(~aresetn)
+					buf_mem_port_b_access_pending[buf_mem_ctrl_i] <= 1'b0;
+				else if(mem_en_b[buf_mem_ctrl_i] ^ buf_mem_port_b_rsp_accepted[buf_mem_ctrl_i])
+					buf_mem_port_b_access_pending[buf_mem_ctrl_i] <= # SIM_DELAY mem_en_b[buf_mem_ctrl_i];
 			end
 			
-			// 缓存MEM响应选择的从机号
+			// 缓存MEM端口A响应选择的从机号
 			always @(posedge aclk)
 			begin
 				if(aclken & mem_en_a[buf_mem_ctrl_i])
-					buf_mem_rsp_sid[buf_mem_ctrl_i] <= # SIM_DELAY buf_mem_access_by_slave[buf_mem_ctrl_i];
+					buf_mem_port_a_rsp_sid[buf_mem_ctrl_i] <= # SIM_DELAY buf_mem_port_a_access_by_slave[buf_mem_ctrl_i];
+			end
+			// 缓存MEM端口B响应选择的从机号
+			always @(posedge aclk)
+			begin
+				if(aclken & mem_en_b[buf_mem_ctrl_i])
+					buf_mem_port_b_rsp_sid[buf_mem_ctrl_i] <= # SIM_DELAY buf_mem_port_b_access_by_slave[buf_mem_ctrl_i];
 			end
 		end
 	endgenerate
@@ -479,34 +652,44 @@ module phy_conv_buffer_core #(
 	*/
 	assign s0_fmbuf_cmd_ready = 
 		aclken & 
-		fmbuf_access_msg_fifo_full_n[0] & (
-			(~buf_mem_access_pending[fmbuf_access_bid[0]]) | 
-			(buf_mem_rsp_slave_ready[fmbuf_access_bid[0]] & buf_mem_rsp_to_pass[fmbuf_access_bid[0]])
-		) & (
-			(~fmbuf_access_cfl_sel) | (~s1_fmbuf_cmd_valid) | (~fmbuf_addr_conflict) | fmbuf_addr_exceed_bd[0] | fmbuf_addr_exceed_bd[1]
-		);
+		fmbuf_access_msg_fifo_full_n[0] & 
+		(
+			(~buf_mem_port_a_access_pending[fmbuf_access_bid[0]]) | 
+			(buf_mem_port_a_rsp_slave_ready[fmbuf_access_bid[0]] & buf_mem_port_a_rsp_to_pass[fmbuf_access_bid[0]])
+		) & 
+		((~fmbuf_access_cfl_sel) | (~s1_fmbuf_cmd_valid) | (~fmbuf_addr_conflict) | fmbuf_addr_exceed_bd[0] | fmbuf_addr_exceed_bd[1]);
 	assign s1_fmbuf_cmd_ready = 
 		aclken & 
-		fmbuf_access_msg_fifo_full_n[1] & (
-			(~buf_mem_access_pending[fmbuf_access_bid[1]]) | 
-			(buf_mem_rsp_slave_ready[fmbuf_access_bid[1]] & buf_mem_rsp_to_pass[fmbuf_access_bid[1]])
-		) & (
-			fmbuf_access_cfl_sel | (~s0_fmbuf_cmd_valid) | (~fmbuf_addr_conflict) | fmbuf_addr_exceed_bd[0] | fmbuf_addr_exceed_bd[1]
-		);
+		fmbuf_access_msg_fifo_full_n[1] & 
+		(
+			(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+				(
+					(~buf_mem_port_a_access_pending[fmbuf_access_bid[1]]) | 
+					(buf_mem_port_a_rsp_slave_ready[fmbuf_access_bid[1]] & buf_mem_port_a_rsp_to_pass[fmbuf_access_bid[1]])
+				):
+				(
+					(~buf_mem_port_b_access_pending[fmbuf_access_bid[1]]) | 
+					(buf_mem_port_b_rsp_slave_ready[fmbuf_access_bid[1]] & buf_mem_port_b_rsp_to_pass[fmbuf_access_bid[1]])
+				)
+		) & 
+		(fmbuf_access_cfl_sel | (~s0_fmbuf_cmd_valid) | (~fmbuf_addr_conflict) | fmbuf_addr_exceed_bd[0] | fmbuf_addr_exceed_bd[1]);
 	
 	assign fmbuf_access_msg_fifo_wen[0] = s0_fmbuf_cmd_valid & s0_fmbuf_cmd_ready;
 	assign fmbuf_access_msg_fifo_wen[1] = s1_fmbuf_cmd_valid & s1_fmbuf_cmd_ready;
 	assign fmbuf_access_msg_fifo_din[0] = {fmbuf_addr_exceed_bd[0], fmbuf_access_bid[0]};
 	assign fmbuf_access_msg_fifo_din[1] = {fmbuf_addr_exceed_bd[1], fmbuf_access_bid[1]};
 	
-	assign fmbuf_addr_conflict = fmbuf_access_bid[0] == fmbuf_access_bid[1];
+	assign fmbuf_addr_conflict = 
+		(USE_TRUE_DUAL_PORT_SRAM == "false") & 
+		(fmbuf_access_bid[0] == fmbuf_access_bid[1]);
 	
 	// 特征图缓存访问冲突时选择的从机
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
 			fmbuf_access_cfl_sel <= 1'b0;
-		else if(aclken & 
+		else if(
+			aclken & 
 			s0_fmbuf_cmd_valid & s1_fmbuf_cmd_valid & 
 			(s0_fmbuf_cmd_ready | s1_fmbuf_cmd_ready) & 
 			fmbuf_addr_conflict & (~fmbuf_addr_exceed_bd[0]) & (~fmbuf_addr_exceed_bd[1])
@@ -525,34 +708,44 @@ module phy_conv_buffer_core #(
 	*/
 	assign s0_kbuf_cmd_ready = 
 		aclken & 
-		kbuf_access_msg_fifo_full_n[0] & (
-			(~buf_mem_access_pending[kbuf_access_bid[0]]) | 
-			(buf_mem_rsp_slave_ready[kbuf_access_bid[0]] & buf_mem_rsp_to_pass[kbuf_access_bid[0]])
-		) & (
-			(~kbuf_access_cfl_sel) | (~s1_kbuf_cmd_valid) | (~kbuf_addr_conflict) | kbuf_addr_exceed_bd[0] | kbuf_addr_exceed_bd[1]
-		);
+		kbuf_access_msg_fifo_full_n[0] & 
+		(
+			(~buf_mem_port_a_access_pending[kbuf_access_bid[0]]) | 
+			(buf_mem_port_a_rsp_slave_ready[kbuf_access_bid[0]] & buf_mem_port_a_rsp_to_pass[kbuf_access_bid[0]])
+		) & 
+		((~kbuf_access_cfl_sel) | (~s1_kbuf_cmd_valid) | (~kbuf_addr_conflict) | kbuf_addr_exceed_bd[0] | kbuf_addr_exceed_bd[1]);
 	assign s1_kbuf_cmd_ready = 
 		aclken & 
-		kbuf_access_msg_fifo_full_n[1] & (
-			(~buf_mem_access_pending[kbuf_access_bid[1]]) | 
-			(buf_mem_rsp_slave_ready[kbuf_access_bid[1]] & buf_mem_rsp_to_pass[kbuf_access_bid[1]])
-		) & (
-			kbuf_access_cfl_sel | (~s0_kbuf_cmd_valid) | (~kbuf_addr_conflict) | kbuf_addr_exceed_bd[0] | kbuf_addr_exceed_bd[1]
-		);
+		kbuf_access_msg_fifo_full_n[1] & 
+		(
+			(USE_TRUE_DUAL_PORT_SRAM == "false") ? 
+				(
+					(~buf_mem_port_a_access_pending[kbuf_access_bid[1]]) | 
+					(buf_mem_port_a_rsp_slave_ready[kbuf_access_bid[1]] & buf_mem_port_a_rsp_to_pass[kbuf_access_bid[1]])
+				):
+				(
+					(~buf_mem_port_b_access_pending[kbuf_access_bid[1]]) | 
+					(buf_mem_port_b_rsp_slave_ready[kbuf_access_bid[1]] & buf_mem_port_b_rsp_to_pass[kbuf_access_bid[1]])
+				)
+		) & 
+		(kbuf_access_cfl_sel | (~s0_kbuf_cmd_valid) | (~kbuf_addr_conflict) | kbuf_addr_exceed_bd[0] | kbuf_addr_exceed_bd[1]);
 	
 	assign kbuf_access_msg_fifo_wen[0] = s0_kbuf_cmd_valid & s0_kbuf_cmd_ready;
 	assign kbuf_access_msg_fifo_wen[1] = s1_kbuf_cmd_valid & s1_kbuf_cmd_ready;
 	assign kbuf_access_msg_fifo_din[0] = {kbuf_addr_exceed_bd[0], kbuf_access_bid[0]};
 	assign kbuf_access_msg_fifo_din[1] = {kbuf_addr_exceed_bd[1], kbuf_access_bid[1]};
 	
-	assign kbuf_addr_conflict = kbuf_access_bid[0] == kbuf_access_bid[1];
+	assign kbuf_addr_conflict = 
+		(USE_TRUE_DUAL_PORT_SRAM == "false") & 
+		(kbuf_access_bid[0] == kbuf_access_bid[1]);
 	
 	// 卷积核缓存访问冲突时选择的从机
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
 			kbuf_access_cfl_sel <= 1'b0;
-		else if(aclken & 
+		else if(
+			aclken & 
 			s0_kbuf_cmd_valid & s1_kbuf_cmd_valid & 
 			(s0_kbuf_cmd_ready | s1_kbuf_cmd_ready) & 
 			kbuf_addr_conflict & (~kbuf_addr_exceed_bd[0]) & (~kbuf_addr_exceed_bd[1])

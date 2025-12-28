@@ -52,7 +52,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/10
+日期: 2025/12/28
 ********************************************************************/
 
 
@@ -67,6 +67,7 @@ module conv_data_hub #(
 	parameter integer LG_FMBUF_BUFFER_RID_WIDTH = 9, // 特征图缓存的缓存行号的位宽(3~10, 应为clogb2(MAX_FMBUF_ROWN))
 	parameter EN_REG_SLICE_IN_FM_RD_REQ = "true", // 是否在"特征图表面行读请求"处插入寄存器片
 	parameter EN_REG_SLICE_IN_KWGTBLK_RD_REQ = "true", // 是否在"卷积核权重块读请求"处插入寄存器片
+	parameter PHY_BUF_USE_TRUE_DUAL_PORT_SRAM = "false", // 物理缓存是否使用真双口RAM
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -212,7 +213,13 @@ module conv_data_hub #(
 	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_a, // combinational logic out
 	output wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_a, // combinational logic out
 	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a, // combinational logic out
-	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a,
+	output wire phy_conv_buf_mem_clk_b,
+	output wire[CBUF_BANK_N-1:0] phy_conv_buf_mem_en_b, // combinational logic out
+	output wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_b, // combinational logic out
+	output wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_b, // combinational logic out
+	output wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_b, // combinational logic out
+	input wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_b
 );
 	
 	// 计算bit_depth的最高有效位编号(即位数-1)
@@ -2002,6 +2009,7 @@ module conv_data_hub #(
 		.EN_ICB1_FMBUF_REG_SLICE("true"),
 		.EN_ICB0_KBUF_REG_SLICE("true"),
 		.EN_ICB1_KBUF_REG_SLICE("true"),
+		.USE_TRUE_DUAL_PORT_SRAM(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM),
 		.SIM_DELAY(SIM_DELAY)
 	)phy_conv_buffer_u(
 		.aclk(aclk),
@@ -2059,7 +2067,13 @@ module conv_data_hub #(
 		.mem_wen_a(phy_conv_buf_mem_wen_a),
 		.mem_addr_a(phy_conv_buf_mem_addr_a),
 		.mem_din_a(phy_conv_buf_mem_din_a),
-		.mem_dout_a(phy_conv_buf_mem_dout_a)
+		.mem_dout_a(phy_conv_buf_mem_dout_a),
+		.mem_clk_b(phy_conv_buf_mem_clk_b),
+		.mem_en_b(phy_conv_buf_mem_en_b),
+		.mem_wen_b(phy_conv_buf_mem_wen_b),
+		.mem_addr_b(phy_conv_buf_mem_addr_b),
+		.mem_din_b(phy_conv_buf_mem_din_b),
+		.mem_dout_b(phy_conv_buf_mem_dout_b)
 	);
 	
 endmodule
