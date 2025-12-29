@@ -217,25 +217,33 @@ module pool_middle_res_upd #(
 	
 	always @(posedge aclk)
 	begin
-		if(aclken)
-		begin
-			{
-				pool_upd_in_info_along_delayed[6],
-				pool_upd_in_info_along_delayed[5],
-				pool_upd_in_info_along_delayed[4],
-				pool_upd_in_info_along_delayed[3],
-				pool_upd_in_info_along_delayed[2],
-				pool_upd_in_info_along_delayed[1]
-			} <= # SIM_DELAY 
-				{
-					pool_upd_in_info_along_delayed[5],
-					pool_upd_in_info_along_delayed[4],
-					pool_upd_in_info_along_delayed[3],
-					pool_upd_in_info_along_delayed[2],
-					pool_upd_in_info_along_delayed[1],
-					pool_upd_in_info_along
-				};
-		end
+		if(aclken & pool_upd_in_valid)
+			pool_upd_in_info_along_delayed[1] <= # SIM_DELAY pool_upd_in_info_along;
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[1])
+			pool_upd_in_info_along_delayed[2] <= # SIM_DELAY pool_upd_in_info_along_delayed[1];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[2])
+			pool_upd_in_info_along_delayed[3] <= # SIM_DELAY pool_upd_in_info_along_delayed[2];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[3])
+			pool_upd_in_info_along_delayed[4] <= # SIM_DELAY pool_upd_in_info_along_delayed[3];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[4])
+			pool_upd_in_info_along_delayed[5] <= # SIM_DELAY pool_upd_in_info_along_delayed[4];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[5])
+			pool_upd_in_info_along_delayed[6] <= # SIM_DELAY pool_upd_in_info_along_delayed[5];
 	end
 	
 	/**

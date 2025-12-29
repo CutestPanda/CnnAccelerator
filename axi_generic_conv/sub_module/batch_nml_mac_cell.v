@@ -369,17 +369,43 @@ module batch_nml_mac_cell #(
 	// 延迟的随路数据
 	always @(posedge aclk)
 	begin
-		if(aclken)
-		begin
+		if(aclken & mac_cell_i_vld)
 			mac_cell_i_info_along_delayed[1] <= # SIM_DELAY mac_cell_i_info_along;
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[1])
 			mac_cell_i_info_along_delayed[2] <= # SIM_DELAY mac_cell_i_info_along_delayed[1];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[2])
 			mac_cell_i_info_along_delayed[3] <= # SIM_DELAY mac_cell_i_info_along_delayed[2];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[3])
 			mac_cell_i_info_along_delayed[4] <= # SIM_DELAY mac_cell_i_info_along_delayed[3];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[4])
 			mac_cell_i_info_along_delayed[5] <= # SIM_DELAY mac_cell_i_info_along_delayed[4];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[5])
 			mac_cell_i_info_along_delayed[6] <= # SIM_DELAY mac_cell_i_info_along_delayed[5];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[6])
 			mac_cell_i_info_along_delayed[7] <= # SIM_DELAY mac_cell_i_info_along_delayed[6];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & mac_cell_i_vld_delayed[7])
 			mac_cell_i_info_along_delayed[8] <= # SIM_DELAY mac_cell_i_info_along_delayed[7];
-		end
 	end
 	
 	/**
