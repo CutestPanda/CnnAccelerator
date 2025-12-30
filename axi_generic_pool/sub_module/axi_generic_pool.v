@@ -240,7 +240,7 @@ module axi_generic_pool #(
 	// [运行时参数]
 	wire[1:0] bn_act_calfmt; // 运算数据格式
 	wire bn_act_use_bn_unit; // 启用BN单元
-	wire bn_act_use_act_unit; // 启用激活单元
+	wire[2:0] bn_act_act_func_type; // 激活函数类型
 	wire[4:0] bn_act_bn_fixed_point_quat_accrc; // (操作数A)定点数量化精度
 	wire bn_act_bn_is_a_eq_1; // 参数A的实际值为1(标志)
 	wire bn_act_bn_is_b_eq_0; // 参数B的实际值为0(标志)
@@ -396,7 +396,7 @@ module axi_generic_pool #(
 		.en_bn_act_proc_dup(en_bn_act_proc_dup),
 		.bn_act_calfmt(bn_act_calfmt),
 		.bn_act_use_bn_unit(bn_act_use_bn_unit),
-		.bn_act_use_act_unit(bn_act_use_act_unit),
+		.bn_act_act_func_type(bn_act_act_func_type),
 		.bn_act_bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
 		.bn_act_bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
 		.bn_act_bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
@@ -894,7 +894,7 @@ module axi_generic_pool #(
 		
 		.calfmt(bn_act_calfmt),
 		.use_bn_unit(bn_act_use_bn_unit),
-		.use_act_unit(bn_act_use_act_unit),
+		.act_func_type(bn_act_act_func_type),
 		.bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
@@ -903,6 +903,7 @@ module axi_generic_pool #(
 		.param_b_in_const_mac_mode(bn_act_param_b_in_const_mac_mode),
 		.leaky_relu_fixed_point_quat_accrc(5'dx),
 		.leaky_relu_param_alpha(32'hxxxxxxxx),
+		.sigmoid_fixed_point_quat_accrc(5'dx),
 		
 		.s_sub_row_msg_axis_data(16'hxxxx),
 		.s_sub_row_msg_axis_last(1'bx),
@@ -935,6 +936,11 @@ module axi_generic_pool #(
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
+		
+		.sigmoid_lut_mem_clk_a(),
+		.sigmoid_lut_mem_ren_a(),
+		.sigmoid_lut_mem_addr_a(),
+		.sigmoid_lut_mem_dout_a({(16*POST_MAC_PRL_N){1'bx}}),
 		
 		.mul0_op_a(post_mac_mul_op_a),
 		.mul0_op_b(post_mac_mul_op_b),

@@ -155,26 +155,6 @@ module conv_middle_res_accumulate #(
 					);
 	end
 	
-	/** 随路数据延迟链 **/
-	reg[INFO_ALONG_WIDTH-1:0] acmlt_in_info_along_d[1:9]; // 延迟1~9clk的随路数据
-	
-	// 延迟1~9clk的随路数据
-	always @(posedge aclk)
-	begin
-		if(aclken)
-		begin
-			{
-				acmlt_in_info_along_d[9], acmlt_in_info_along_d[8], acmlt_in_info_along_d[7], 
-				acmlt_in_info_along_d[6], acmlt_in_info_along_d[5], acmlt_in_info_along_d[4], 
-				acmlt_in_info_along_d[3], acmlt_in_info_along_d[2], acmlt_in_info_along_d[1]
-			} <= # SIM_DELAY {
-				acmlt_in_info_along_d[8], acmlt_in_info_along_d[7], acmlt_in_info_along_d[6], 
-				acmlt_in_info_along_d[5], acmlt_in_info_along_d[4], acmlt_in_info_along_d[3], 
-				acmlt_in_info_along_d[2], acmlt_in_info_along_d[1], acmlt_in_info_along
-			};
-		end
-	end
-	
 	/** 输入有效指示延迟链 **/
 	reg acmlt_in_valid_d1; // 延迟1clk的输入有效指示
 	reg acmlt_in_valid_d2; // 延迟2clk的输入有效指示
@@ -205,6 +185,56 @@ module conv_middle_res_accumulate #(
 				acmlt_in_valid_d5, acmlt_in_valid_d4, acmlt_in_valid_d3, 
 				acmlt_in_valid_d2, acmlt_in_valid_d1, acmlt_in_valid
 			};
+	end
+	
+	/** 随路数据延迟链 **/
+	reg[INFO_ALONG_WIDTH-1:0] acmlt_in_info_along_d[1:9]; // 延迟1~9clk的随路数据
+	
+	// 延迟1~9clk的随路数据
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid)
+			acmlt_in_info_along_d[1] <= # SIM_DELAY acmlt_in_info_along;
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d1)
+			acmlt_in_info_along_d[2] <= # SIM_DELAY acmlt_in_info_along_d[1];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d2)
+			acmlt_in_info_along_d[3] <= # SIM_DELAY acmlt_in_info_along_d[2];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d3)
+			acmlt_in_info_along_d[4] <= # SIM_DELAY acmlt_in_info_along_d[3];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d4)
+			acmlt_in_info_along_d[5] <= # SIM_DELAY acmlt_in_info_along_d[4];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d5)
+			acmlt_in_info_along_d[6] <= # SIM_DELAY acmlt_in_info_along_d[5];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d6)
+			acmlt_in_info_along_d[7] <= # SIM_DELAY acmlt_in_info_along_d[6];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d7)
+			acmlt_in_info_along_d[8] <= # SIM_DELAY acmlt_in_info_along_d[7];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & acmlt_in_valid_d8)
+			acmlt_in_info_along_d[9] <= # SIM_DELAY acmlt_in_info_along_d[8];
 	end
 	
 	/**

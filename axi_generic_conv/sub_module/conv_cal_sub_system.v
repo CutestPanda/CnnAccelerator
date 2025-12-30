@@ -37,6 +37,7 @@ SOFTWARE.
 使用RBUF_BANK_N个简单双口SRAM(位宽 = ATOMIC_K*32+ATOMIC_K, 深度 = RBUF_DEPTH), 读时延 = 1clk
 使用1个真双口SRAM(位宽 = 64, 深度 = 最大的卷积核个数), 读时延 = 1clk
 使用1个简单双口SRAM(位宽 = BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5, 深度 = 512), 读时延 = 1clk
+使用BN_ACT_PRL_N个单口SRAM(位宽 = 16, 深度 = 4096), 读时延 = 1clk
 
 注意：
 当参数calfmt(运算数据格式)或cal_round(计算轮次 - 1)无效时, 需要除能乘加阵列(en_mac_array拉低)
@@ -119,12 +120,13 @@ module conv_cal_sub_system #(
 	input wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
 	// [批归一化与激活参数]
 	input wire use_bn_unit, // 启用BN单元
-	input wire use_act_unit, // 启用激活单元
+	input wire[2:0] act_func_type, // 激活函数类型
 	input wire[4:0] bn_fixed_point_quat_accrc, // (批归一化操作数A)定点数量化精度
 	input wire bn_is_a_eq_1, // 批归一化参数A的实际值为1(标志)
 	input wire bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
 	input wire[4:0] leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
 	input wire[31:0] leaky_relu_param_alpha, // 泄露Relu激活参数
+	input wire[4:0] sigmoid_fixed_point_quat_accrc, // Sigmoid输入定点数量化精度
 	
 	// 特征图切块信息(AXIS从机)
 	input wire[7:0] s_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
@@ -253,7 +255,12 @@ module conv_cal_sub_system #(
 	output wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
 	output wire proc_res_fifo_mem_ren_b, // combinational logic out
 	output wire[8:0] proc_res_fifo_mem_addr_b,
-	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b
+	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b,
+	// Sigmoid函数值查找表(MEM主接口)
+	output wire sigmoid_lut_mem_clk_a,
+	output wire[BN_ACT_PRL_N-1:0] sigmoid_lut_mem_ren_a, // combinational logic out
+	output wire[12*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_addr_a, // combinational logic out
+	input wire[16*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_dout_a
 );
 	
 	// 计算bit_depth的最高有效位编号(即位数-1)
@@ -780,7 +787,7 @@ module conv_cal_sub_system #(
 				
 				.calfmt(bn_act_calfmt),
 				.use_bn_unit(use_bn_unit),
-				.use_act_unit(use_act_unit),
+				.act_func_type(act_func_type),
 				.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 				.bn_is_a_eq_1(bn_is_a_eq_1),
 				.bn_is_b_eq_0(bn_is_b_eq_0),
@@ -789,6 +796,7 @@ module conv_cal_sub_system #(
 				.param_b_in_const_mac_mode(32'hxxxxxxxx),
 				.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 				.leaky_relu_param_alpha(leaky_relu_param_alpha),
+				.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
 				
 				.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
 				.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),
@@ -821,6 +829,11 @@ module conv_cal_sub_system #(
 				.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 				.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 				.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
+				
+				.sigmoid_lut_mem_clk_a(sigmoid_lut_mem_clk_a),
+				.sigmoid_lut_mem_ren_a(sigmoid_lut_mem_ren_a),
+				.sigmoid_lut_mem_addr_a(sigmoid_lut_mem_addr_a),
+				.sigmoid_lut_mem_dout_a(sigmoid_lut_mem_dout_a),
 				
 				.mul0_op_a(mul1_op_a),
 				.mul0_op_b(mul1_op_b),
@@ -868,6 +881,10 @@ module conv_cal_sub_system #(
 			assign proc_res_fifo_mem_din_a = {(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5){1'bx}};
 			assign proc_res_fifo_mem_ren_b = 1'b0;
 			assign proc_res_fifo_mem_addr_b = 9'dx;
+			
+			assign sigmoid_lut_mem_clk_a = 1'b0;
+			assign sigmoid_lut_mem_ren_a = {BN_ACT_PRL_N{1'b0}};
+			assign sigmoid_lut_mem_addr_a = {(BN_ACT_PRL_N*12){1'b0}};
 			
 			assign mul1_op_a = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};
 			assign mul1_op_b = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};

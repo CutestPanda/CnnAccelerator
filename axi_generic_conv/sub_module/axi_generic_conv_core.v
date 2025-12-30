@@ -36,7 +36,7 @@ SOFTWARE.
 支持卷积核膨胀
 支持计算轮次拓展
 支持批归一化处理
-支持Leaky-Relu激活
+支持Leaky-Relu激活和Sigmoid激活
 
 注意：
 BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
@@ -53,6 +53,7 @@ AXIS MASTER/SLAVE
 module axi_generic_conv_core #(
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
+	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
 	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
@@ -236,12 +237,13 @@ module axi_generic_conv_core #(
 	// [运行时参数]
 	output wire[1:0] bn_act_calfmt, // 运算数据格式
 	output wire bn_act_use_bn_unit, // 启用BN单元
-	output wire bn_act_use_act_unit, // 启用激活单元
+	output wire[2:0] bn_act_act_func_type, // 激活函数类型
 	output wire[4:0] bn_act_bn_fixed_point_quat_accrc, // (批归一化操作数A)定点数量化精度
 	output wire bn_act_bn_is_a_eq_1, // 批归一化参数A的实际值为1(标志)
 	output wire bn_act_bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
 	output wire[4:0] bn_act_leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
 	output wire[31:0] bn_act_leaky_relu_param_alpha, // 泄露Relu激活参数
+	output wire[4:0] bn_act_sigmoid_fixed_point_quat_accrc, // (Sigmoid输入)定点数量化精度
 	// [卷积最终结果(AXIS主机)]
 	output wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data, // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
 	output wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep,
@@ -374,12 +376,13 @@ module axi_generic_conv_core #(
 	wire[3:0] mid_res_buf_row_n_bufferable; // 可缓存行数 - 1
 	// [批归一化与激活参数]
 	wire use_bn_unit; // 启用BN单元
-	wire use_act_unit; // 启用激活单元
+	wire[2:0] act_func_type; // 激活函数类型
 	wire[4:0] bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
 	wire bn_is_a_eq_1; // 批归一化参数A的实际值为1(标志)
 	wire bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
 	wire[4:0] leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
 	wire[31:0] leaky_relu_param_alpha; // 泄露Relu激活参数
+	wire[4:0] sigmoid_fixed_point_quat_accrc; // Sigmoid输入定点数量化精度
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
 	wire kernal_access_blk_start;
@@ -397,6 +400,7 @@ module axi_generic_conv_core #(
 	reg_if_for_generic_conv #(
 		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
+		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED ? 1'b1:1'b0),
 		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
 		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
 		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
@@ -487,12 +491,13 @@ module axi_generic_conv_core #(
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
 		.use_bn_unit(use_bn_unit),
-		.use_act_unit(use_act_unit),
+		.act_func_type(act_func_type),
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
 		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(leaky_relu_param_alpha),
+		.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
 		
 		.kernal_access_blk_start(kernal_access_blk_start),
 		.kernal_access_blk_idle(kernal_access_blk_idle),
@@ -805,12 +810,13 @@ module axi_generic_conv_core #(
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
 		.use_bn_unit(use_bn_unit),
-		.use_act_unit(use_act_unit),
+		.act_func_type(act_func_type),
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
 		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(leaky_relu_param_alpha),
+		.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
@@ -920,7 +926,12 @@ module axi_generic_conv_core #(
 		.proc_res_fifo_mem_din_a(),
 		.proc_res_fifo_mem_ren_b(),
 		.proc_res_fifo_mem_addr_b(),
-		.proc_res_fifo_mem_dout_b({BN_ACT_PROC_RES_FIFO_WIDTH{1'bx}})
+		.proc_res_fifo_mem_dout_b({BN_ACT_PROC_RES_FIFO_WIDTH{1'bx}}),
+		
+		.sigmoid_lut_mem_clk_a(),
+		.sigmoid_lut_mem_ren_a(),
+		.sigmoid_lut_mem_addr_a(),
+		.sigmoid_lut_mem_dout_a({(16*BN_ACT_PRL_N){1'bx}})
 	);
 	
 	/** 乘法器 **/
@@ -1007,12 +1018,13 @@ module axi_generic_conv_core #(
 	
 	assign bn_act_calfmt = calfmt;
 	assign bn_act_use_bn_unit = use_bn_unit;
-	assign bn_act_use_act_unit = use_act_unit;
+	assign bn_act_act_func_type = act_func_type;
 	assign bn_act_bn_fixed_point_quat_accrc = bn_fixed_point_quat_accrc;
 	assign bn_act_bn_is_a_eq_1 = bn_is_a_eq_1;
 	assign bn_act_bn_is_b_eq_0 = bn_is_b_eq_0;
 	assign bn_act_leaky_relu_fixed_point_quat_accrc = leaky_relu_fixed_point_quat_accrc;
 	assign bn_act_leaky_relu_param_alpha = leaky_relu_param_alpha;
+	assign bn_act_sigmoid_fixed_point_quat_accrc = sigmoid_fixed_point_quat_accrc;
 	
 	assign round_calfmt = calfmt;
 	assign round_fixed_point_quat_accrc = 4'dx; // 警告: 需要给出运行时参数!!!

@@ -187,7 +187,7 @@ module axi_generic_pool_core #(
 	// [运行时参数]
 	output wire[1:0] bn_act_calfmt, // 运算数据格式
 	output wire bn_act_use_bn_unit, // 启用BN单元
-	output wire bn_act_use_act_unit, // 启用激活单元
+	output wire[2:0] bn_act_act_func_type, // 激活函数类型
 	output wire[4:0] bn_act_bn_fixed_point_quat_accrc, // (操作数A)定点数量化精度
 	output wire bn_act_bn_is_a_eq_1, // 参数A的实际值为1(标志)
 	output wire bn_act_bn_is_b_eq_0, // 参数B的实际值为0(标志)
@@ -266,6 +266,10 @@ module axi_generic_pool_core #(
 	localparam CAL_FMT_INT8 = 2'b00;
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
+	// 激活函数类型的编码
+	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
+	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_NONE = 3'b111;
 	
 	/** 寄存器配置接口 **/
 	// 控制信号
@@ -820,7 +824,7 @@ module axi_generic_pool_core #(
 	
 	assign bn_act_calfmt = post_mac_calfmt;
 	assign bn_act_use_bn_unit = 1'b1;
-	assign bn_act_use_act_unit = 1'b0;
+	assign bn_act_act_func_type = ACT_FUNC_TYPE_NONE;
 	assign bn_act_bn_fixed_point_quat_accrc = post_mac_fixed_point_quat_accrc;
 	assign bn_act_bn_is_a_eq_1 = post_mac_is_a_eq_1;
 	assign bn_act_bn_is_b_eq_0 = post_mac_is_b_eq_0;

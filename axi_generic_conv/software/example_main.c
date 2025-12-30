@@ -2,6 +2,7 @@
 通用卷积处理单元IP配置参数:
 	parameter integer BN_SUPPORTED = 1; // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1; // 是否支持Leaky-Relu激活
+	parameter integer SIGMOID_SUPPORTED = 1; // 是否支持Sigmoid激活
 	parameter integer INT8_SUPPORTED = 0; // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0; // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1; // 是否支持FP16
@@ -21,12 +22,14 @@
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer MM2S_STREAM_DATA_WIDTH = 64; // MM2S通道DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer S2MM_STREAM_DATA_WIDTH = 64; // S2MM通道DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer PHY_BUF_USE_TRUE_DUAL_PORT_SRAM = 0; // 物理缓存是否使用真双口RAM
 	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
 	parameter integer CBUF_DEPTH_FOREACH_BANK = 512; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_KERNAL_N = 1024; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
+	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt"; // sigmoid函数值查找表存储器的初始化文件路径
 **/
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -124,7 +127,7 @@ int main(){
 	conv_cfg.buffer_cfg.fmbufcoln = CONV_COLN_1024;
 	conv_cfg.buffer_cfg.sfc_n_each_wgtblk = CONV_WGTBLK_SFC_N_16;
 	conv_cfg.bn_act_cfg.use_bn_unit = 1;
-	conv_cfg.bn_act_cfg.use_act_unit = 0;
+	conv_cfg.bn_act_cfg.act_func_type = ACT_FUNC_NONE;
 	conv_cfg.bn_act_cfg.bn_is_a_eq_1 = 1;
 	conv_cfg.bn_act_cfg.bn_is_b_eq_0 = 0;
 	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.01f;
@@ -165,10 +168,10 @@ int main(){
 	conv_cfg.buffer_cfg.fmbufcoln = CONV_COLN_512;
 	conv_cfg.buffer_cfg.sfc_n_each_wgtblk = CONV_WGTBLK_SFC_N_16;
 	conv_cfg.bn_act_cfg.use_bn_unit = 1;
-	conv_cfg.bn_act_cfg.use_act_unit = 0;
+	conv_cfg.bn_act_cfg.act_func_type = ACT_FUNC_NONE;
 	conv_cfg.bn_act_cfg.bn_is_a_eq_1 = 1;
 	conv_cfg.bn_act_cfg.bn_is_b_eq_0 = 0;
-	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.01f;
+	conv_cfg.bn_act_cfg.leaky_relu_param_alpha = 0.1f;
 
 	if(test_conv_layer(
 		"in_fmap_1.bin", "kernal_1.bin", "bn_1.bin", "out_fmap_1.bin",

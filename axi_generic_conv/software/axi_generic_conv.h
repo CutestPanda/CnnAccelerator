@@ -13,6 +13,7 @@
         2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
         2025.12.26 1.23 修改ctrl0寄存器
+        2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -87,6 +88,13 @@ typedef enum{
 	CONV_WGTBLK_SFC_N_128 = 0b111
 }AxiGnrConvWgtblkSfcNType;
 
+// 枚举类型: 激活函数类型
+typedef enum{
+	ACT_FUNC_LEAKY_RELU = 0b000,
+	ACT_FUNC_SIGMOID = 0b001,
+	ACT_FUNC_NONE = 0b111
+}AxiGnrConvActFuncType;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // 结构体: 加速器属性
@@ -97,6 +105,7 @@ typedef struct{
 
 	uint8_t bn_supported; // 是否支持批归一化处理
 	uint8_t leaky_relu_supported; // 是否支持Leaky-Relu激活
+	uint8_t sigmoid_supported; // 是否支持Sigmoid激活
 	uint8_t int8_supported; // 是否支持INT8运算数据格式
 	uint8_t int16_supported; // 是否支持INT16运算数据格式
 	uint8_t fp16_supported; // 是否支持FP16运算数据格式
@@ -237,11 +246,12 @@ typedef struct{
 // 结构体: 子配置参数(BN与激活)
 typedef struct{
 	uint8_t use_bn_unit; // 启用BN单元
-	uint8_t use_act_unit; // 启用激活单元
+	AxiGnrConvActFuncType act_func_type; // 激活函数类型
 	uint8_t bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
 	uint8_t bn_is_a_eq_1; // 批归一化参数A的实际值是否为1
 	uint8_t bn_is_b_eq_0; // 批归一化参数B的实际值是否为0
 	uint8_t leaky_relu_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
+	uint8_t sigmoid_point_quat_accrc; // (sigmoid输入参数)定点数量化精度
 	float leaky_relu_param_alpha; // 泄露Relu激活参数
 }AxiGnrConvBNActCfg;
 

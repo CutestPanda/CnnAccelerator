@@ -1409,20 +1409,11 @@ module conv_data_hub #(
 		if(
 			aclken & 
 			(
-				// 载入新的请求项, 且该请求项是"重置缓存"
-				(
-					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
-					m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
-				) | 
-				// DMA命令被接受, 预热/准备存入新的通道组
-				(s1_dma_cmd_axis_valid & s1_dma_cmd_axis_ready & en_rsv_rgn_warm_up)
+				rst_logic_kbuf | // 正在重置逻辑卷积核缓存
+				(s1_dma_cmd_axis_valid & s1_dma_cmd_axis_ready & en_rsv_rgn_warm_up) // DMA命令被接受, 预热/准备存入新的通道组
 			)
 		)
-			warm_rsv_rgn_grpn <= # SIM_DELAY 
-				{9{~(
-					m_kwgtblk_rd_req_reg_axis_valid & m_kwgtblk_rd_req_reg_axis_ready & 
-					m_kwgtblk_rd_req_reg_axis_data[KWGTBLK_RD_REQ_TO_RST_BUF_FLAG_SID]
-				)}} & (warm_rsv_rgn_grpn + 1'b1);
+			warm_rsv_rgn_grpn <= # SIM_DELAY {9{~rst_logic_kbuf}} & (warm_rsv_rgn_grpn + 1'b1);
 	end
 	
 	genvar kwgtblk_rd_req_i;
@@ -2010,6 +2001,7 @@ module conv_data_hub #(
 		.EN_ICB0_KBUF_REG_SLICE("true"),
 		.EN_ICB1_KBUF_REG_SLICE("true"),
 		.USE_TRUE_DUAL_PORT_SRAM(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM),
+		.SLAVE_ACCESS_MSG_FIFO_DEPTH(2),
 		.SIM_DELAY(SIM_DELAY)
 	)phy_conv_buffer_u(
 		.aclk(aclk),

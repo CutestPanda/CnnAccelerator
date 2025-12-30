@@ -55,6 +55,7 @@ AXIS MASTER/SLAVE
 module axi_generic_conv #(
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
+	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
 	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
@@ -80,6 +81,7 @@ module axi_generic_conv #(
 	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
+	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt", // sigmoid函数值查找表存储器的初始化文件路径
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -291,12 +293,13 @@ module axi_generic_conv #(
 	// [运行时参数]
 	wire[1:0] bn_act_calfmt; // 运算数据格式
 	wire bn_act_use_bn_unit; // 启用BN单元
-	wire bn_act_use_act_unit; // 启用激活单元
+	wire[2:0] bn_act_act_func_type; // 激活函数类型
 	wire[4:0] bn_act_bn_fixed_point_quat_accrc; // (批归一化操作数A)定点数量化精度
 	wire bn_act_bn_is_a_eq_1; // 批归一化参数A的实际值为1(标志)
 	wire bn_act_bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
 	wire[4:0] bn_act_leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
 	wire[31:0] bn_act_leaky_relu_param_alpha; // 泄露Relu激活参数
+	wire[4:0] bn_act_sigmoid_fixed_point_quat_accrc; // (Sigmoid输入)定点数量化精度
 	// [卷积最终结果(AXIS主机)]
 	wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data; // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
 	wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep;
@@ -347,6 +350,7 @@ module axi_generic_conv #(
 	axi_generic_conv_core #(
 		.BN_SUPPORTED(BN_SUPPORTED),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
+		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED),
 		.INT8_SUPPORTED(INT8_SUPPORTED),
 		.INT16_SUPPORTED(INT16_SUPPORTED),
 		.FP16_SUPPORTED(FP16_SUPPORTED),
@@ -492,12 +496,13 @@ module axi_generic_conv #(
 		.en_bn_act_proc_dup(en_bn_act_proc_dup),
 		.bn_act_calfmt(bn_act_calfmt),
 		.bn_act_use_bn_unit(bn_act_use_bn_unit),
-		.bn_act_use_act_unit(bn_act_use_act_unit),
+		.bn_act_act_func_type(bn_act_act_func_type),
 		.bn_act_bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
 		.bn_act_bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
 		.bn_act_bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
 		.bn_act_leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
 		.bn_act_leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
+		.bn_act_sigmoid_fixed_point_quat_accrc(bn_act_sigmoid_fixed_point_quat_accrc),
 		.m_axis_ext_bn_act_i_data(m_axis_ext_bn_act_i_data),
 		.m_axis_ext_bn_act_i_keep(m_axis_ext_bn_act_i_keep),
 		.m_axis_ext_bn_act_i_user(m_axis_ext_bn_act_i_user),
@@ -978,6 +983,11 @@ module axi_generic_conv #(
 	wire proc_res_fifo_mem_ren_b;
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
+	// Sigmoid函数值查找表(MEM主接口)
+	wire sigmoid_lut_mem_clk_a;
+	wire[BN_ACT_PRL_N-1:0] sigmoid_lut_mem_ren_a;
+	wire[12*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_addr_a;
+	wire[16*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_dout_a;
 	
 	conv_bn_act_proc #(
 		.FP32_KEEP(1'b1),
@@ -996,7 +1006,7 @@ module axi_generic_conv #(
 		
 		.calfmt(bn_act_calfmt),
 		.use_bn_unit(bn_act_use_bn_unit),
-		.use_act_unit(bn_act_use_act_unit),
+		.act_func_type(bn_act_act_func_type),
 		.bn_fixed_point_quat_accrc(bn_act_bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_act_bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
@@ -1005,6 +1015,7 @@ module axi_generic_conv #(
 		.param_b_in_const_mac_mode(32'hxxxxxxxx),
 		.leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
+		.sigmoid_fixed_point_quat_accrc(bn_act_sigmoid_fixed_point_quat_accrc),
 		
 		.s_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
 		.s_sub_row_msg_axis_last(m_sub_row_msg_axis_last),
@@ -1046,7 +1057,12 @@ module axi_generic_conv #(
 		.mul1_op_a(leaky_relu_mul_op_a),
 		.mul1_op_b(leaky_relu_mul_op_b),
 		.mul1_ce(leaky_relu_mul_ce),
-		.mul1_res(leaky_relu_mul_res)
+		.mul1_res(leaky_relu_mul_res),
+		
+		.sigmoid_lut_mem_clk_a(sigmoid_lut_mem_clk_a),
+		.sigmoid_lut_mem_ren_a(sigmoid_lut_mem_ren_a),
+		.sigmoid_lut_mem_addr_a(sigmoid_lut_mem_addr_a),
+		.sigmoid_lut_mem_dout_a(sigmoid_lut_mem_dout_a)
 	);
 	
 	/** 输出数据舍入单元组 **/
@@ -1360,5 +1376,29 @@ module axi_generic_conv #(
 		.dinb(64'dx),
 		.doutb(bn_mem_dout_b)
 	);
+	
+	genvar sigmoid_lut_mem_i;
+	generate
+		for(sigmoid_lut_mem_i = 0;sigmoid_lut_mem_i < BN_ACT_PRL_N;sigmoid_lut_mem_i = sigmoid_lut_mem_i + 1)
+		begin:sigmoid_lut_mem_blk
+			bram_single_port #(
+				.style("LOW_LATENCY"),
+				.rw_mode("read_first"),
+				.mem_width(16),
+				.mem_depth(4096),
+				.INIT_FILE(SIGMOID_LUT_MEM_INIT_FILE),
+				.byte_write_mode("false"),
+				.simulation_delay(SIM_DELAY)
+			)sigmoid_lut_mem_u(
+				.clk(sigmoid_lut_mem_clk_a),
+				
+				.en(sigmoid_lut_mem_ren_a[sigmoid_lut_mem_i]),
+				.wen(1'b0),
+				.addr(sigmoid_lut_mem_addr_a[12*(sigmoid_lut_mem_i+1)-1:12*sigmoid_lut_mem_i]),
+				.din(),
+				.dout(sigmoid_lut_mem_dout_a[16*(sigmoid_lut_mem_i+1)-1:16*sigmoid_lut_mem_i])
+			);
+		end
+	endgenerate
 	
 endmodule

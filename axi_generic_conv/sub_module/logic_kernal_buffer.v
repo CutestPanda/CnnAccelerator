@@ -528,7 +528,8 @@ module logic_kernal_buffer #(
 	wire find_wtblk_in_rsv_rgn; // 在驻留区找到权重块(标志)
 	wire find_wtblk_in_sw_rgn0; // 在交换区通道组#0找到权重块(标志)
 	wire find_wtblk_in_sw_rgn1; // 在交换区通道组#1找到权重块(标志)
-	reg[31:0] rd_wtblk_baseaddr; // 待读取权重块的基地址
+	reg[31:0] rd_wtblk_cgrp_baseaddr; // 通道组基地址
+	reg[31:0] rd_wtblk_sfc_baseaddr; // 待读取权重块的表面基地址
 	reg[4:0] wtblk_to_rd_sfc_n; // 待读取权重块的表面个数 - 1
 	reg[5:0] sfc_rd_cmd_dsptc_n; // 已派发的表面读命令个数
 	reg[5:0] sfc_rd_resp_acpt_n; // 已接受的表面读响应个数
@@ -556,7 +557,7 @@ module logic_kernal_buffer #(
 		);
 	
 	assign m1_kbuf_cmd_addr = 
-		rd_wtblk_baseaddr + (sfc_rd_cmd_dsptc_n * ATOMIC_C * 2);
+		rd_wtblk_cgrp_baseaddr + rd_wtblk_sfc_baseaddr + (sfc_rd_cmd_dsptc_n * ATOMIC_C * 2);
 	assign m1_kbuf_cmd_read = 1'b1;
 	assign m1_kbuf_cmd_wdata = {(ATOMIC_C*2*8){1'bx}};
 	assign m1_kbuf_cmd_wmask = {(ATOMIC_C*2){1'bx}};
@@ -592,22 +593,20 @@ module logic_kernal_buffer #(
 	assign find_wtblk_in_sw_rgn0 = sw_rgn0_vld_r & (s_rd_req_axis_data_actual_gid == sw_rgn0_grpid_r);
 	assign find_wtblk_in_sw_rgn1 = sw_rgn1_vld_r & (s_rd_req_axis_data_actual_gid == sw_rgn1_grpid_r);
 	
-	// 待读取权重块的基地址, 待读取权重块的表面个数 - 1
+	// 通道组基地址, 待读取权重块的表面基地址, 待读取权重块的表面个数 - 1
 	always @(posedge aclk)
 	begin
 		if(aclken & (~rst_logic_kbuf) & s_rd_req_axis_valid & s_rd_req_axis_ready)
 		begin
-			rd_wtblk_baseaddr <= # SIM_DELAY 
-				// 通道组基址
-				(
-					(find_wtblk_in_sw_rgn0 | find_wtblk_in_sw_rgn1) ? 
-						(
-							find_wtblk_in_sw_rgn0 ? 
-								sw_rgn0_baseaddr:
-								sw_rgn1_baseaddr
-						):
-						(((access_rsv_rgn_cgid * wtblkn_in_cgrp) | 32'h0000_0000) << kernal_blk_addr_stride_lshn)
-				) + 
+			rd_wtblk_cgrp_baseaddr <= # SIM_DELAY 
+				(find_wtblk_in_sw_rgn0 | find_wtblk_in_sw_rgn1) ? 
+					(
+						find_wtblk_in_sw_rgn0 ? 
+							sw_rgn0_baseaddr:
+							sw_rgn1_baseaddr
+					):
+					(((access_rsv_rgn_cgid * wtblkn_in_cgrp) | 32'h0000_0000) << kernal_blk_addr_stride_lshn);
+			rd_wtblk_sfc_baseaddr <= # SIM_DELAY 
 				// 权重块偏移地址
 				((s_rd_req_axis_data_bid | 32'h0000_0000) << kernal_blk_addr_stride_lshn) + 
 				// 表面偏移地址

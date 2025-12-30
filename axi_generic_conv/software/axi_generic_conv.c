@@ -13,6 +13,7 @@
         2025.12.22 1.21 增加性能监测计数器组(运行周期数, 0号MM2S通道传输字节数, 1号MM2S通道传输字节数, S2MM通道传输字节数)
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
         2025.12.26 1.23 修改ctrl0寄存器
+        2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -182,6 +183,13 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 		handler->property.leaky_relu_supported = 1;
 	}else{
 		handler->property.leaky_relu_supported = 0;
+	}
+
+	handler->reg_region_bn_act_cfg->act_cfg0 = (0x00000002 << 16);
+	if((((handler->reg_region_bn_act_cfg->act_cfg0) >> 16) & 0x000000FF) == 2){
+		handler->property.sigmoid_supported = 1;
+	}else{
+		handler->property.sigmoid_supported = 0;
 	}
 
 	axi_generic_conv_disable_cal_sub_sys(handler);
@@ -361,7 +369,10 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		return -2;
 	}
 
-	if(cfg->bn_act_cfg.use_act_unit && (!handler->property.leaky_relu_supported)){
+	if(
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_LEAKY_RELU && (!handler->property.leaky_relu_supported)) ||
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_SIGMOID && (!handler->property.sigmoid_supported))
+	){
 		return -2;
 	}
 
@@ -433,8 +444,16 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 
 	if(
 		(cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) &&
-		cfg->bn_act_cfg.use_act_unit &&
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_LEAKY_RELU) &&
 		(cfg->bn_act_cfg.leaky_relu_point_quat_accrc >= 32)
+	){
+		return -2;
+	}
+
+	if(
+		(cfg->cal_cfg.cal_fmt == CONV_INT8 || cfg->cal_cfg.cal_fmt == CONV_INT16) &&
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_SIGMOID) &&
+		(cfg->bn_act_cfg.sigmoid_point_quat_accrc >= 32)
 	){
 		return -2;
 	}
@@ -592,10 +611,11 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 		(((uint32_t)cfg->bn_act_cfg.bn_is_b_eq_0) << 17);
 
 	handler->reg_region_bn_act_cfg->act_cfg0 =
-		((uint32_t)cfg->bn_act_cfg.use_act_unit) |
-		(((uint32_t)cfg->bn_act_cfg.leaky_relu_point_quat_accrc) << 8);
+		((uint32_t)cfg->bn_act_cfg.act_func_type) |
+		(((uint32_t)cfg->bn_act_cfg.leaky_relu_point_quat_accrc) << 8) |
+		(((uint32_t)cfg->bn_act_cfg.sigmoid_point_quat_accrc) << 16);
 
-	if(cfg->bn_act_cfg.use_act_unit){
+	if(cfg->bn_act_cfg.act_func_type == ACT_FUNC_LEAKY_RELU){
 		handler->reg_region_bn_act_cfg->act_cfg1 = (*((uint32_t*)(&cfg->bn_act_cfg.leaky_relu_param_alpha)));
 	}
 

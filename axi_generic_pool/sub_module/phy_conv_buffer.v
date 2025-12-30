@@ -52,6 +52,7 @@ module phy_conv_buffer #(
 	parameter EN_ICB0_KBUF_REG_SLICE = "true", // 是否在卷积核缓存0号ICB插入AXIS寄存器片
 	parameter EN_ICB1_KBUF_REG_SLICE = "true", // 是否在卷积核缓存1号ICB插入AXIS寄存器片
 	parameter USE_TRUE_DUAL_PORT_SRAM = "false", // 是否使用真双口RAM
+	parameter integer SLAVE_ACCESS_MSG_FIFO_DEPTH = 4, // 从机访问信息fifo的深度(必须在范围[1, 8]内)
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -194,6 +195,7 @@ module phy_conv_buffer #(
 		.EN_EXCEED_BD_PROTECT(EN_EXCEED_BD_PROTECT),
 		.EN_HP_ICB(EN_HP_ICB),
 		.USE_TRUE_DUAL_PORT_SRAM(USE_TRUE_DUAL_PORT_SRAM),
+		.SLAVE_ACCESS_MSG_FIFO_DEPTH(SLAVE_ACCESS_MSG_FIFO_DEPTH),
 		.SIM_DELAY(SIM_DELAY)
 	)phy_conv_buffer_core_u(
 		.aclk(aclk),

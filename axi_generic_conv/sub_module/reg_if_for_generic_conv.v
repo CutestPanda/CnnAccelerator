@@ -171,8 +171,10 @@ SOFTWARE.
 	|          |         |17: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
 	|          |         |    参数B的实际值是否为0       |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
-	| act_cfg0 |0x184/97 |0: 启用激活单元                |      RW      | 仅当支持任意1种激活时, 写1生效   |
+	| act_cfg0 |0x184/97 |2~0: 激活函数类型              |      RW      | 设置支持的激活函数类型时生效     |
 	|          |         |12~8:(泄露Relu激活参数)        |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	|          |         |20~16:(Sigmoid输入)            |      RW      | 仅当支持Sigmoid激活时,           |
 	|          |         |     定点数量化精度            |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
 	| act_cfg1 |0x188/98 |31~0: 泄露Relu激活参数         |      RW      | 仅当支持Leaky-Relu激活时,        |
@@ -194,6 +196,7 @@ BLK CTRL
 module reg_if_for_generic_conv #(
 	parameter BN_SUPPORTED = 1'b1, // 是否支持批归一化处理
 	parameter LEAKY_RELU_SUPPORTED = 1'b1, // 是否支持Leaky-Relu激活
+	parameter SIGMOID_SUPPORTED = 1'b1, // 是否支持Sigmoid激活
 	parameter INT8_SUPPORTED = 1'b0, // 是否支持INT8
 	parameter INT16_SUPPORTED = 1'b1, // 是否支持INT16
 	parameter FP16_SUPPORTED = 1'b1, // 是否支持FP16
@@ -299,12 +302,13 @@ module reg_if_for_generic_conv #(
 	output wire[3:0] mid_res_buf_row_n_bufferable, // 可缓存行数 - 1
 	// [批归一化与激活参数]
 	output wire use_bn_unit, // 启用BN单元
-	output wire use_act_unit, // 启用激活单元
+	output wire[2:0] act_func_type, // 激活函数类型
 	output wire[4:0] bn_fixed_point_quat_accrc, // (批归一化操作数A)定点数量化精度
 	output wire bn_is_a_eq_1, // 批归一化参数A的实际值为1(标志)
 	output wire bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
 	output wire[4:0] leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
 	output wire[31:0] leaky_relu_param_alpha, // 泄露Relu激活参数
+	output wire[4:0] sigmoid_fixed_point_quat_accrc, // Sigmoid输入定点数量化精度
 	
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
@@ -383,8 +387,10 @@ module reg_if_for_generic_conv #(
 	localparam CAL_FMT_INT16 = 2'b01;
 	localparam CAL_FMT_FP16 = 2'b10;
 	localparam CAL_FMT_NONE = 2'b11;
-	// 是否支持任意1种激活
-	localparam ANY_ACT_SUPPORTED = LEAKY_RELU_SUPPORTED;
+	// 激活函数类型的编码
+	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
+	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_NONE = 3'b111;
 	
 	/** 寄存器配置控制 **/
 	reg[2:0] reg_cfg_sts; // 寄存器配置状态
@@ -527,7 +533,7 @@ module reg_if_for_generic_conv #(
 	wire[7:0] bn_act_prl_n_r; // BN与激活并行数 - 1
 	wire[15:0] max_kernal_n_r; // 最大的卷积核个数 - 1
 	
-	assign version_r = {4'd6, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.26
+	assign version_r = {4'd0, 4'd3, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.30
 	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv\0\0"
 	assign accelerator_id_r = ACCELERATOR_ID;
 	assign atomic_k_r = ATOMIC_K - 1;
@@ -1293,8 +1299,10 @@ module reg_if_for_generic_conv #(
 	|          |         |17: 批归一化                   |      RW      | 仅当支持批归一化处理时,          |
 	|          |         |    参数B的实际值是否为0       |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
-	| act_cfg0 |0x184/97 |0: 启用激活单元                |      RW      | 仅当支持任意1种激活时, 写1生效   |
+	| act_cfg0 |0x184/97 |2~0: 激活函数类型              |      RW      | 设置支持的激活函数类型时生效     |
 	|          |         |12~8:(泄露Relu激活参数)        |      RW      | 仅当支持Leaky-Relu激活时,        |
+	|          |         |     定点数量化精度            |              | 该字段可用                       |
+	|          |         |20~16:(Sigmoid输入)            |      RW      | 仅当支持Sigmoid激活时,           |
 	|          |         |     定点数量化精度            |              | 该字段可用                       |
 	--------------------------------------------------------------------------------------------------------
 	| act_cfg1 |0x188/98 |31~0: 泄露Relu激活参数         |      RW      | 仅当支持Leaky-Relu激活时,        |
@@ -1305,17 +1313,23 @@ module reg_if_for_generic_conv #(
 	reg[4:0] bn_fixed_point_quat_accrc_r; // (批归一化操作数A)定点数量化精度
 	reg bn_is_a_eq_1_r; // 批归一化参数A的实际值为1(标志)
 	reg bn_is_b_eq_0_r; // 批归一化参数B的实际值为0(标志)
-	reg use_act_unit_r; // 启用激活单元
+	reg[2:0] act_func_type_r; // 激活函数类型
 	reg[4:0] leaky_relu_fixed_point_quat_accrc_r; // (泄露Relu激活参数)定点数量化精度
+	reg[4:0] sigmoid_fixed_point_quat_accrc_r; // (Sigmoid输入)定点数量化精度
 	reg[31:0] leaky_relu_param_alpha_r; // 泄露Relu激活参数
 	
 	assign use_bn_unit = BN_SUPPORTED & use_bn_unit_r;
+	
 	assign bn_fixed_point_quat_accrc = bn_fixed_point_quat_accrc_r;
 	assign bn_is_a_eq_1 = bn_is_a_eq_1_r;
 	assign bn_is_b_eq_0 = bn_is_b_eq_0_r;
 	
-	assign use_act_unit = ANY_ACT_SUPPORTED & use_act_unit_r;
+	assign act_func_type = 
+		(LEAKY_RELU_SUPPORTED & (act_func_type_r == ACT_FUNC_TYPE_LEAKY_RELU)) ? ACT_FUNC_TYPE_LEAKY_RELU:
+		(SIGMOID_SUPPORTED & (act_func_type_r == ACT_FUNC_TYPE_SIGMOID))       ? ACT_FUNC_TYPE_SIGMOID:
+		                                                                         ACT_FUNC_TYPE_NONE;
 	assign leaky_relu_fixed_point_quat_accrc = leaky_relu_fixed_point_quat_accrc_r;
+	assign sigmoid_fixed_point_quat_accrc = sigmoid_fixed_point_quat_accrc_r;
 	assign leaky_relu_param_alpha = leaky_relu_param_alpha_r;
 	
 	// 启用BN单元
@@ -1346,11 +1360,20 @@ module reg_if_for_generic_conv #(
 			bn_is_b_eq_0_r <= # SIM_DELAY regs_din[17];
 	end
 	
-	// 启用激活单元
-	always @(posedge aclk)
+	// 激活函数类型
+	always @(posedge aclk or negedge aresetn)
 	begin
-		if(regs_en & regs_wen & (regs_addr == 97))
-			use_act_unit_r <= # SIM_DELAY ANY_ACT_SUPPORTED & regs_din[0];
+		if(~aresetn)
+			act_func_type_r <= ACT_FUNC_TYPE_NONE;
+		else if(
+			regs_en & regs_wen & (regs_addr == 97) & 
+			(
+				(regs_din[2:0] == ACT_FUNC_TYPE_NONE) | 
+				((regs_din[2:0] == ACT_FUNC_TYPE_LEAKY_RELU) & LEAKY_RELU_SUPPORTED) | 
+				((regs_din[2:0] == ACT_FUNC_TYPE_SIGMOID) & SIGMOID_SUPPORTED)
+			)
+		)
+			act_func_type_r <= # SIM_DELAY regs_din[2:0];
 	end
 	
 	// (泄露Relu激活参数)定点数量化精度
@@ -1358,6 +1381,13 @@ module reg_if_for_generic_conv #(
 	begin
 		if(regs_en & regs_wen & (regs_addr == 97) & LEAKY_RELU_SUPPORTED)
 			leaky_relu_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[12:8];
+	end
+	
+	// (Sigmoid输入)定点数量化精度
+	always @(posedge aclk)
+	begin
+		if(regs_en & regs_wen & (regs_addr == 97) & SIGMOID_SUPPORTED)
+			sigmoid_fixed_point_quat_accrc_r <= # SIM_DELAY regs_din[20:16];
 	end
 	
 	// 泄露Relu激活参数
@@ -1426,7 +1456,12 @@ module reg_if_for_generic_conv #(
 				
 				96: regs_dout <= # SIM_DELAY 
 					{8'h00, 6'd0, bn_is_b_eq_0_r, bn_is_a_eq_1_r, 3'b000, bn_fixed_point_quat_accrc_r[4:0], 7'd0, use_bn_unit_r};
-				97: regs_dout <= # SIM_DELAY {8'h00, 8'h00, 3'b000, leaky_relu_fixed_point_quat_accrc_r[4:0], 7'd0, use_act_unit_r};
+				97: regs_dout <= # SIM_DELAY {
+					8'h00,
+					3'b000, sigmoid_fixed_point_quat_accrc_r[4:0],
+					3'b000, leaky_relu_fixed_point_quat_accrc_r[4:0],
+					5'd0, act_func_type_r[2:0]
+				};
 				98: regs_dout <= # SIM_DELAY {leaky_relu_param_alpha_r[31:0]};
 				
 				default: regs_dout <= # SIM_DELAY 32'h0000_0000;
