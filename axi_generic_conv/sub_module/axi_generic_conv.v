@@ -48,11 +48,12 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/28
+日期: 2025/12/31
 ********************************************************************/
 
 
 module axi_generic_conv #(
+	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -84,9 +85,12 @@ module axi_generic_conv #(
 	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt", // sigmoid函数值查找表存储器的初始化文件路径
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
-	// 时钟和复位
+	// 主时钟和复位
 	input wire aclk,
 	input wire aresetn,
+	// 计算核心时钟和复位
+	input wire mac_array_aclk,
+	input wire mac_array_aresetn,
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -348,6 +352,7 @@ module axi_generic_conv #(
 	wire m_axis_ext_collector_ready;
 	
 	axi_generic_conv_core #(
+		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.BN_SUPPORTED(BN_SUPPORTED),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED),
@@ -380,6 +385,9 @@ module axi_generic_conv #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
+		.mac_array_aclk(mac_array_aclk),
+		.mac_array_aresetn(mac_array_aresetn),
+		.mac_array_aclken(1'b1),
 		
 		.s_axi_lite_araddr(s_axi_lite_araddr),
 		.s_axi_lite_arvalid(s_axi_lite_arvalid),

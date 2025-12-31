@@ -51,6 +51,7 @@ AXIS MASTER/SLAVE
 
 
 module axi_generic_conv_core #(
+	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -80,10 +81,14 @@ module axi_generic_conv_core #(
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
-	// 时钟和复位
+	// 主时钟和复位
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	// 计算核心时钟和复位
+	input wire mac_array_aclk,
+	input wire mac_array_aresetn,
+	input wire mac_array_aclken,
 	
 	// 使能信号
 	output wire en_accelerator, // 使能卷积加速器
@@ -745,6 +750,7 @@ module axi_generic_conv_core #(
 	wire s_kwgtblk_axis_valid;
 	wire s_kwgtblk_axis_ready;
 	// (卷积乘加)有符号乘法器阵列
+	wire mul_array_clk;
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_a; // 操作数A
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_b; // 操作数B
 	wire[ATOMIC_K-1:0] mul_array_ce; // 计算使能
@@ -765,6 +771,7 @@ module axi_generic_conv_core #(
 	assign s_kernal_wgtblk_axis_ready = s_kwgtblk_axis_ready;
 	
 	conv_cal_sub_system #(
+		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -787,6 +794,9 @@ module axi_generic_conv_core #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(aclken),
+		.mac_array_aclk(mac_array_aclk),
+		.mac_array_aresetn(mac_array_aresetn),
+		.mac_array_aclken(mac_array_aclken),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -891,6 +901,7 @@ module axi_generic_conv_core #(
 		.m_axis_ext_collector_valid(m_axis_ext_collector_valid),
 		.m_axis_ext_collector_ready(m_axis_ext_collector_ready),
 		
+		.mul0_clk(mul_array_clk),
 		.mul0_op_a(mul_array_op_a),
 		.mul0_op_b(mul_array_op_b),
 		.mul0_ce(mul_array_ce),
@@ -979,7 +990,7 @@ module axi_generic_conv_core #(
 				.en_out_reg("false"),
 				.simulation_delay(SIM_DELAY)
 			)mul_s16_s16_u(
-				.clk(aclk),
+				.clk(mul_array_clk),
 				
 				.ce_in_reg(1'b0),
 				.ce_mul(mul_array_ce[conv_mac_mul_i/ATOMIC_C]),

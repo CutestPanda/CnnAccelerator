@@ -54,11 +54,12 @@ FP16模式时, 尾数偏移为-50
 无
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/30
 ********************************************************************/
 
 
 module conv_mac_array #(
+	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -68,10 +69,14 @@ module conv_mac_array #(
 	parameter TO_SKIP_EMPTY_CAL_ROUND = "true", // 是否跳过空的计算轮次
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
-	// 时钟和复位
+	// 主时钟和复位
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	// 计算核心时钟和复位
+	input wire mac_array_aclk,
+	input wire mac_array_aresetn,
+	input wire mac_array_aclken,
 	
 	// 使能信号
 	input wire en_mac_array, // 使能乘加阵列
@@ -106,14 +111,17 @@ module conv_mac_array #(
 	input wire array_o_res_rdy, // 就绪标志
 	
 	// 外部有符号乘法器
+	output wire mul_clk,
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_a, // 操作数A
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_op_b, // 操作数B
 	output wire[ATOMIC_K-1:0] mul_ce, // 计算使能
 	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_res // 计算结果
 );
 	
-	/** 复位乘加阵列 **/
-	wire rst_mac_array;
+	/** 乘加阵列控制 **/
+	wire rst_mac_array; // 复位乘加阵列
+	wire async_array_i_vld; // 异步乘加阵列输入有效(标志)
+	wire async_array_i_rdy; // 异步乘加阵列输入就绪(标志)
 	
 	assign rst_mac_array = ~en_mac_array;
 	
@@ -331,7 +339,8 @@ module conv_mac_array #(
 	wire nxt_kernal_rgn_to_cal_invld; // 下一待计算权重域无效(标志)
 	
 	assign array_i_ftm_sfc_rdy = 
-		aclken & (~rst_mac_array) & kernal_buf_empty_n & array_o_res_rdy & 
+		aclken & (~rst_mac_array) & kernal_buf_empty_n & 
+		((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy) & 
 		((cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld);
 	
 	assign nxt_kernal_rgn_to_cal_invld = 
@@ -352,7 +361,7 @@ module conv_mac_array #(
 			aclken & 
 			(
 				rst_mac_array | 
-				(array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy)
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & ((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy))
 			)
 		)
 			cal_round_cnt <= # SIM_DELAY 
@@ -370,7 +379,7 @@ module conv_mac_array #(
 			aclken & 
 			(
 				rst_mac_array | 
-				(array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy)
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & ((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy))
 			)
 		)
 			cal_round_onehot <= # SIM_DELAY 
@@ -412,40 +421,90 @@ module conv_mac_array #(
 	
 	genvar mac_cell_i;
 	generate
-		for(mac_cell_i = 0;mac_cell_i < ATOMIC_K;mac_cell_i = mac_cell_i + 1)
-		begin:mac_array_blk
-			assign mac_in_valid[mac_cell_i] = 
-				aclken & (~rst_mac_array) & 
-				array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy & 
-				kernal_buf_mask_cur[mac_cell_i]; // 若当前权重表面未加载, 则对应CELL无需作这个表面的乘加计算
+		if(MAC_ARRAY_CLK_RATE == 1)
+		begin
+			for(mac_cell_i = 0;mac_cell_i < ATOMIC_K;mac_cell_i = mac_cell_i + 1)
+			begin:mac_array_blk
+				assign mul_clk = aclk;
+				
+				assign mac_in_valid[mac_cell_i] = 
+					aclken & (~rst_mac_array) & 
+					array_i_ftm_sfc_vld & kernal_buf_empty_n & array_o_res_rdy & 
+					kernal_buf_mask_cur[mac_cell_i]; // 若当前权重表面未加载, 则对应CELL无需作这个表面的乘加计算
+				
+				conv_mac_cell #(
+					.ATOMIC_C(ATOMIC_C),
+					.EN_SMALL_FP16(EN_SMALL_FP16),
+					.INFO_ALONG_WIDTH(ATOMIC_K + INFO_ALONG_WIDTH + 4 + 1),
+					.SIM_DELAY(SIM_DELAY)
+				)mac_cell_u(
+					.aclk(aclk),
+					.aresetn(aresetn),
+					.aclken(aclken & array_o_res_rdy),
+					
+					.calfmt(calfmt),
+					
+					.mac_in_ftm(array_i_ftm_sfc),
+					.mac_in_wgt(kernal_buf_data_cur[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
+					.mac_in_ftm_masked(array_i_ftm_sfc_masked),
+					.mac_in_info_along(mac_in_info_along),
+					.mac_in_valid(mac_in_valid[mac_cell_i]),
+					
+					.mac_out_exp(array_o_res[mac_cell_i*48+47:mac_cell_i*48+40]),
+					.mac_out_frac(array_o_res[mac_cell_i*48+39:mac_cell_i*48+0]),
+					.mac_out_info_along(mac_out_info_along_arr[mac_cell_i]),
+					.mac_out_valid(array_o_res_vld_vec[mac_cell_i]),
+					
+					.mul_op_a(mul_op_a[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
+					.mul_op_b(mul_op_b[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
+					.mul_ce(mul_ce[mac_cell_i]),
+					.mul_res(mul_res[(mac_cell_i+1)*(ATOMIC_C*32)-1:mac_cell_i*(ATOMIC_C*32)])
+				);
+			end
+		end
+		else
+		begin
+			assign mul_clk = mac_array_aclk;
 			
-			conv_mac_cell #(
+			assign async_array_i_vld = 
+				aclken & (~rst_mac_array) & 
+				array_i_ftm_sfc_vld & kernal_buf_empty_n;
+			
+			conv_async_mac_array_core #(
+				.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+				.ATOMIC_K(ATOMIC_K),
 				.ATOMIC_C(ATOMIC_C),
-				.EN_SMALL_FP16(EN_SMALL_FP16),
 				.INFO_ALONG_WIDTH(ATOMIC_K + INFO_ALONG_WIDTH + 4 + 1),
+				.EN_SMALL_FP16(EN_SMALL_FP16),
 				.SIM_DELAY(SIM_DELAY)
-			)mac_cell_u(
+			)async_mac_array_core_u(
 				.aclk(aclk),
 				.aresetn(aresetn),
-				.aclken(aclken & array_o_res_rdy),
+				.aclken(aclken),
+				.mac_array_aclk(mac_array_aclk),
+				.mac_array_aresetn(mac_array_aresetn),
+				.mac_array_aclken(mac_array_aclken),
+				
+				.en_mac_array(en_mac_array),
 				
 				.calfmt(calfmt),
 				
-				.mac_in_ftm(array_i_ftm_sfc),
-				.mac_in_wgt(kernal_buf_data_cur[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
-				.mac_in_ftm_masked(array_i_ftm_sfc_masked),
-				.mac_in_info_along(mac_in_info_along),
-				.mac_in_valid(mac_in_valid[mac_cell_i]),
+				.array_i_ftm_sfc_data(array_i_ftm_sfc),
+				.array_i_kernal_wgtblk_data(kernal_buf_data_cur),
+				.array_i_ftm_sfc_masked(array_i_ftm_sfc_masked),
+				.array_i_info_along(mac_in_info_along),
+				.array_i_vld(async_array_i_vld),
+				.array_i_rdy(async_array_i_rdy),
 				
-				.mac_out_exp(array_o_res[mac_cell_i*48+47:mac_cell_i*48+40]),
-				.mac_out_frac(array_o_res[mac_cell_i*48+39:mac_cell_i*48+0]),
-				.mac_out_info_along(mac_out_info_along_arr[mac_cell_i]),
-				.mac_out_valid(array_o_res_vld_vec[mac_cell_i]),
+				.array_o_res(array_o_res),
+				.array_o_info_along(mac_out_info_along_arr[0]),
+				.array_o_vld(array_o_res_vld_vec[0]),
+				.array_o_rdy(aclken & array_o_res_rdy),
 				
-				.mul_op_a(mul_op_a[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
-				.mul_op_b(mul_op_b[(mac_cell_i+1)*(ATOMIC_C*16)-1:mac_cell_i*(ATOMIC_C*16)]),
-				.mul_ce(mul_ce[mac_cell_i]),
-				.mul_res(mul_res[(mac_cell_i+1)*(ATOMIC_C*32)-1:mac_cell_i*(ATOMIC_C*32)])
+				.mul_op_a(mul_op_a),
+				.mul_op_b(mul_op_b),
+				.mul_ce(mul_ce),
+				.mul_res(mul_res)
 			);
 		end
 	endgenerate

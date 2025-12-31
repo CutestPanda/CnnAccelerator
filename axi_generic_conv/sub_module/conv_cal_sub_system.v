@@ -60,6 +60,7 @@ AXIS MASTER/SLAVE
 
 module conv_cal_sub_system #(
 	// [子系统配置参数]
+	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -82,10 +83,14 @@ module conv_cal_sub_system #(
 	// [仿真配置参数]
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
-	// 时钟和复位
+	// 主时钟和复位
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	// 计算核心时钟和复位
+	input wire mac_array_aclk,
+	input wire mac_array_aresetn,
+	input wire mac_array_aclken,
 	
 	// 计算子系统控制/状态
 	// [物理特征图表面行适配器]
@@ -215,12 +220,10 @@ module conv_cal_sub_system #(
 	input wire m_axis_ext_collector_ready,
 	
 	// 外部有符号乘法器#0
+	output wire mul0_clk,
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul0_op_a, // 操作数A
-	                                                 // combinational logic out
 	output wire[ATOMIC_K*ATOMIC_C*16-1:0] mul0_op_b, // 操作数B
-	                                                 // combinational logic out
 	output wire[ATOMIC_K-1:0] mul0_ce, // 计算使能
-	                                   // combinational logic out
 	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul0_res, // 计算结果
 	// 外部有符号乘法器#1
 	output wire[(BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul1_op_a, // 操作数A
@@ -420,6 +423,7 @@ module conv_cal_sub_system #(
 	end
 	
 	conv_mac_array #(
+		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
@@ -432,6 +436,9 @@ module conv_cal_sub_system #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(aclken),
+		.mac_array_aclk(mac_array_aclk),
+		.mac_array_aresetn(mac_array_aresetn),
+		.mac_array_aclken(mac_array_aclken),
 		
 		.en_mac_array(en_mac_array),
 		
@@ -459,6 +466,7 @@ module conv_cal_sub_system #(
 		.array_o_res_vld(array_o_res_vld),
 		.array_o_res_rdy(array_o_res_rdy),
 		
+		.mul_clk(mul0_clk),
 		.mul_op_a(mul0_op_a),
 		.mul_op_b(mul0_op_b),
 		.mul_ce(mul0_ce),

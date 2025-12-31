@@ -67,22 +67,30 @@ module max_tree_2_4_8_16_32 #(
     
     /** 比较输入 **/
 	wire signed[cmp_width-1:0] cmp_in_arr[0:31];
+	wire[31:0] cmp_in_mask;
 	
 	genvar cmp_in_i;
 	generate
 		for(cmp_in_i = 0;cmp_in_i < 32;cmp_in_i = cmp_in_i + 1)
 		begin:cmp_in_blk
 			assign cmp_in_arr[cmp_in_i] = 
-				(cmp_in_i < cmp_input_n) ? 
-					cmp_in[(cmp_in_i+1)*cmp_width-1:cmp_in_i*cmp_width]:
+				((cmp_in_i % (32/cmp_input_n)) == 0) ? 
+					cmp_in[((cmp_in_i/(32/cmp_input_n))+1)*cmp_width-1:(cmp_in_i/(32/cmp_input_n))*cmp_width]:
 					{1'b1, {(cmp_width-1){1'b0}}};
+			assign cmp_in_mask[cmp_in_i] = 
+				((cmp_in_i % (32/cmp_input_n)) == 0) ? 
+					1'b1:
+					1'b0;
 		end
 	endgenerate
 	
 	/** 第1~3级比较 **/
 	wire signed[cmp_width-1:0] cmp_s1_res[0:15];
+	wire[15:0] cmp_s1_mask;
 	wire signed[cmp_width-1:0] cmp_s2_res[0:7];
+	wire[7:0] cmp_s2_mask;
 	reg signed[cmp_width-1:0] cmp_s3_res[0:3];
+	reg[3:0] cmp_s3_mask;
 	reg cmp_in_vld_d1;
 	
 	genvar cmp_s1_i;
@@ -90,9 +98,11 @@ module max_tree_2_4_8_16_32 #(
 		for(cmp_s1_i = 0;cmp_s1_i < 16;cmp_s1_i = cmp_s1_i + 1)
 		begin:cmp_s1_blk
 			assign cmp_s1_res[cmp_s1_i] = 
-				(cmp_in_arr[cmp_s1_i*2] > cmp_in_arr[cmp_s1_i*2+1]) ? 
+				(cmp_in_mask[cmp_s1_i*2] & (cmp_in_arr[cmp_s1_i*2] > cmp_in_arr[cmp_s1_i*2+1])) ? 
 					cmp_in_arr[cmp_s1_i*2]:
 					cmp_in_arr[cmp_s1_i*2+1];
+			assign cmp_s1_mask[cmp_s1_i] = 
+				cmp_in_mask[cmp_s1_i*2] | cmp_in_mask[cmp_s1_i*2+1];
 		end
 	endgenerate
 	
@@ -101,9 +111,11 @@ module max_tree_2_4_8_16_32 #(
 		for(cmp_s2_i = 0;cmp_s2_i < 8;cmp_s2_i = cmp_s2_i + 1)
 		begin:cmp_s2_blk
 			assign cmp_s2_res[cmp_s2_i] = 
-				(cmp_s1_res[cmp_s2_i*2] > cmp_s1_res[cmp_s2_i*2+1]) ? 
+				(cmp_s1_mask[cmp_s2_i*2] & (cmp_s1_res[cmp_s2_i*2] > cmp_s1_res[cmp_s2_i*2+1])) ? 
 					cmp_s1_res[cmp_s2_i*2]:
 					cmp_s1_res[cmp_s2_i*2+1];
+			assign cmp_s2_mask[cmp_s2_i] = 
+				cmp_s1_mask[cmp_s2_i*2] | cmp_s1_mask[cmp_s2_i*2+1];
 		end
 	endgenerate
 	
@@ -114,10 +126,15 @@ module max_tree_2_4_8_16_32 #(
 			always @(posedge aclk)
 			begin
 				if(aclken & cmp_in_vld)
+				begin
 					cmp_s3_res[cmp_s3_i] <= # simulation_delay 
-						(cmp_s2_res[cmp_s3_i*2] > cmp_s2_res[cmp_s3_i*2+1]) ? 
+						(cmp_s2_mask[cmp_s3_i*2] & (cmp_s2_res[cmp_s3_i*2] > cmp_s2_res[cmp_s3_i*2+1])) ? 
 							cmp_s2_res[cmp_s3_i*2]:
 							cmp_s2_res[cmp_s3_i*2+1];
+					
+					cmp_s3_mask[cmp_s3_i] <= # simulation_delay 
+						cmp_s2_mask[cmp_s3_i*2] | cmp_s2_mask[cmp_s3_i*2+1];
+				end
 			end
 		end
 	endgenerate
@@ -132,23 +149,27 @@ module max_tree_2_4_8_16_32 #(
 	
 	/** 第4~5级比较 **/
 	wire signed[cmp_width-1:0] cmp_s4_res[0:1];
+	wire[1:0] cmp_s4_mask;
 	reg signed[cmp_width-1:0] cmp_s5_res;
 	reg cmp_in_vld_d2;
 	
 	assign cmp_s4_res[0] = 
-		(cmp_s3_res[0] > cmp_s3_res[1]) ? 
+		(cmp_s3_mask[0] & (cmp_s3_res[0] > cmp_s3_res[1])) ? 
 			cmp_s3_res[0]:
 			cmp_s3_res[1];
 	assign cmp_s4_res[1] = 
-		(cmp_s3_res[2] > cmp_s3_res[3]) ? 
+		(cmp_s3_mask[2] & (cmp_s3_res[2] > cmp_s3_res[3])) ? 
 			cmp_s3_res[2]:
 			cmp_s3_res[3];
+	
+	assign cmp_s4_mask[0] = cmp_s3_mask[0] | cmp_s3_mask[1];
+	assign cmp_s4_mask[1] = cmp_s3_mask[2] | cmp_s3_mask[3];
 	
 	always @(posedge aclk)
 	begin
 		if(aclken & cmp_in_vld_d1)
 			cmp_s5_res <= # simulation_delay 
-				(cmp_s4_res[0] > cmp_s4_res[1]) ? 
+				(cmp_s4_mask[0] & (cmp_s4_res[0] > cmp_s4_res[1])) ? 
 					cmp_s4_res[0]:
 					cmp_s4_res[1];
 	end

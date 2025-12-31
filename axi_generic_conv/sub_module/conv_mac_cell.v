@@ -48,7 +48,7 @@ FP16模式时, 尾数偏移为-50
 无
 
 作者: 陈家耀
-日期: 2025/11/27
+日期: 2025/12/31
 ********************************************************************/
 
 
@@ -106,19 +106,42 @@ module conv_mac_cell #(
 	localparam CAL_FMT_FP16 = 2'b10;
 	
 	/** 外部有符号乘法器 **/
+	wire mul_ce_inner;
 	wire signed[15:0] mul_op_a_arr[0:ATOMIC_C-1]; // 操作数A
 	wire signed[15:0] mul_op_b_arr[0:ATOMIC_C-1]; // 操作数B
+	reg mul_ce_inner_d1;
+	reg signed[15:0] mul_op_a_arr_d1[0:ATOMIC_C-1]; // 操作数A
+	reg signed[15:0] mul_op_b_arr_d1[0:ATOMIC_C-1]; // 操作数B
 	wire signed[31:0] mul_res_arr[0:ATOMIC_C-1]; // 计算结果
+	
+	assign mul_ce = aclken & mul_ce_inner_d1;
 	
 	genvar mul_i;
 	generate
 		for(mul_i = 0;mul_i < ATOMIC_C;mul_i = mul_i + 1)
 		begin:mul_blk
-			assign mul_op_a[mul_i*16+15:mul_i*16] = mul_op_a_arr[mul_i];
-			assign mul_op_b[mul_i*16+15:mul_i*16] = mul_op_b_arr[mul_i];
+			assign mul_op_a[mul_i*16+15:mul_i*16] = mul_op_a_arr_d1[mul_i];
+			assign mul_op_b[mul_i*16+15:mul_i*16] = mul_op_b_arr_d1[mul_i];
 			assign mul_res_arr[mul_i] = $signed(mul_res[mul_i*32+31:mul_i*32]);
+			
+			always @(posedge aclk)
+			begin
+				if(aclken & mul_ce_inner)
+				begin
+					mul_op_a_arr_d1[mul_i] <= # SIM_DELAY mul_op_a_arr[mul_i];
+					mul_op_b_arr_d1[mul_i] <= # SIM_DELAY mul_op_b_arr[mul_i];
+				end
+			end
 		end
 	endgenerate
+	
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mul_ce_inner_d1 <= 1'b0;
+		else if(aclken)
+			mul_ce_inner_d1 <= # SIM_DELAY mul_ce_inner;
+	end
 	
 	/** 乘加单元计算输入 **/
 	wire[15:0] mac_in_ftm_arr[0:ATOMIC_C-1]; // 特征图数据
@@ -242,9 +265,6 @@ module conv_mac_cell #(
 	end
 	
 	/** INT16计算 **/
-	// 延迟1clk的特征图数据和卷积核权重
-	reg signed[15:0] ftm_d1_int16[0:ATOMIC_C-1];
-	reg signed[15:0] wgt_d1_int16[0:ATOMIC_C-1];
 	// 外部有符号乘法器
 	wire signed[15:0] mul_op_a_int16_arr[0:ATOMIC_C-1]; // 操作数A
 	wire signed[15:0] mul_op_b_int16_arr[0:ATOMIC_C-1]; // 操作数B
@@ -258,7 +278,8 @@ module conv_mac_cell #(
 	wire mac_out_int16_mask;
 	wire mac_out_int16_valid;
 	
-	assign mul_ce_int16 = mac_in_valid_d1 & (~mac_in_ftm_masked_d1);
+	assign mul_ce_int16 = mac_in_valid & (~mac_in_ftm_masked);
+	
 	assign add_tree_in_int16_mask = mac_in_ftm_masked_d2;
 	assign add_tree_in_int16_valid = mac_in_valid_d2;
 	
@@ -270,28 +291,18 @@ module conv_mac_cell #(
 	generate
 		for(cal_int16_i = 0;cal_int16_i < ATOMIC_C;cal_int16_i = cal_int16_i + 1)
 		begin:cal_int16_blk
-			assign mul_op_a_int16_arr[cal_int16_i] = ftm_d1_int16[cal_int16_i];
-			assign mul_op_b_int16_arr[cal_int16_i] = wgt_d1_int16[cal_int16_i];
+			assign mul_op_a_int16_arr[cal_int16_i] = $signed(mac_in_ftm_arr[cal_int16_i]);
+			assign mul_op_b_int16_arr[cal_int16_i] = $signed(mac_in_wgt_arr[cal_int16_i]);
 			
 			assign add_tree_in_int16_arr[cal_int16_i] = mul_res_arr[cal_int16_i];
-			
-			// 延迟1clk的特征图数据和卷积核权重
-			always @(posedge aclk)
-			begin
-				if(aclken & (calfmt == CAL_FMT_INT16) & mac_in_valid & (~mac_in_ftm_masked))
-				begin
-					ftm_d1_int16[cal_int16_i] <= # SIM_DELAY $signed(mac_in_ftm_arr[cal_int16_i]);
-					wgt_d1_int16[cal_int16_i] <= # SIM_DELAY $signed(mac_in_wgt_arr[cal_int16_i]);
-				end
-			end
 		end
 	endgenerate
 	
 	/**
 	FP16计算
 	
-	第1级流水线: 生成MTS, 生成单点乘积的符号位, 计算特征图数据与卷积核权重的高3位阶码的和
-	第2级流水线: 尾数相乘, 计算FUNC(阶段#1)
+	第1级流水线: 生成MTS与尾数相乘(阶段#1), 生成单点乘积的符号位, 计算特征图数据与卷积核权重的高3位阶码的和
+	第2级流水线: 尾数相乘(阶段#2), 计算FUNC(阶段#1)
 	第3级流水线: 生成带符号位的MTSO, 计算FUNC(阶段#2)
 	第4级流水线: 生成右移的MTSO
 	第4~(4 + log2(ATOMIC_C))级流水线: 通道累加
@@ -322,8 +333,8 @@ module conv_mac_cell #(
 	wire[4:0] fp16_e_w[0:ATOMIC_C-1]; // 卷积核权重的指数位
 	wire[9:0] fp16_m_w[0:ATOMIC_C-1]; // 卷积核权重的尾数位
 	// MTS
-	reg[13:0] fp16_mts_f[0:ATOMIC_C-1]; // 特征图数据的MTS
-	reg[13:0] fp16_mts_w[0:ATOMIC_C-1]; // 卷积核权重的MTS
+	wire[13:0] fp16_mts_f[0:ATOMIC_C-1]; // 特征图数据的MTS
+	wire[13:0] fp16_mts_w[0:ATOMIC_C-1]; // 卷积核权重的MTS
 	// 单点乘积的符号位
 	reg fp16_mtso_sign[0:ATOMIC_C-1]; // MTSO的符号位
 	reg fp16_mtso_sign_d1[0:ATOMIC_C-1]; // 延迟1clk的MTSO的符号位
@@ -338,7 +349,7 @@ module conv_mac_cell #(
 	reg signed[28:0] fp16_signed_mtso[0:ATOMIC_C-1]; // 原始的有符号MTSO
 	reg signed[28:0] fp16_shifted_mtso[0:ATOMIC_C-1]; // 右移的有符号MTSO
 	
-	assign mul_ce_fp16 = mac_in_valid_d1 & (~mac_in_ftm_masked_d1);
+	assign mul_ce_fp16 = mac_in_valid & (~mac_in_ftm_masked);
 	
 	assign add_tree_in_fp16_mask = mac_in_ftm_masked_d4;
 	assign add_tree_in_fp16_valid = mac_in_valid_d4;
@@ -366,29 +377,20 @@ module conv_mac_cell #(
 	generate
 		for(fp16_mts_i = 0;fp16_mts_i < ATOMIC_C;fp16_mts_i = fp16_mts_i + 1)
 		begin:fp16_mts_blk
-			always @(posedge aclk)
-			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
-					fp16_mts_f[fp16_mts_i] <= # SIM_DELAY 
-						{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_f[fp16_mts_i] != 5'b00000), fp16_m_f[fp16_mts_i]} << 
-							(
-								((EN_SMALL_FP16 == "false") | (fp16_e_f[fp16_mts_i] != 5'b00000)) ? 
-									fp16_e_f[fp16_mts_i][1:0]:
-									2'b01
-							);
-			end
-			
-			always @(posedge aclk)
-			begin
-				if(aclken & (calfmt == CAL_FMT_FP16) & mac_in_valid & (~mac_in_ftm_masked))
-					fp16_mts_w[fp16_mts_i] <= # SIM_DELAY 
-						{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_w[fp16_mts_i] != 5'b00000), fp16_m_w[fp16_mts_i]} << 
-							(
-								((EN_SMALL_FP16 == "false") | (fp16_e_w[fp16_mts_i] != 5'b00000)) ? 
-									fp16_e_w[fp16_mts_i][1:0]:
-									2'b01
-							);
-			end
+			assign fp16_mts_f[fp16_mts_i] = 
+				{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_f[fp16_mts_i] != 5'b00000), fp16_m_f[fp16_mts_i]} << 
+					(
+						((EN_SMALL_FP16 == "false") | (fp16_e_f[fp16_mts_i] != 5'b00000)) ? 
+							fp16_e_f[fp16_mts_i][1:0]:
+							2'b01
+					);
+			assign fp16_mts_w[fp16_mts_i] = 
+				{3'b000, (EN_SMALL_FP16 == "false") | (fp16_e_w[fp16_mts_i] != 5'b00000), fp16_m_w[fp16_mts_i]} << 
+					(
+						((EN_SMALL_FP16 == "false") | (fp16_e_w[fp16_mts_i] != 5'b00000)) ? 
+							fp16_e_w[fp16_mts_i][1:0]:
+							2'b01
+					);
 		end
 	endgenerate
 	
@@ -627,11 +629,9 @@ module conv_mac_cell #(
 	end
 	
 	/** 乘法器复用 **/
-	assign mul_ce = 
-		aclken & (
-			((calfmt == CAL_FMT_FP16) & mul_ce_fp16) | 
-			((calfmt == CAL_FMT_INT16) & mul_ce_int16)
-		);
+	assign mul_ce_inner = 
+		((calfmt == CAL_FMT_FP16) & mul_ce_fp16) | 
+		((calfmt == CAL_FMT_INT16) & mul_ce_int16);
 	
 	genvar mul_reuse_i;
 	generate
