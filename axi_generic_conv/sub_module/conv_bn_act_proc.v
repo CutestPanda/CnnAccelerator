@@ -32,6 +32,8 @@ SOFTWARE.
 
 进行激活处理(支持Leaky Relu和Sigmoid)
 
+支持独立的BN与激活计算核心时钟, 实际的BN与激活单元数 = BN_ACT_PRL_N/BN_ACT_CLK_RATE
+
 可选的舍入 -> 
 ---------------------------------------
 |  待舍入数据格式  |  舍入后数据格式  |
@@ -44,28 +46,28 @@ SOFTWARE.
 ---------------------------------------
 
 批归一化所使用的乘法器 -> 
-------------------------------------------------------------------------------------------------------
-| 是否支持INT16运算数据格式 | 是否支持INT32运算数据格式 |      乘法器使用情况       |   乘法器时延   |
-------------------------------------------------------------------------------------------------------
-|              是           |             ---           | BN_ACT_PRL_N*4个s18乘法器 |       1        |
-------------------------------------------------------------------------------------------------------
-|              否           |              是           | BN_ACT_PRL_N个s32乘法器   |       3        |
-|                           |---------------------------|---------------------------|                |
-|                           |              否           | BN_ACT_PRL_N个s25乘法器   |                |
-------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------
+| 是否支持INT16运算数据格式 | 是否支持INT32运算数据格式 |               乘法器使用情况              |   乘法器时延   |
+----------------------------------------------------------------------------------------------------------------------
+|              是           |             ---           | BN_ACT_PRL_N/BN_ACT_CLK_RATE*4个s18乘法器 |       1        |
+----------------------------------------------------------------------------------------------------------------------
+|              否           |              是           | BN_ACT_PRL_N/BN_ACT_CLK_RATE个s32乘法器   |       3        |
+|                           |---------------------------|-------------------------------------------|                |
+|                           |              否           | BN_ACT_PRL_N/BN_ACT_CLK_RATE个s25乘法器   |                |
+----------------------------------------------------------------------------------------------------------------------
 
 Leaky Relu所使用的乘法器 -> 
------------------------------------------------------------------------------
-| 是否需要支持INT32运算数据格式 |      乘法器使用情况      |   乘法器时延   |
------------------------------------------------------------------------------
-|              是               | BN_ACT_PRL_N个s32乘法器  |       2        |
-|-------------------------------|--------------------------|                |
-|              否               | BN_ACT_PRL_N个s25乘法器  |                |
------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------
+| 是否需要支持INT32运算数据格式 |              乘法器使用情况              |   乘法器时延   |
+---------------------------------------------------------------------------------------------
+|              是               | BN_ACT_PRL_N/BN_ACT_CLK_RATE个s32乘法器  |       2        |
+|-------------------------------|------------------------------------------|                |
+|              否               | BN_ACT_PRL_N/BN_ACT_CLK_RATE个s25乘法器  |                |
+---------------------------------------------------------------------------------------------
 
 使用1个真双口SRAM(位宽 = 64, 深度 = 最大的卷积核个数), 读时延 = 1clk
 使用1个简单双口SRAM(位宽 = BN_ACT_PRL_N*(16或32)+BN_ACT_PRL_N+1+5, 深度 = 512), 读时延 = 1clk
-使用BN_ACT_PRL_N个单口SRAM(位宽 = 16, 深度 = 4096), 读时延 = 1clk
+使用BN_ACT_PRL_N/BN_ACT_CLK_RATE个单口SRAM(位宽 = 16, 深度 = 4096), 读时延 = 1clk
 
 注意：
 BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
@@ -658,6 +660,14 @@ module conv_bn_act_proc #(
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] cur_bn_param_a; // 当前的BN参数A
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] cur_bn_param_b; // 当前的BN参数B
 	// [BN单元]
+	wire bn_mac_aclk;
+	wire bn_mac_aresetn;
+	wire bn_mac_aclken;
+	reg[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] cur_bn_param_a_d1;
+	reg[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] cur_bn_param_b_d1;
+	reg[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] cur_sfc_data_d1;
+	reg[BN_ACT_PRL_N+1+5-1:0] cur_info_along_d1;
+	reg[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] cur_bn_vld_d1;
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] bn_mac_i_vld;
 	wire[BN_ACT_PRL_N+1+5-1:0] bn_mac_i_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] bn_mac_o_res; // 计算结果
@@ -705,6 +715,10 @@ module conv_bn_act_proc #(
 	assign bn_act_data_blk_gen_aresetn = (BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn;
 	assign bn_act_data_blk_gen_aclken = (BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken;
 	
+	assign bn_mac_aclk = (BN_ACT_CLK_RATE == 1) ? aclk:bn_act_aclk;
+	assign bn_mac_aresetn = (BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn;
+	assign bn_mac_aclken = (BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken;
+	
 	assign fnl_sfc_in_vld = 
 		en_bn_act_proc_sync & 
 		to_pass_fnl_sfc & 
@@ -746,7 +760,7 @@ module conv_bn_act_proc #(
 	assign bn_mac_o_res_actual = 
 		use_bn_unit ? 
 			bn_mac_o_res:
-			cur_sfc_data;
+			cur_sfc_data_d1;
 	assign bn_mac_o_vld_actual = 
 		use_bn_unit ? 
 			bn_mac_o_vld:
@@ -803,6 +817,30 @@ module conv_bn_act_proc #(
 					0;
 	end
 	
+	// 延迟1clk的BN输入
+	always @(posedge bn_mac_aclk)
+	begin
+		if(bn_mac_aclken & fnl_sfc_in_vld)
+		begin
+			cur_bn_param_a_d1 <= # SIM_DELAY cur_bn_param_a;
+			cur_bn_param_b_d1 <= # SIM_DELAY cur_bn_param_b;
+			cur_sfc_data_d1 <= # SIM_DELAY cur_sfc_data;
+			cur_info_along_d1 <= # SIM_DELAY 
+				{
+					// 是否最后1个子行(1bit)
+					(BN_ACT_CLK_RATE == 1) ? 
+						s_axis_fnl_res_user[4]:
+						bn_act_in_async_fifo_dout_last_sub_row_flag,
+					// 子行号(4bit)
+					(BN_ACT_CLK_RATE == 1) ? 
+						s_axis_fnl_res_user[3:0]:
+						bn_act_in_async_fifo_dout_sub_row_id,
+					cur_sfc_mask, // 数据有效掩码(BN_ACT_PRL_N bit)
+					last_data_blk_in_row // 行内最后1个数据块标志(1bit)
+				};
+		end
+	end
+	
 	genvar bn_cell_i;
 	generate
 		for(bn_cell_i = 0;bn_cell_i < BN_ACT_PRL_N;bn_cell_i = bn_cell_i + 1)
@@ -810,31 +848,32 @@ module conv_bn_act_proc #(
 			if(bn_cell_i < BN_ACT_PRL_N/BN_ACT_CLK_RATE)
 			begin
 				assign bn_mac_i_vld[bn_cell_i] = 
-					fnl_sfc_in_vld & 
-					(
-						((BN_ACT_CLK_RATE > 1) & (bn_cell_i == 0)) | 
-						(|(cur_sfc_mask & (1 << (BN_ACT_PRL_N/BN_ACT_CLK_RATE*bn_act_in_round_cnt*((BN_ACT_CLK_RATE == 1) ? 0:1) + bn_cell_i))))
-					);
+					cur_bn_vld_d1[bn_cell_i];
 				assign bn_mac_i_info_along[bn_cell_i] = 
 					(bn_cell_i == 0) ? 
-						{
-							// 是否最后1个子行(1bit)
-							(BN_ACT_CLK_RATE == 1) ? 
-								s_axis_fnl_res_user[4]:
-								bn_act_in_async_fifo_dout_last_sub_row_flag,
-							// 子行号(4bit)
-							(BN_ACT_CLK_RATE == 1) ? 
-								s_axis_fnl_res_user[3:0]:
-								bn_act_in_async_fifo_dout_sub_row_id,
-							cur_sfc_mask, // 数据有效掩码(BN_ACT_PRL_N bit)
-							last_data_blk_in_row // 行内最后1个数据块标志(1bit)
-						}:
+						cur_info_along_d1:
 						{(BN_ACT_PRL_N+1+5){1'bx}};
 				
 				assign bn_mac_o_info_along_actual[bn_cell_i] = 
 					use_bn_unit ? 
 						bn_mac_o_info_along[bn_cell_i]:
 						bn_mac_i_info_along[bn_cell_i];
+				
+				always @(posedge bn_mac_aclk or negedge bn_mac_aresetn)
+				begin
+					if(~bn_mac_aresetn)
+						cur_bn_vld_d1[bn_cell_i] <= 1'b0;
+					else if(bn_mac_aclken)
+						cur_bn_vld_d1[bn_cell_i] <= # SIM_DELAY 
+							fnl_sfc_in_vld & 
+							(
+								((BN_ACT_CLK_RATE > 1) & (bn_cell_i == 0)) | 
+								(|(
+									cur_sfc_mask & 
+									(1 << (BN_ACT_PRL_N/BN_ACT_CLK_RATE*bn_act_in_round_cnt*((BN_ACT_CLK_RATE == 1) ? 0:1) + bn_cell_i))
+								))
+							);
+				end
 				
 				batch_nml_mac_cell #(
 					.INT16_SUPPORTED(INT16_SUPPORTED),
@@ -843,16 +882,16 @@ module conv_bn_act_proc #(
 					.INFO_ALONG_WIDTH(BN_ACT_PRL_N+1+5),
 					.SIM_DELAY(SIM_DELAY)
 				)batch_nml_mac_cell_u(
-					.aclk((BN_ACT_CLK_RATE == 1) ? aclk:bn_act_aclk),
-					.aresetn((BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn),
-					.aclken((BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken),
+					.aclk(bn_mac_aclk),
+					.aresetn(bn_mac_aresetn),
+					.aclken(bn_mac_aclken),
 					
 					.bn_calfmt(calfmt),
 					.fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 					
-					.mac_cell_i_op_a(cur_bn_param_a[bn_cell_i*32+31:bn_cell_i*32]),
-					.mac_cell_i_op_x(cur_sfc_data[bn_cell_i*32+31:bn_cell_i*32]),
-					.mac_cell_i_op_b(cur_bn_param_b[bn_cell_i*32+31:bn_cell_i*32]),
+					.mac_cell_i_op_a(cur_bn_param_a_d1[bn_cell_i*32+31:bn_cell_i*32]),
+					.mac_cell_i_op_x(cur_sfc_data_d1[bn_cell_i*32+31:bn_cell_i*32]),
+					.mac_cell_i_op_b(cur_bn_param_b_d1[bn_cell_i*32+31:bn_cell_i*32]),
 					.mac_cell_i_is_a_eq_1(bn_is_a_eq_1),
 					.mac_cell_i_is_b_eq_0(bn_is_b_eq_0),
 					.mac_cell_i_info_along(bn_mac_i_info_along[bn_cell_i]),
@@ -1192,7 +1231,7 @@ module conv_bn_act_proc #(
 		end
 		else
 		begin
-			assign proc_res_fifo_almost_full_n = proc_res_fifo_data_cnt_wt <= 10'd480;
+			assign proc_res_fifo_almost_full_n = proc_res_fifo_data_cnt_wt < 10'd480;
 			
 			/*
 			跨时钟域:
