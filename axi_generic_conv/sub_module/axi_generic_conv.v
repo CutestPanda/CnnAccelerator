@@ -54,6 +54,7 @@ AXIS MASTER/SLAVE
 
 module axi_generic_conv #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
+	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -83,6 +84,7 @@ module axi_generic_conv #(
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt", // sigmoid函数值查找表存储器的初始化文件路径
+	parameter integer USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = 0, // 是否使用DSP单元作为乘加阵列里的加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -91,6 +93,9 @@ module axi_generic_conv #(
 	// 计算核心时钟和复位
 	input wire mac_array_aclk,
 	input wire mac_array_aresetn,
+	// BN与激活单元时钟和复位
+	input wire bn_act_aclk,
+	input wire bn_act_aresetn,
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -380,6 +385,7 @@ module axi_generic_conv #(
 		.MAX_KERNAL_N(MAX_KERNAL_N),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
+		.USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY),
 		.SIM_DELAY(SIM_DELAY)
 	)axi_generic_conv_core_u(
 		.aclk(aclk),
@@ -969,11 +975,13 @@ module axi_generic_conv #(
 	
 	/** BN与激活单元 **/
 	// BN乘法器组
+	wire bn_mul_clk;
 	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_a; // 操作数A
 	wire[BN_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_op_b; // 操作数B
 	wire[BN_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_ce; // 计算使能
 	wire[BN_MUL_RES_WIDTH*BN_ACT_PRL_N-1:0] bn_mul_res; // 计算结果
 	// 泄露Relu乘法器组
+	wire leaky_relu_mul_clk;
 	wire[LEAKY_RELU_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_a; // 操作数A
 	wire[LEAKY_RELU_MUL_OP_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_b; // 操作数B
 	wire[LEAKY_RELU_MUL_CE_WIDTH*BN_ACT_PRL_N-1:0] leaky_relu_mul_ce; // 计算使能
@@ -984,10 +992,11 @@ module axi_generic_conv #(
 	wire[15:0] bn_mem_addr_b;
 	wire[63:0] bn_mem_dout_b; // {参数B(32bit), 参数A(32bit)}
 	// 处理结果fifo(MEM主接口)
-	wire proc_res_fifo_mem_clk;
+	wire proc_res_fifo_mem_clk_a;
 	wire proc_res_fifo_mem_wen_a;
 	wire[8:0] proc_res_fifo_mem_addr_a;
 	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_din_a;
+	wire proc_res_fifo_mem_clk_b;
 	wire proc_res_fifo_mem_ren_b;
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[BN_ACT_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
@@ -998,6 +1007,7 @@ module axi_generic_conv #(
 	wire[16*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_dout_a;
 	
 	conv_bn_act_proc #(
+		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 		.FP32_KEEP(1'b1),
 		.ATOMIC_K(ATOMIC_K),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -1009,6 +1019,9 @@ module axi_generic_conv #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
+		.bn_act_aclk(bn_act_aclk),
+		.bn_act_aresetn(bn_act_aresetn),
+		.bn_act_aclken(1'b1),
 		
 		.en_bn_act_proc(en_bn_act_proc_dup),
 		
@@ -1049,19 +1062,22 @@ module axi_generic_conv #(
 		.bn_mem_addr_b(bn_mem_addr_b),
 		.bn_mem_dout_b(bn_mem_dout_b),
 		
-		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_clk_a(proc_res_fifo_mem_clk_a),
 		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
 		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
 		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_clk_b(proc_res_fifo_mem_clk_b),
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
 		
+		.mul0_clk(bn_mul_clk),
 		.mul0_op_a(bn_mul_op_a),
 		.mul0_op_b(bn_mul_op_b),
 		.mul0_ce(bn_mul_ce),
 		.mul0_res(bn_mul_res),
 		
+		.mul1_clk(leaky_relu_mul_clk),
 		.mul1_op_a(leaky_relu_mul_op_a),
 		.mul1_op_b(leaky_relu_mul_op_b),
 		.mul1_ce(leaky_relu_mul_ce),
@@ -1162,7 +1178,7 @@ module axi_generic_conv #(
 				.en_out_reg("true"),
 				.simulation_delay(SIM_DELAY)
 			)leaky_relu_mul_u(
-				.clk(aclk),
+				.clk(leaky_relu_mul_clk),
 				
 				.ce_in_reg(1'b0),
 				.ce_mul(leaky_relu_mul_ce[bn_act_mul_i*2+0]),
@@ -1187,7 +1203,7 @@ module axi_generic_conv #(
 					.en_out_reg("false"),
 					.simulation_delay(SIM_DELAY)
 				)bn_mul_u(
-					.clk(aclk),
+					.clk(bn_mul_clk),
 					
 					.ce_in_reg(1'b0),
 					.ce_mul(bn_mul_ce[bn_act_mul_i]),
@@ -1212,7 +1228,7 @@ module axi_generic_conv #(
 					.en_out_reg("true"),
 					.simulation_delay(SIM_DELAY)
 				)bn_mul_u(
-					.clk(aclk),
+					.clk(bn_mul_clk),
 					
 					.ce_in_reg(bn_mul_ce[bn_act_mul_i*3+0]),
 					.ce_mul(bn_mul_ce[bn_act_mul_i*3+1]),
@@ -1343,14 +1359,15 @@ module axi_generic_conv #(
 		end
 	endgenerate
 	
-	bram_simple_dual_port #(
+	bram_simple_dual_port_async #(
 		.style("LOW_LATENCY"),
 		.mem_width(BN_ACT_PROC_RES_FIFO_WIDTH),
 		.mem_depth(512),
 		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
 	)bn_act_proc_res_fifo_ram_u(
-		.clk(proc_res_fifo_mem_clk),
+		.clk_a(proc_res_fifo_mem_clk_a),
+		.clk_b(proc_res_fifo_mem_clk_b),
 		
 		.wen_a(proc_res_fifo_mem_wen_a),
 		.addr_a(proc_res_fifo_mem_addr_a),
@@ -1361,7 +1378,7 @@ module axi_generic_conv #(
 		.dout_b(proc_res_fifo_mem_dout_b)
 	);
 	
-	bram_true_dual_port #(
+	bram_true_dual_port_async #(
 		.mem_width(64),
 		.mem_depth(MAX_KERNAL_N),
 		.INIT_FILE("no_init"),
@@ -1370,7 +1387,8 @@ module axi_generic_conv #(
 		.en_byte_write("true"),
 		.simulation_delay(SIM_DELAY)
 	)bn_param_ram_u(
-		.clk(bn_mem_clk_a),
+		.clk_a(bn_mem_clk_a),
+		.clk_b(bn_mem_clk_b),
 		
 		.ena(bn_mem_en_a),
 		.wea(bn_mem_wen_a),

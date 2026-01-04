@@ -41,6 +41,7 @@ SOFTWARE.
 
 
 module generic_pool_sim #(
+	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter INT8_SUPPORTED = 1'b0, // 是否支持INT8运算数据格式
 	parameter INT16_SUPPORTED = 1'b1, // 是否支持INT16运算数据格式
 	parameter FP16_SUPPORTED = 1'b1, // 是否支持FP16运算数据格式
@@ -870,15 +871,17 @@ module generic_pool_sim #(
 	wire m_axis_post_mac_valid;
 	wire m_axis_post_mac_ready;
 	// 后乘加处理的乘法器组
+	wire post_mac_mul_clk;
 	wire[POST_MAC_MUL_OP_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_op_a; // 操作数A
 	wire[POST_MAC_MUL_OP_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_op_b; // 操作数B
 	wire[POST_MAC_MUL_CE_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_ce; // 计算使能
 	wire[POST_MAC_MUL_RES_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_res; // 计算结果
 	// 处理结果fifo(MEM主接口)
-	wire proc_res_fifo_mem_clk;
+	wire proc_res_fifo_mem_clk_a;
 	wire proc_res_fifo_mem_wen_a;
 	wire[8:0] proc_res_fifo_mem_addr_a;
 	wire[POST_MAC_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_din_a;
+	wire proc_res_fifo_mem_clk_b;
 	wire proc_res_fifo_mem_ren_b;
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[POST_MAC_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
@@ -893,6 +896,7 @@ module generic_pool_sim #(
 	assign s_axis_post_mac_valid = en_post_mac & m_axis_mid_res_buf_valid;
 	
 	conv_bn_act_proc #(
+		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 		.ATOMIC_K(ATOMIC_C),
 		.BN_ACT_PRL_N(POST_MAC_PRL_N),
 		.INT16_SUPPORTED(INT8_SUPPORTED),
@@ -903,6 +907,9 @@ module generic_pool_sim #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
+		.bn_act_aclk(aclk),
+		.bn_act_aresetn(aresetn),
+		.bn_act_aclken(1'b1),
 		
 		.en_bn_act_proc(en_post_mac),
 		
@@ -942,19 +949,22 @@ module generic_pool_sim #(
 		.bn_mem_addr_b(),
 		.bn_mem_dout_b(64'dx),
 		
-		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_clk_a(proc_res_fifo_mem_clk_a),
 		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
 		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
 		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_clk_b(proc_res_fifo_mem_clk_b),
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
 		
+		.mul0_clk(post_mac_mul_clk),
 		.mul0_op_a(post_mac_mul_op_a),
 		.mul0_op_b(post_mac_mul_op_b),
 		.mul0_ce(post_mac_mul_ce),
 		.mul0_res(post_mac_mul_res),
 		
+		.mul1_clk(),
 		.mul1_op_a(),
 		.mul1_op_b(),
 		.mul1_ce(),
@@ -1097,7 +1107,7 @@ module generic_pool_sim #(
 					.en_out_reg("false"),
 					.simulation_delay(SIM_DELAY)
 				)bn_mul_u(
-					.clk(aclk),
+					.clk(post_mac_mul_clk),
 					
 					.ce_in_reg(1'b0),
 					.ce_mul(post_mac_mul_ce[post_mac_mul_i]),
@@ -1122,7 +1132,7 @@ module generic_pool_sim #(
 					.en_out_reg("true"),
 					.simulation_delay(SIM_DELAY)
 				)bn_mul_u(
-					.clk(aclk),
+					.clk(post_mac_mul_clk),
 					
 					.ce_in_reg(post_mac_mul_ce[post_mac_mul_i*3+0]),
 					.ce_mul(post_mac_mul_ce[post_mac_mul_i*3+1]),
@@ -1222,14 +1232,15 @@ module generic_pool_sim #(
 		end
 	endgenerate
 	
-	bram_simple_dual_port #(
+	bram_simple_dual_port_async #(
 		.style("LOW_LATENCY"),
 		.mem_width(POST_MAC_PROC_RES_FIFO_WIDTH),
 		.mem_depth(512),
 		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
-	)post_mac_proc_res_fifo_ram_u(
-		.clk(proc_res_fifo_mem_clk),
+	)proc_res_fifo_ram_u(
+		.clk_a(proc_res_fifo_mem_clk_a),
+		.clk_b(proc_res_fifo_mem_clk_b),
 		
 		.wen_a(proc_res_fifo_mem_wen_a),
 		.addr_a(proc_res_fifo_mem_addr_a),

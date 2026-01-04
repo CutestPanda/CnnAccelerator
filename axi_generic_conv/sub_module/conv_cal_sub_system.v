@@ -61,6 +61,7 @@ AXIS MASTER/SLAVE
 module conv_cal_sub_system #(
 	// [子系统配置参数]
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
+	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -70,6 +71,7 @@ module conv_cal_sub_system #(
 	parameter USE_EXT_BN_ACT_UNIT = "false", // 是否使用外部的BN与激活单元
 	parameter USE_EXT_FNL_RES_COLLECTOR = "false", // 是否使用外部的最终结果数据收集器
 	parameter USE_EXT_ROUND_GRP = "false", // 是否使用外部的输出数据舍入单元组
+	parameter USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = "false", // 是否使用DSP单元作为乘加阵列里的加法器
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter EN_SMALL_FP16 = "true", // 乘加阵列是否处理极小FP16
@@ -91,6 +93,10 @@ module conv_cal_sub_system #(
 	input wire mac_array_aclk,
 	input wire mac_array_aresetn,
 	input wire mac_array_aclken,
+	// BN与激活单元时钟和复位
+	input wire bn_act_aclk,
+	input wire bn_act_aresetn,
+	input wire bn_act_aclken,
 	
 	// 计算子系统控制/状态
 	// [物理特征图表面行适配器]
@@ -226,12 +232,14 @@ module conv_cal_sub_system #(
 	output wire[ATOMIC_K-1:0] mul0_ce, // 计算使能
 	input wire[ATOMIC_K*ATOMIC_C*32-1:0] mul0_res, // 计算结果
 	// 外部有符号乘法器#1
+	output wire mul1_clk,
 	output wire[(BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul1_op_a, // 操作数A
 	output wire[(BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N-1:0] mul1_op_b, // 操作数B
 	output wire[(BN_ACT_INT16_SUPPORTED ? 4:3)*BN_ACT_PRL_N-1:0] mul1_ce, // 计算使能
 	                                                                      // combinational logic out
 	input wire[(BN_ACT_INT16_SUPPORTED ? 4*36:(BN_ACT_INT32_SUPPORTED ? 64:50))*BN_ACT_PRL_N-1:0] mul1_res, // 计算结果
 	// 外部有符号乘法器#2
+	output wire mul2_clk,
 	output wire[(BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N-1:0] mul2_op_a, // 操作数A
 	output wire[(BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N-1:0] mul2_op_b, // 操作数B
 	output wire[2*BN_ACT_PRL_N-1:0] mul2_ce, // 计算使能
@@ -252,10 +260,11 @@ module conv_cal_sub_system #(
 	output wire[15:0] bn_mem_addr_b,
 	input wire[63:0] bn_mem_dout_b, // {参数B(32bit), 参数A(32bit)}
 	// 处理结果fifo(MEM主接口)
-	output wire proc_res_fifo_mem_clk,
+	output wire proc_res_fifo_mem_clk_a,
 	output wire proc_res_fifo_mem_wen_a, // combinational logic out
 	output wire[8:0] proc_res_fifo_mem_addr_a,
 	output wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a,
+	output wire proc_res_fifo_mem_clk_b,
 	output wire proc_res_fifo_mem_ren_b, // combinational logic out
 	output wire[8:0] proc_res_fifo_mem_addr_b,
 	input wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b,
@@ -431,6 +440,7 @@ module conv_cal_sub_system #(
 		.INFO_ALONG_WIDTH(1),
 		.USE_INNER_SFC_CNT("true"),
 		.TO_SKIP_EMPTY_CAL_ROUND("true"),
+		.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_mac_array_u(
 		.aclk(aclk),
@@ -779,6 +789,7 @@ module conv_cal_sub_system #(
 			assign s_axis_ext_bn_act_o_ready = 1'b1;
 			
 			conv_bn_act_proc #(
+				.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 				.FP32_KEEP(1'b1),
 				.ATOMIC_K(ATOMIC_K),
 				.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -790,6 +801,9 @@ module conv_cal_sub_system #(
 				.aclk(aclk),
 				.aresetn(aresetn),
 				.aclken(aclken),
+				.bn_act_aclk(bn_act_aclk),
+				.bn_act_aresetn(bn_act_aresetn),
+				.bn_act_aclken(bn_act_aclken),
 				
 				.en_bn_act_proc(en_bn_act_proc),
 				
@@ -830,10 +844,11 @@ module conv_cal_sub_system #(
 				.bn_mem_addr_b(bn_mem_addr_b),
 				.bn_mem_dout_b(bn_mem_dout_b),
 				
-				.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+				.proc_res_fifo_mem_clk_a(proc_res_fifo_mem_clk_a),
 				.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
 				.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
 				.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+				.proc_res_fifo_mem_clk_b(proc_res_fifo_mem_clk_b),
 				.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 				.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 				.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
@@ -843,11 +858,13 @@ module conv_cal_sub_system #(
 				.sigmoid_lut_mem_addr_a(sigmoid_lut_mem_addr_a),
 				.sigmoid_lut_mem_dout_a(sigmoid_lut_mem_dout_a),
 				
+				.mul0_clk(mul1_clk),
 				.mul0_op_a(mul1_op_a),
 				.mul0_op_b(mul1_op_b),
 				.mul0_ce(mul1_ce),
 				.mul0_res(mul1_res),
 				
+				.mul1_clk(mul2_clk),
 				.mul1_op_a(mul2_op_a),
 				.mul1_op_b(mul2_op_b),
 				.mul1_ce(mul2_ce),
@@ -883,10 +900,11 @@ module conv_cal_sub_system #(
 			assign bn_mem_ren_b = 1'b0;
 			assign bn_mem_addr_b = 16'dx;
 			
-			assign proc_res_fifo_mem_clk = 1'b0;
+			assign proc_res_fifo_mem_clk_a = 1'b0;
 			assign proc_res_fifo_mem_wen_a = 1'b0;
 			assign proc_res_fifo_mem_addr_a = 9'dx;
 			assign proc_res_fifo_mem_din_a = {(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5){1'bx}};
+			assign proc_res_fifo_mem_clk_b = 1'b0;
 			assign proc_res_fifo_mem_ren_b = 1'b0;
 			assign proc_res_fifo_mem_addr_b = 9'dx;
 			
@@ -894,10 +912,12 @@ module conv_cal_sub_system #(
 			assign sigmoid_lut_mem_ren_a = {BN_ACT_PRL_N{1'b0}};
 			assign sigmoid_lut_mem_addr_a = {(BN_ACT_PRL_N*12){1'b0}};
 			
+			assign mul1_clk = 1'b0;
 			assign mul1_op_a = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};
 			assign mul1_op_b = {((BN_ACT_INT16_SUPPORTED ? 4*18:(BN_ACT_INT32_SUPPORTED ? 32:25))*BN_ACT_PRL_N){1'bx}};
 			assign mul1_ce = {((BN_ACT_INT16_SUPPORTED ? 4:3)*BN_ACT_PRL_N){1'b0}};
 			
+			assign mul2_clk = 1'b0;
 			assign mul2_op_a = {((BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N){1'bx}};
 			assign mul2_op_b = {((BN_ACT_INT32_SUPPORTED ? 32:25)*BN_ACT_PRL_N){1'bx}};
 			assign mul2_ce = {(2*BN_ACT_PRL_N){1'b0}};

@@ -41,6 +41,8 @@ SOFTWARE.
 
 
 module generic_conv_sim #(
+	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
+	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -187,7 +189,14 @@ module generic_conv_sim #(
     end
     endfunction
 	
+	/** 常量 **/
+	// 激活函数类型的编码
+	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
+	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_NONE = 3'b111;
+	
 	/** 内部参数 **/
+	localparam integer PHY_BUF_USE_TRUE_DUAL_PORT_SRAM = 1; // 物理缓存是否使用真双口RAM
 	localparam integer LG_FMBUF_BUFFER_RID_WIDTH = clogb2(MAX_FMBUF_ROWN); // 特征图缓存的缓存行号的位宽
 	
 	/** 通用卷积单元控制子系统 **/
@@ -359,6 +368,12 @@ module generic_conv_sim #(
 	wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_a;
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_a;
 	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_a;
+	wire phy_conv_buf_mem_clk_b;
+	wire[CBUF_BANK_N-1:0] phy_conv_buf_mem_en_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2-1:0] phy_conv_buf_mem_wen_b;
+	wire[CBUF_BANK_N*16-1:0] phy_conv_buf_mem_addr_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_din_b;
+	wire[CBUF_BANK_N*ATOMIC_C*2*8-1:0] phy_conv_buf_mem_dout_b;
 	
 	assign s_fm_rd_req_axis_data = m_fm_rd_req_axis_data;
 	assign s_fm_rd_req_axis_valid = m_fm_rd_req_axis_valid;
@@ -379,6 +394,7 @@ module generic_conv_sim #(
 		.LG_FMBUF_BUFFER_RID_WIDTH(LG_FMBUF_BUFFER_RID_WIDTH),
 		.EN_REG_SLICE_IN_FM_RD_REQ("true"),
 		.EN_REG_SLICE_IN_KWGTBLK_RD_REQ("true"),
+		.PHY_BUF_USE_TRUE_DUAL_PORT_SRAM(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM ? "true":"false"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_data_hub_u(
 		.aclk(aclk),
@@ -462,10 +478,22 @@ module generic_conv_sim #(
 		.phy_conv_buf_mem_wen_a(phy_conv_buf_mem_wen_a),
 		.phy_conv_buf_mem_addr_a(phy_conv_buf_mem_addr_a),
 		.phy_conv_buf_mem_din_a(phy_conv_buf_mem_din_a),
-		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a)
+		.phy_conv_buf_mem_dout_a(phy_conv_buf_mem_dout_a),
+		.phy_conv_buf_mem_clk_b(phy_conv_buf_mem_clk_b),
+		.phy_conv_buf_mem_en_b(phy_conv_buf_mem_en_b),
+		.phy_conv_buf_mem_wen_b(phy_conv_buf_mem_wen_b),
+		.phy_conv_buf_mem_addr_b(phy_conv_buf_mem_addr_b),
+		.phy_conv_buf_mem_din_b(phy_conv_buf_mem_din_b),
+		.phy_conv_buf_mem_dout_b(phy_conv_buf_mem_dout_b)
 	);
 	
 	/** 通用卷积单元计算子系统 **/
+	// 计算核心时钟和复位
+	wire mac_array_aclk;
+	wire mac_array_aresetn;
+	// BN与激活单元时钟和复位
+	wire bn_act_aclk;
+	wire bn_act_aresetn;
 	// 特征图切块信息(AXIS从机)
 	wire[7:0] s_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	wire s_fm_cake_info_axis_valid;
@@ -486,16 +514,19 @@ module generic_conv_sim #(
 	wire s_kwgtblk_axis_valid;
 	wire s_kwgtblk_axis_ready;
 	// 有符号乘法器阵列
+	wire mul_array_clk;
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_a; // 操作数A
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_b; // 操作数B
 	wire[ATOMIC_K-1:0] mul_array_ce; // 计算使能
 	wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_array_res; // 计算结果
 	// BN乘法器组
+	wire mul_bn_clk;
 	wire[32*BN_ACT_PRL_N-1:0] mul_bn_op_a; // 操作数A
 	wire[32*BN_ACT_PRL_N-1:0] mul_bn_op_b; // 操作数B
 	wire[3*BN_ACT_PRL_N-1:0] mul_bn_ce; // 计算使能
 	wire[64*BN_ACT_PRL_N-1:0] mul_bn_res; // 计算结果
 	// 泄露Relu乘法器组
+	wire leaky_relu_mul_clk;
 	wire[32*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_a; // 操作数A
 	wire[32*BN_ACT_PRL_N-1:0] leaky_relu_mul_op_b; // 操作数B
 	wire[2*BN_ACT_PRL_N-1:0] leaky_relu_mul_ce; // 计算使能
@@ -515,13 +546,16 @@ module generic_conv_sim #(
 	wire[15:0] bn_mem_addr_b;
 	wire[63:0] bn_mem_dout_b; // {参数B(32bit), 参数A(32bit)}
 	// 处理结果fifo(MEM主接口)
-	wire proc_res_fifo_mem_clk;
+	wire proc_res_fifo_mem_clk_a;
 	wire proc_res_fifo_mem_wen_a;
 	wire[8:0] proc_res_fifo_mem_addr_a;
 	wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_din_a;
+	wire proc_res_fifo_mem_clk_b;
 	wire proc_res_fifo_mem_ren_b;
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5)-1:0] proc_res_fifo_mem_dout_b;
+	
+	assign m_axis_fnl_res_user = 5'bxxxxx;
 	
 	assign s_fm_cake_info_axis_data = m_fm_cake_info_axis_data;
 	assign s_fm_cake_info_axis_valid = m_fm_cake_info_axis_valid;
@@ -542,11 +576,37 @@ module generic_conv_sim #(
 	assign s_kwgtblk_axis_valid = m_kout_wgtblk_axis_valid;
 	assign m_kout_wgtblk_axis_ready = s_kwgtblk_axis_ready;
 	
+	/*
+	reg clk2 = 1'b1;
+	reg aresetn2 = 1'b0;
+	
+	always
+	begin
+		# 3.125 clk2 <= ~clk2;
+	end
+	
+	initial
+	begin
+		repeat(100)
+			@(posedge clk2);
+		
+		aresetn2 <= 1'b1;
+	end
+	*/
+	
+	assign mac_array_aclk = aclk;
+	assign mac_array_aresetn = aresetn;
+	assign bn_act_aclk = aclk;
+	assign bn_act_aresetn = aresetn;
+	
 	conv_cal_sub_system #(
+		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
 		.STREAM_DATA_WIDTH(FNL_RES_DATA_WIDTH),
+		.FP32_KEEP(1'b1),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),
@@ -560,6 +620,12 @@ module generic_conv_sim #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
+		.mac_array_aclk(mac_array_aclk),
+		.mac_array_aresetn(mac_array_aresetn),
+		.mac_array_aclken(1'b1),
+		.bn_act_aclk(bn_act_aclk),
+		.bn_act_aresetn(bn_act_aresetn),
+		.bn_act_aclken(1'b1),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -582,12 +648,13 @@ module generic_conv_sim #(
 		.mid_res_item_n_foreach_row(mid_res_item_n_foreach_row),
 		.mid_res_buf_row_n_bufferable(mid_res_buf_row_n_bufferable),
 		.use_bn_unit(1'b1),
-		.use_act_unit(1'b0), // 后续开展激活测试时需要!!!
+		.act_func_type(ACT_FUNC_TYPE_NONE), // 后续开展激活测试时需要!!!
 		.bn_fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(bn_is_a_eq_1),
 		.bn_is_b_eq_0(bn_is_b_eq_0),
 		.leaky_relu_fixed_point_quat_accrc(), // 后续开展激活测试时需要!!!
 		.leaky_relu_param_alpha(), // 后续开展激活测试时需要!!!
+		.sigmoid_fixed_point_quat_accrc(), // 后续开展激活测试时需要!!!
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
@@ -610,21 +677,23 @@ module generic_conv_sim #(
 		
 		.m_axis_fnl_res_data(m_axis_fnl_res_data),
 		.m_axis_fnl_res_keep(m_axis_fnl_res_keep),
-		.m_axis_fnl_res_user(m_axis_fnl_res_user),
 		.m_axis_fnl_res_last(m_axis_fnl_res_last),
 		.m_axis_fnl_res_valid(m_axis_fnl_res_valid),
 		.m_axis_fnl_res_ready(m_axis_fnl_res_ready),
 		
+		.mul0_clk(mul_array_clk),
 		.mul0_op_a(mul_array_op_a),
 		.mul0_op_b(mul_array_op_b),
 		.mul0_ce(mul_array_ce),
 		.mul0_res(mul_array_res),
 		
+		.mul1_clk(mul_bn_clk),
 		.mul1_op_a(mul_bn_op_a),
 		.mul1_op_b(mul_bn_op_b),
 		.mul1_ce(mul_bn_ce),
 		.mul1_res(mul_bn_res),
 		
+		.mul2_clk(leaky_relu_mul_clk),
 		.mul2_op_a(leaky_relu_mul_op_a),
 		.mul2_op_b(leaky_relu_mul_op_b),
 		.mul2_ce(leaky_relu_mul_ce),
@@ -644,10 +713,11 @@ module generic_conv_sim #(
 		.bn_mem_addr_b(bn_mem_addr_b),
 		.bn_mem_dout_b(bn_mem_dout_b),
 		
-		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_clk_a(proc_res_fifo_mem_clk_a),
 		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
 		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
 		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_clk_b(proc_res_fifo_mem_clk_b),
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b)
@@ -664,20 +734,20 @@ module generic_conv_sim #(
 			
 			assign mul_bn_res[64*(mul_bn_act_i+1)-1:64*mul_bn_act_i] = mul_bn_res_r_d2;
 			
-			always @(posedge aclk)
+			always @(posedge mul_bn_clk)
 			begin
 				if(mul_bn_ce[3*mul_bn_act_i+0])
 					mul_bn_res_r <= # SIM_DELAY 
 						$signed(mul_bn_op_a[32*(mul_bn_act_i+1)-1:32*mul_bn_act_i]) * $signed(mul_bn_op_b[32*(mul_bn_act_i+1)-1:32*mul_bn_act_i]);
 			end
 			
-			always @(posedge aclk)
+			always @(posedge mul_bn_clk)
 			begin
 				if(mul_bn_ce[3*mul_bn_act_i+1])
 					mul_bn_res_r_d1 <= # SIM_DELAY mul_bn_res_r;
 			end
 			
-			always @(posedge aclk)
+			always @(posedge mul_bn_clk)
 			begin
 				if(mul_bn_ce[3*mul_bn_act_i+2])
 					mul_bn_res_r_d2 <= # SIM_DELAY mul_bn_res_r_d1;
@@ -691,7 +761,7 @@ module generic_conv_sim #(
 				.en_out_reg("true"),
 				.simulation_delay(SIM_DELAY)
 			)leaky_relu_mul_u(
-				.clk(aclk),
+				.clk(leaky_relu_mul_clk),
 				
 				.ce_in_reg(1'b0),
 				.ce_mul(leaky_relu_mul_ce[mul_bn_act_i*2+0]),
@@ -765,7 +835,7 @@ module generic_conv_sim #(
 				.en_out_reg("false"),
 				.simulation_delay(SIM_DELAY)
 			)mul_s16_s16_u(
-				.clk(aclk),
+				.clk(mul_array_clk),
 				
 				.ce_in_reg(1'b0),
 				.ce_mul(mul_array_ce[mul_i/ATOMIC_C]),
@@ -844,52 +914,91 @@ module generic_conv_sim #(
 	generate
 		for(phy_conv_buf_mem_i = 0;phy_conv_buf_mem_i < CBUF_BANK_N;phy_conv_buf_mem_i = phy_conv_buf_mem_i + 1)
 		begin:phy_conv_buf_mem_blk
-			bram_single_port #(
-				.style("LOW_LATENCY"),
-				.rw_mode("read_first"),
-				.mem_width(ATOMIC_C*2*8),
-				.mem_depth(CBUF_DEPTH_FOREACH_BANK),
-				.INIT_FILE("no_init"),
-				.byte_write_mode("true"),
-				.simulation_delay(SIM_DELAY)
-			)phy_conv_buf_ram_u(
-				.clk(phy_conv_buf_mem_clk_a),
+			if(PHY_BUF_USE_TRUE_DUAL_PORT_SRAM)
+			begin
+				bram_true_dual_port #(
+					.mem_width(ATOMIC_C*2*8),
+					.mem_depth(CBUF_DEPTH_FOREACH_BANK),
+					.INIT_FILE("no_init"),
+					.read_write_mode("read_first"),
+					.use_output_register("false"),
+					.en_byte_write("true"),
+					.simulation_delay(SIM_DELAY)
+				)phy_conv_buf_ram_u(
+					.clk(phy_conv_buf_mem_clk_a),
+					
+					.ena(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
+					.wea(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addra(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.dina(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.douta(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					
+					.enb(phy_conv_buf_mem_en_b[phy_conv_buf_mem_i]),
+					.web(phy_conv_buf_mem_wen_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addrb(phy_conv_buf_mem_addr_b[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.dinb(phy_conv_buf_mem_din_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.doutb(phy_conv_buf_mem_dout_b[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
+				);
+			end
+			else
+			begin
+				assign phy_conv_buf_mem_dout_b = {(CBUF_BANK_N*ATOMIC_C*2*8){1'bx}};
 				
-				.en(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
-				.wen(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
-				.addr(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
-				.din(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
-				.dout(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
-			);
+				bram_single_port #(
+					.style("LOW_LATENCY"),
+					.rw_mode("read_first"),
+					.mem_width(ATOMIC_C*2*8),
+					.mem_depth(CBUF_DEPTH_FOREACH_BANK),
+					.INIT_FILE("no_init"),
+					.byte_write_mode("true"),
+					.simulation_delay(SIM_DELAY)
+				)phy_conv_buf_ram_u(
+					.clk(phy_conv_buf_mem_clk_a),
+					
+					.en(phy_conv_buf_mem_en_a[phy_conv_buf_mem_i]),
+					.wen(phy_conv_buf_mem_wen_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2-1:phy_conv_buf_mem_i*ATOMIC_C*2]),
+					.addr(phy_conv_buf_mem_addr_a[phy_conv_buf_mem_i*16+clogb2(CBUF_DEPTH_FOREACH_BANK-1):phy_conv_buf_mem_i*16]),
+					.din(phy_conv_buf_mem_din_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8]),
+					.dout(phy_conv_buf_mem_dout_a[(phy_conv_buf_mem_i+1)*ATOMIC_C*2*8-1:phy_conv_buf_mem_i*ATOMIC_C*2*8])
+				);
+			end
 		end
 	endgenerate
 	
-	bram_simple_dual_port #(
-		.style("LOW_LATENCY"),
+	bram_true_dual_port_async #(
 		.mem_width(64),
 		.mem_depth(MAX_KERNAL_N),
 		.INIT_FILE("no_init"),
+		.read_write_mode("read_first"),
+		.use_output_register("false"),
+		.en_byte_write("true"),
 		.simulation_delay(SIM_DELAY)
 	)bn_param_ram_u(
-		.clk(bn_mem_clk_b),
+		.clk_a(aclk),
+		.clk_b(bn_mem_clk_b),
 		
-		.wen_a(bn_mem_wen_a),
-		.addr_a(bn_mem_addr_a),
-		.din_a(bn_mem_din_a),
+		.ena(1'b1),
+		.wea(bn_mem_wen_a),
+		.addra(bn_mem_addr_a),
+		.dina(bn_mem_din_a),
+		.douta(),
 		
-		.ren_b(bn_mem_ren_b),
-		.addr_b(bn_mem_addr_b),
-		.dout_b(bn_mem_dout_b)
+		.enb(bn_mem_ren_b),
+		.web(8'b0000_0000),
+		.addrb(bn_mem_addr_b),
+		.dinb(64'dx),
+		.doutb(bn_mem_dout_b)
 	);
 	
-	bram_simple_dual_port #(
+	bram_simple_dual_port_async #(
 		.style("LOW_LATENCY"),
 		.mem_width(BN_ACT_PRL_N*32+BN_ACT_PRL_N+1+5),
 		.mem_depth(512),
 		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
 	)proc_res_fifo_ram_u(
-		.clk(proc_res_fifo_mem_clk),
+		.clk_a(proc_res_fifo_mem_clk_a),
+		.clk_b(proc_res_fifo_mem_clk_b),
 		
 		.wen_a(proc_res_fifo_mem_wen_a),
 		.addr_a(proc_res_fifo_mem_addr_a),

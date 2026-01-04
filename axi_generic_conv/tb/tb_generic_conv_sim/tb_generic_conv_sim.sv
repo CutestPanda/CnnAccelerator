@@ -65,9 +65,26 @@ module tb_generic_conv_sim();
 	parameter integer MAX_FMBUF_ROWN = 512; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
 	parameter integer RBUF_BANK_N = 4; // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
+	
+	配置参数#3:
+	parameter integer MAC_ARRAY_CLK_RATE = 2; // 计算核心时钟倍率(>=1)
+	parameter integer ATOMIC_K = 16; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 16; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
+	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
+	parameter integer CBUF_BANK_N = 16; // 物理缓存的MEM片数(4 | 8 | 16 | 32 | 64 | 128)
+	parameter integer CBUF_DEPTH_FOREACH_BANK = 128; // 物理缓存每片MEM的深度(128 | 256 | 512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_KERNAL_N = 1024; // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
+	parameter integer MAX_FMBUF_ROWN = 128; // 特征图缓存的最大表面行数(8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024)
+	parameter integer RBUF_BANK_N = 16; // 中间结果缓存MEM个数(>=2)
+	parameter integer RBUF_DEPTH = 32; // 中间结果缓存MEM深度(16 | ...)
 	*/
-	parameter integer ATOMIC_K = 4; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer ATOMIC_C = 2; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer MAC_ARRAY_CLK_RATE = 1; // 计算核心时钟倍率(>=1)
+	parameter integer BN_ACT_CLK_RATE = 1; // BN与激活单元的时钟倍率(>=1)
+	parameter integer ATOMIC_K = 16; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer ATOMIC_C = 16; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
@@ -483,6 +500,8 @@ module tb_generic_conv_sim();
 	assign m_axis_fnl_res_ready = dma_s2mm_strm_axis_if.ready;
 	
 	generic_conv_sim #(
+		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),

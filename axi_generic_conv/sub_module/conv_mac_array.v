@@ -67,6 +67,7 @@ module conv_mac_array #(
 	parameter integer INFO_ALONG_WIDTH = 1, // 随路数据的位宽(必须>=1)
 	parameter USE_INNER_SFC_CNT = "true", // 是否使用内部表面计数器
 	parameter TO_SKIP_EMPTY_CAL_ROUND = "true", // 是否跳过空的计算轮次
+	parameter USE_DSP_MACRO_FOR_ADD_TREE = "false", // 是否使用DSP单元作为加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -436,6 +437,7 @@ module conv_mac_array #(
 					.ATOMIC_C(ATOMIC_C),
 					.EN_SMALL_FP16(EN_SMALL_FP16),
 					.INFO_ALONG_WIDTH(ATOMIC_K + INFO_ALONG_WIDTH + 4 + 1),
+					.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE),
 					.SIM_DELAY(SIM_DELAY)
 				)mac_cell_u(
 					.aclk(aclk),
@@ -476,6 +478,7 @@ module conv_mac_array #(
 				.ATOMIC_C(ATOMIC_C),
 				.INFO_ALONG_WIDTH(ATOMIC_K + INFO_ALONG_WIDTH + 4 + 1),
 				.EN_SMALL_FP16(EN_SMALL_FP16),
+				.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE),
 				.SIM_DELAY(SIM_DELAY)
 			)async_mac_array_core_u(
 				.aclk(aclk),
@@ -492,6 +495,7 @@ module conv_mac_array #(
 				.array_i_ftm_sfc_data(array_i_ftm_sfc),
 				.array_i_kernal_wgtblk_data(kernal_buf_data_cur),
 				.array_i_ftm_sfc_masked(array_i_ftm_sfc_masked),
+				.array_i_kernal_mask(kernal_buf_mask_cur),
 				.array_i_info_along(mac_in_info_along),
 				.array_i_vld(async_array_i_vld),
 				.array_i_rdy(async_array_i_rdy),

@@ -52,6 +52,7 @@ AXIS MASTER/SLAVE
 
 
 module axi_generic_pool #(
+	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer MAX_POOL_SUPPORTED = 1, // 是否支持最大池化
 	parameter integer AVG_POOL_SUPPORTED = 0, // 是否支持平均池化
@@ -76,9 +77,12 @@ module axi_generic_pool #(
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
-	// 时钟和复位
+	// 主时钟和复位
 	input wire aclk,
 	input wire aresetn,
+	// BN与激活单元时钟和复位
+	input wire bn_act_aclk,
+	input wire bn_act_aresetn,
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -864,20 +868,23 @@ module axi_generic_pool #(
 	
 	/** 后乘加处理 **/
 	// 后乘加处理的乘法器组
+	wire post_mac_mul_clk;
 	wire[POST_MAC_MUL_OP_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_op_a; // 操作数A
 	wire[POST_MAC_MUL_OP_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_op_b; // 操作数B
 	wire[POST_MAC_MUL_CE_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_ce; // 计算使能
 	wire[POST_MAC_MUL_RES_WIDTH*POST_MAC_PRL_N-1:0] post_mac_mul_res; // 计算结果
 	// 处理结果fifo(MEM主接口)
-	wire proc_res_fifo_mem_clk;
+	wire proc_res_fifo_mem_clk_a;
 	wire proc_res_fifo_mem_wen_a;
 	wire[8:0] proc_res_fifo_mem_addr_a;
 	wire[POST_MAC_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_din_a;
+	wire proc_res_fifo_mem_clk_b;
 	wire proc_res_fifo_mem_ren_b;
 	wire[8:0] proc_res_fifo_mem_addr_b;
 	wire[POST_MAC_PROC_RES_FIFO_WIDTH-1:0] proc_res_fifo_mem_dout_b;
 	
 	conv_bn_act_proc #(
+		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
 		.FP32_KEEP(1'b1),
 		.ATOMIC_K(ATOMIC_C),
 		.BN_ACT_PRL_N(POST_MAC_PRL_N),
@@ -889,6 +896,9 @@ module axi_generic_pool #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(1'b1),
+		.bn_act_aclk(bn_act_aclk),
+		.bn_act_aresetn(bn_act_aresetn),
+		.bn_act_aclken(1'b1),
 		
 		.en_bn_act_proc(en_bn_act_proc_dup),
 		
@@ -929,28 +939,31 @@ module axi_generic_pool #(
 		.bn_mem_addr_b(),
 		.bn_mem_dout_b(64'dx),
 		
-		.proc_res_fifo_mem_clk(proc_res_fifo_mem_clk),
+		.proc_res_fifo_mem_clk_a(proc_res_fifo_mem_clk_a),
 		.proc_res_fifo_mem_wen_a(proc_res_fifo_mem_wen_a),
 		.proc_res_fifo_mem_addr_a(proc_res_fifo_mem_addr_a),
 		.proc_res_fifo_mem_din_a(proc_res_fifo_mem_din_a),
+		.proc_res_fifo_mem_clk_b(proc_res_fifo_mem_clk_b),
 		.proc_res_fifo_mem_ren_b(proc_res_fifo_mem_ren_b),
 		.proc_res_fifo_mem_addr_b(proc_res_fifo_mem_addr_b),
 		.proc_res_fifo_mem_dout_b(proc_res_fifo_mem_dout_b),
 		
-		.sigmoid_lut_mem_clk_a(),
-		.sigmoid_lut_mem_ren_a(),
-		.sigmoid_lut_mem_addr_a(),
-		.sigmoid_lut_mem_dout_a({(16*POST_MAC_PRL_N){1'bx}}),
-		
+		.mul0_clk(post_mac_mul_clk),
 		.mul0_op_a(post_mac_mul_op_a),
 		.mul0_op_b(post_mac_mul_op_b),
 		.mul0_ce(post_mac_mul_ce),
 		.mul0_res(post_mac_mul_res),
 		
+		.mul1_clk(),
 		.mul1_op_a(),
 		.mul1_op_b(),
 		.mul1_ce(),
-		.mul1_res({(POST_MAC_PRL_N*(INT16_SUPPORTED ? 64:50)){1'bx}})
+		.mul1_res({(POST_MAC_PRL_N*(INT16_SUPPORTED ? 64:50)){1'bx}}),
+		
+		.sigmoid_lut_mem_clk_a(),
+		.sigmoid_lut_mem_ren_a(),
+		.sigmoid_lut_mem_addr_a(),
+		.sigmoid_lut_mem_dout_a({(16*POST_MAC_PRL_N){1'bx}})
 	);
 	
 	/** 输出数据舍入单元组 **/
@@ -1044,7 +1057,7 @@ module axi_generic_pool #(
 					.en_out_reg("false"),
 					.simulation_delay(SIM_DELAY)
 				)post_mac_mul_u(
-					.clk(aclk),
+					.clk(post_mac_mul_clk),
 					
 					.ce_in_reg(1'b0),
 					.ce_mul(post_mac_mul_ce[post_mac_mul_i]),
@@ -1069,7 +1082,7 @@ module axi_generic_pool #(
 					.en_out_reg("true"),
 					.simulation_delay(SIM_DELAY)
 				)post_mac_mul_u(
-					.clk(aclk),
+					.clk(post_mac_mul_clk),
 					
 					.ce_in_reg(post_mac_mul_ce[post_mac_mul_i*3+0]),
 					.ce_mul(post_mac_mul_ce[post_mac_mul_i*3+1]),
@@ -1200,14 +1213,15 @@ module axi_generic_pool #(
 		end
 	endgenerate
 	
-	bram_simple_dual_port #(
+	bram_simple_dual_port_async #(
 		.style("LOW_LATENCY"),
 		.mem_width(POST_MAC_PROC_RES_FIFO_WIDTH),
 		.mem_depth(512),
 		.INIT_FILE("no_init"),
 		.simulation_delay(SIM_DELAY)
 	)post_mac_proc_res_fifo_ram_u(
-		.clk(proc_res_fifo_mem_clk),
+		.clk_a(proc_res_fifo_mem_clk_a),
+		.clk_b(proc_res_fifo_mem_clk_b),
 		
 		.wen_a(proc_res_fifo_mem_wen_a),
 		.addr_a(proc_res_fifo_mem_addr_a),

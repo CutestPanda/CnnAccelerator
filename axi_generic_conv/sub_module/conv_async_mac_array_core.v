@@ -27,7 +27,9 @@ SOFTWARE.
 本模块: (异步)卷积乘加阵列计算核心
 
 描述:
-请填写
+输入异步fifo -> 卷积乘加阵列 -> 输出异步fifo
+
+输入端作跨时钟域并串转换, 输出端作跨时钟域串并转换, 乘加单元数量为ATOMIC_K/MAC_ARRAY_CLK_RATE
 
 注意：
 核并行数(ATOMIC_K)必须能被计算核心时钟倍率(MAC_ARRAY_CLK_RATE)整除
@@ -46,6 +48,7 @@ module conv_async_mac_array_core #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer INFO_ALONG_WIDTH = 1, // 随路数据的位宽(必须>=1)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
+	parameter USE_DSP_MACRO_FOR_ADD_TREE = "false", // 是否使用DSP单元作为加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -67,6 +70,7 @@ module conv_async_mac_array_core #(
 	input wire[ATOMIC_C*16-1:0] array_i_ftm_sfc_data, // 特征图表面(数据)
 	input wire[ATOMIC_K*ATOMIC_C*16-1:0] array_i_kernal_wgtblk_data, // 卷积核权重块(数据)
 	input wire array_i_ftm_sfc_masked, // 特征图表面(无效标志)
+	input wire[ATOMIC_K-1:0] array_i_kernal_mask, // 卷积核权重(掩码)
 	input wire[INFO_ALONG_WIDTH-1:0] array_i_info_along, // 随路数据
 	input wire array_i_vld,
 	output wire array_i_rdy,
@@ -100,7 +104,6 @@ module conv_async_mac_array_core #(
 	reg en_mac_array_d3;
 	reg en_mac_array_d4;
 	wire on_en_mac_array_posedge;
-	reg[1:0] calfmt_latched;
 	
 	assign on_en_mac_array_posedge = en_mac_array_d3 & (~en_mac_array_d4);
 	
@@ -114,13 +117,6 @@ module conv_async_mac_array_core #(
 				{en_mac_array_d3, en_mac_array_d2, en_mac_array_d1, en_mac_array};
 	end
 	
-	// 跨时钟域: ... -> calfmt_latched[*]
-	always @(posedge mac_array_aclk)
-	begin
-		if(on_en_mac_array_posedge)
-			calfmt_latched <= # SIM_DELAY calfmt;
-	end
-	
 	/** 输入异步fifo **/
 	// [fifo写端口]
 	wire in_async_fifo_wen;
@@ -128,6 +124,7 @@ module conv_async_mac_array_core #(
 	wire[ATOMIC_C*16-1:0] in_async_fifo_din_ftm_sfc_data; // 特征图表面(数据)
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] in_async_fifo_din_kernal_wgtblk_data; // 卷积核权重块(数据)
 	wire in_async_fifo_din_ftm_sfc_masked; // 特征图表面(无效标志)
+	wire[ATOMIC_K-1:0] in_async_fifo_din_kernal_mask; // 卷积核权重(掩码)
 	wire[INFO_ALONG_WIDTH-1:0] in_async_fifo_din_info_along; // 随路数据
 	// [fifo读端口]
 	wire in_async_fifo_ren;
@@ -135,6 +132,7 @@ module conv_async_mac_array_core #(
 	wire[ATOMIC_C*16-1:0] in_async_fifo_dout_ftm_sfc_data; // 特征图表面(数据)
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] in_async_fifo_dout_kernal_wgtblk_data; // 卷积核权重块(数据)
 	wire in_async_fifo_dout_ftm_sfc_masked; // 特征图表面(无效标志)
+	wire[ATOMIC_K-1:0] in_async_fifo_dout_kernal_mask; // 卷积核权重(掩码)
 	wire[INFO_ALONG_WIDTH-1:0] in_async_fifo_dout_info_along; // 随路数据
 	
 	assign array_i_rdy = aclken & in_async_fifo_full_n;
@@ -143,6 +141,7 @@ module conv_async_mac_array_core #(
 	assign in_async_fifo_din_ftm_sfc_data = array_i_ftm_sfc_data;
 	assign in_async_fifo_din_kernal_wgtblk_data = array_i_kernal_wgtblk_data;
 	assign in_async_fifo_din_ftm_sfc_masked = array_i_ftm_sfc_masked;
+	assign in_async_fifo_din_kernal_mask = array_i_kernal_mask;
 	assign in_async_fifo_din_info_along = array_i_info_along;
 	
 	/*
@@ -155,7 +154,7 @@ module conv_async_mac_array_core #(
 		.fwft_mode("true"),
 		.ram_type("lutram"),
 		.depth(32),
-		.data_width(ATOMIC_C*16 + ATOMIC_K*ATOMIC_C*16 + 1 + INFO_ALONG_WIDTH),
+		.data_width(ATOMIC_C*16 + ATOMIC_K*ATOMIC_C*16 + 1 + ATOMIC_K + INFO_ALONG_WIDTH),
 		.simulation_delay(SIM_DELAY)
 	)in_async_fifo_u(
 		.clk_wt(aclk),
@@ -171,6 +170,7 @@ module conv_async_mac_array_core #(
 				in_async_fifo_din_ftm_sfc_data,
 				in_async_fifo_din_kernal_wgtblk_data,
 				in_async_fifo_din_ftm_sfc_masked,
+				in_async_fifo_din_kernal_mask,
 				in_async_fifo_din_info_along
 			}
 		),
@@ -183,6 +183,7 @@ module conv_async_mac_array_core #(
 				in_async_fifo_dout_ftm_sfc_data,
 				in_async_fifo_dout_kernal_wgtblk_data,
 				in_async_fifo_dout_ftm_sfc_masked,
+				in_async_fifo_dout_kernal_mask,
 				in_async_fifo_dout_info_along
 			}
 		),
@@ -196,6 +197,7 @@ module conv_async_mac_array_core #(
 	// [阵列输入]
 	reg[ATOMIC_C*16-1:0] mac_in_ftm; // 特征图数据
 	reg[(ATOMIC_K/MAC_ARRAY_CLK_RATE)*ATOMIC_C*16-1:0] mac_in_wgt; // 卷积核权重
+	reg[ATOMIC_K/MAC_ARRAY_CLK_RATE-1:0] mac_in_kernal_mask; // 权重表面掩码
 	reg mac_in_ftm_masked; // 特征图数据(无效标志)
 	reg[INFO_ALONG_WIDTH-1:0] mac_in_info_along; // 随路数据
 	reg mac_in_valid; // 阵列输入有效指示
@@ -220,7 +222,7 @@ module conv_async_mac_array_core #(
 					(mac_round_cnt + 1);
 	end
 	
-	// 特征图数据, 卷积核权重, 特征图数据(无效标志), 随路数据
+	// 特征图数据, 卷积核权重, 权重表面掩码, 特征图数据(无效标志), 随路数据
 	always @(posedge mac_array_aclk)
 	begin
 		if(mac_array_aclken & en_mac_array_d4 & to_pass_cal_data & in_async_fifo_empty_n)
@@ -228,6 +230,8 @@ module conv_async_mac_array_core #(
 			mac_in_ftm <= # SIM_DELAY in_async_fifo_dout_ftm_sfc_data;
 			mac_in_wgt <= # SIM_DELAY 
 				in_async_fifo_dout_kernal_wgtblk_data >> (ATOMIC_K*ATOMIC_C*16/MAC_ARRAY_CLK_RATE * mac_round_cnt);
+			mac_in_kernal_mask <= # SIM_DELAY 
+				in_async_fifo_dout_kernal_mask >> (ATOMIC_K/MAC_ARRAY_CLK_RATE * mac_round_cnt);
 			mac_in_ftm_masked <= # SIM_DELAY in_async_fifo_dout_ftm_sfc_masked;
 			mac_in_info_along <= # SIM_DELAY in_async_fifo_dout_info_along;
 		end
@@ -252,19 +256,20 @@ module conv_async_mac_array_core #(
 					.ATOMIC_C(ATOMIC_C),
 					.EN_SMALL_FP16(EN_SMALL_FP16),
 					.INFO_ALONG_WIDTH(INFO_ALONG_WIDTH),
+					.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE),
 					.SIM_DELAY(SIM_DELAY)
 				)conv_mac_cell_u(
 					.aclk(mac_array_aclk),
 					.aresetn(mac_array_aresetn),
 					.aclken(mac_array_aclken),
 					
-					.calfmt(calfmt_latched),
+					.calfmt(calfmt),
 					
 					.mac_in_ftm(mac_in_ftm),
 					.mac_in_wgt(mac_in_wgt[(mac_cell_i+1)*ATOMIC_C*16-1:mac_cell_i*ATOMIC_C*16]),
-					.mac_in_ftm_masked(mac_in_ftm_masked),
+					.mac_in_ftm_masked(mac_in_ftm_masked | (~mac_in_kernal_mask[mac_cell_i])),
 					.mac_in_info_along(mac_in_info_along),
-					.mac_in_valid(mac_in_valid),
+					.mac_in_valid(mac_in_valid & ((mac_cell_i == 0) | mac_in_kernal_mask[mac_cell_i])),
 					
 					.mac_out_exp(mac_out_res[48*mac_cell_i+47:48*mac_cell_i+40]),
 					.mac_out_frac(mac_out_res[48*mac_cell_i+39:48*mac_cell_i+0]),

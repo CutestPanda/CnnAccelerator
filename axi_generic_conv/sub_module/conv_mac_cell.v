@@ -56,6 +56,7 @@ module conv_mac_cell #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
 	parameter integer INFO_ALONG_WIDTH = 2, // 随路数据的位宽
+	parameter USE_DSP_MACRO_FOR_ADD_TREE = "false", // 是否使用DSP单元作为加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -181,6 +182,7 @@ module conv_mac_cell #(
 			add_tree_2_4_8_16_32 #(
 				.add_input_n(ATOMIC_C),
 				.add_width(32),
+				.USE_DSP_MACRO(USE_DSP_MACRO_FOR_ADD_TREE),
 				.simulation_delay(SIM_DELAY)
 			)add_tree_u(
 				.aclk(aclk),
@@ -198,7 +200,7 @@ module conv_mac_cell #(
 				.data_width(1),
 				.delay_n(clogb2(ATOMIC_C)),
 				.shift_type("ff"),
-				.en_output_register_init("false"),
+				.en_output_register_init("true"),
 				.simulation_delay(SIM_DELAY)
 			)delay_for_mask_along_with_add_tree_u(
 				.clk(aclk),
@@ -597,15 +599,9 @@ module conv_mac_cell #(
 		begin
 			ram_based_shift_regs #(
 				.data_width(8),
-				.delay_n(
-					(ATOMIC_C == 2)  ? 1:
-					(ATOMIC_C == 4)  ? 2:
-					(ATOMIC_C == 8)  ? 3:
-					(ATOMIC_C == 16) ? 4:
-					                   5
-				),
+				.delay_n(clogb2(ATOMIC_C)),
 				.shift_type("ff"),
-				.en_output_register_init("false"),
+				.en_output_register_init("true"),
 				.simulation_delay(SIM_DELAY)
 			)delay_for_fp16_func_u(
 				.clk(aclk),
@@ -695,16 +691,9 @@ module conv_mac_cell #(
 	
 	ram_based_shift_regs #(
 		.data_width(INFO_ALONG_WIDTH),
-		.delay_n(
-			(ATOMIC_C == 1)  ? 1:
-			(ATOMIC_C == 2)  ? 2:
-			(ATOMIC_C == 4)  ? 3:
-			(ATOMIC_C == 8)  ? 4:
-			(ATOMIC_C == 16) ? 5:
-							   6
-		),
+		.delay_n(2+clogb2(ATOMIC_C)),
 		.shift_type("ff"),
-		.en_output_register_init("false"),
+		.en_output_register_init("true"),
 		.simulation_delay(SIM_DELAY)
 	)delay_for_info_along_int16_u(
 		.clk(aclk),
@@ -717,9 +706,9 @@ module conv_mac_cell #(
 	
 	ram_based_shift_regs #(
 		.data_width(INFO_ALONG_WIDTH),
-		.delay_n(3),
+		.delay_n(2),
 		.shift_type("ff"),
-		.en_output_register_init("false"),
+		.en_output_register_init("true"),
 		.simulation_delay(SIM_DELAY)
 	)delay_for_info_along_fp16_u(
 		.clk(aclk),

@@ -79,6 +79,7 @@ module axi_generic_conv_core #(
 	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
+	parameter integer USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = 0, // 是否使用DSP单元作为乘加阵列里的加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -772,6 +773,7 @@ module axi_generic_conv_core #(
 	
 	conv_cal_sub_system #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+		.BN_ACT_CLK_RATE(1),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -781,6 +783,7 @@ module axi_generic_conv_core #(
 		.USE_EXT_BN_ACT_UNIT("true"),
 		.USE_EXT_FNL_RES_COLLECTOR("true"),
 		.USE_EXT_ROUND_GRP("true"),
+		.USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY ? "true":"false"),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),
@@ -797,6 +800,9 @@ module axi_generic_conv_core #(
 		.mac_array_aclk(mac_array_aclk),
 		.mac_array_aresetn(mac_array_aresetn),
 		.mac_array_aclken(mac_array_aclken),
+		.bn_act_aclk(1'b0),
+		.bn_act_aresetn(1'b0),
+		.bn_act_aclken(1'b0),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -907,11 +913,13 @@ module axi_generic_conv_core #(
 		.mul0_ce(mul_array_ce),
 		.mul0_res(mul_array_res),
 		
+		.mul1_clk(),
 		.mul1_op_a(),
 		.mul1_op_b(),
 		.mul1_ce(),
 		.mul1_res({(BN_MUL_RES_WIDTH*BN_ACT_PRL_N){1'bx}}),
 		
+		.mul2_clk(),
 		.mul2_op_a(),
 		.mul2_op_b(),
 		.mul2_ce(),
@@ -931,10 +939,11 @@ module axi_generic_conv_core #(
 		.bn_mem_addr_b(),
 		.bn_mem_dout_b(64'dx),
 		
-		.proc_res_fifo_mem_clk(),
+		.proc_res_fifo_mem_clk_a(),
 		.proc_res_fifo_mem_wen_a(),
 		.proc_res_fifo_mem_addr_a(),
 		.proc_res_fifo_mem_din_a(),
+		.proc_res_fifo_mem_clk_b(),
 		.proc_res_fifo_mem_ren_b(),
 		.proc_res_fifo_mem_addr_b(),
 		.proc_res_fifo_mem_dout_b({BN_ACT_PROC_RES_FIFO_WIDTH{1'bx}}),
