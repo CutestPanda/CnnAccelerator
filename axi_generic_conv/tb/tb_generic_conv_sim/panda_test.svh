@@ -205,7 +205,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		
 		this.clk_period = 10ns;
 		this.rst_duration = 1us;
-		this.main_phase_drain_time = 20us;
+		this.main_phase_drain_time = 40us;
 	endfunction
 	
 	function void build_phase(uvm_phase phase);

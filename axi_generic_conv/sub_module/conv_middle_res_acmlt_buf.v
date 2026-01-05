@@ -150,20 +150,20 @@ module conv_middle_res_acmlt_buf #(
 	/** 输出特征图表面行附加信息fifo **/
 	// [fifo写端口]
 	wire ofm_row_extra_msg_fifo_wen;
-	wire[19:0] ofm_row_extra_msg_fifo_din; // {计算轮次 - 1(4bit), 输出表面行长度 - 1(16bit)}
+	wire[19:0] ofm_row_extra_msg_fifo_din; // {计算轮次 - 1(4bit), 输出表面行长度 - 计算轮次(16bit)}
 	wire ofm_row_extra_msg_fifo_full_n;
 	// [fifo读端口]
 	wire ofm_row_extra_msg_fifo_ren;
-	wire[19:0] ofm_row_extra_msg_fifo_dout; // {计算轮次 - 1(4bit), 输出表面行长度 - 1(16bit)}
+	wire[19:0] ofm_row_extra_msg_fifo_dout; // {计算轮次 - 1(4bit), 输出表面行长度 - 计算轮次(16bit)}
 	wire ofm_row_extra_msg_fifo_empty_n;
-	wire[15:0] ofm_row_final_res_len; // 输出表面行(最终结果)长度 - 1
+	wire[15:0] ofm_row_final_res_len_sub_cal_round_n; // 输出表面行(最终结果)长度 - 输出表面行(最终结果)计算轮次
 	wire[3:0] ofm_row_final_res_cal_round_n; // 输出表面行(最终结果)计算轮次 - 1
 	reg ofm_row_final_res_extra_msg_vld; // 输出特征图表面行附加信息(有效标志)
 	
-	assign ofm_row_final_res_len = 
+	assign ofm_row_final_res_len_sub_cal_round_n = 
 		en_cal_round_ext ? 
 			ofm_row_extra_msg_fifo_dout[15:0]:
-			ofmap_w;
+			(ofmap_w[15:clogb2(TSF_N_FOREACH_SFC)] | 16'd0);
 	assign ofm_row_final_res_cal_round_n = 
 		en_cal_round_ext ? 
 			ofm_row_extra_msg_fifo_dout[19:16]:
@@ -412,8 +412,9 @@ module conv_middle_res_acmlt_buf #(
 		tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & 
 		s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
 		s_axis_mid_res_last;
+	
 	assign ofm_row_extra_msg_fifo_din[15:0] = 
-		col_cnt_at_wr; // 输出表面行长度 - 1
+		(col_cnt_at_wr[15:clogb2(TSF_N_FOREACH_SFC)] - cal_round_n_cnt_at_wr) | 16'd0; // 输出表面行长度 - 计算轮次
 	assign ofm_row_extra_msg_fifo_din[19:16] = 
 		cal_round_n_cnt_at_wr; // 计算轮次 - 1
 	
@@ -448,10 +449,7 @@ module conv_middle_res_acmlt_buf #(
 	assign fnl_res_sub_rid_s0 = sub_row_cnt;
 	assign fnl_res_last_s0 = 
 		((col_cnt_at_rd & (TSF_N_FOREACH_SFC - 1)) == (TSF_N_FOREACH_SFC - 1)) & 
-		(
-			(col_cnt_at_rd[15:clogb2(TSF_N_FOREACH_SFC)] + ofm_row_final_res_cal_round_n) >= 
-				ofm_row_final_res_len[15:clogb2(TSF_N_FOREACH_SFC)]
-		);
+		(col_cnt_at_rd[15:clogb2(TSF_N_FOREACH_SFC)] >= ofm_row_final_res_len_sub_cal_round_n);
 	assign fnl_res_valid_s0 = 
 		aclken & 
 		mid_res_line_buf_empty_n & 

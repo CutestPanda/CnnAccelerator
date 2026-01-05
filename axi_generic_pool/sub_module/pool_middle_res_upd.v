@@ -475,7 +475,7 @@ module pool_middle_res_upd #(
 	reg signed[31:0] fp_align_rsh_new_res; // 对阶后的新结果(Q30)
 	reg signed[7:0] fp_align_rsh_exp; // 对阶后的指数(在[-126, 127]范围内)
 	reg signed[4:0] fp_align_rsh_new_res_exp; // 延迟2clk的新结果的指数(在[-14, 15]范围内)
-	reg signed[11:0] fp_align_rsh_new_res_mts; // 延迟2clk的新结果的补码形式尾数(Q10)
+	(*dont_touch="true"*)reg signed[30:0] fp_align_rsh_new_res_mts; // 延迟2clk的新结果的补码形式尾数(Q29)
 	// [尾数求和]
 	wire fp_added_in_vld;
 	wire fp_added_in_is_first_item;
@@ -701,7 +701,7 @@ module pool_middle_res_upd #(
 				fp_pre_align_exp;
 		end
 	end
-	// 延迟2clk的新结果的指数(在[-14, 15]范围内), 延迟2clk的新结果的补码形式尾数(Q10)
+	// 延迟2clk的新结果的指数(在[-14, 15]范围内), 延迟2clk的新结果的补码形式尾数(Q29)
 	always @(posedge aclk)
 	begin
 		if(
@@ -711,7 +711,7 @@ module pool_middle_res_upd #(
 		)
 		begin
 			fp_align_rsh_new_res_exp <= # SIM_DELAY fp_pre_align_new_res_exp;
-			fp_align_rsh_new_res_mts <= # SIM_DELAY fp_pre_align_new_res_mts;
+			fp_align_rsh_new_res_mts <= # SIM_DELAY {fp_pre_align_new_res_mts, 19'd0};
 		end
 	end
 	
@@ -724,25 +724,21 @@ module pool_middle_res_upd #(
 			(~fp_added_in_is_zero_sfc)
 		)
 		begin
-			if(
-				((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
-				((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25])
-			)
-			begin
-				fp_added_exp <= # SIM_DELAY 
-					{{3{fp_align_rsh_new_res_exp[4]}}, fp_align_rsh_new_res_exp[4:0]};
-				
-				fp_added_mts <= # SIM_DELAY 
-					{fp_align_rsh_new_res_mts[11], fp_align_rsh_new_res_mts[11:0], 19'd0};
-			end
-			else
-			begin
-				fp_added_exp <= # SIM_DELAY 
+			fp_added_exp <= # SIM_DELAY 
+				(
+					((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
+					((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25])
+				) ? 
+					{{3{fp_align_rsh_new_res_exp[4]}}, fp_align_rsh_new_res_exp[4:0]}:
 					fp_align_rsh_exp;
-				
-				fp_added_mts <= # SIM_DELAY 
+			
+			fp_added_mts <= # SIM_DELAY 
+				(
+					((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
+					((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25])
+				) ? 
+					{fp_align_rsh_new_res_mts[30], fp_align_rsh_new_res_mts[30:0]}:
 					{shared_adder0_res[25:0], fp_align_rsh_org_res[6:1] | fp_align_rsh_new_res[6:1]};
-			end
 		end
 	end
 	

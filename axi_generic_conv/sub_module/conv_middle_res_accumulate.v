@@ -83,12 +83,15 @@ module conv_middle_res_accumulate #(
 	wire signed[36:0] adder_0_op1; // 操作数1
 	wire signed[31:0] adder_0_op2; // 操作数2
 	wire adder_0_ce; // 计算使能
-	reg signed[37:0] adder_0_out; // 计算结果
+	wire signed[37:0] adder_0_res; // 计算结果(组合逻辑输出)
+	reg signed[37:0] adder_0_out; // 计算结果(寄存器输出)
+	
+	assign adder_0_res = adder_0_op1 + adder_0_op2;
 	
 	always @(posedge aclk)
 	begin
 		if(adder_0_ce)
-			adder_0_out <= # SIM_DELAY adder_0_op1 + adder_0_op2;
+			adder_0_out <= # SIM_DELAY adder_0_res;
 	end
 	
 	/**
@@ -360,8 +363,11 @@ module conv_middle_res_accumulate #(
 	// 累加计算(第3级流水线)
 	reg signed[36:0] acmlt_frac_exp_lg_fp16_d1; // 延迟1clk的绝对指数更大的浮点数的尾数
 	reg signed[8:0] acmlt_exp_larger_fp16_d1; // 延迟1clk的max(原中间结果的绝对指数, 待累加数的绝对指数)
+	wire signed[37:0] acmlt_nml_s0_frac_high38; // 高38位待标准化尾数
+	wire[32:0] acmlt_nml_s0_frac_high33_rvs; // 颠倒的高33位待标准化尾数
 	reg acmlt_is_org_mid_res_exp_lth_in_fp16_d2; // 延迟2clk的(原中间结果的绝对指数 < 待累加数的绝对指数)(标志)
 	reg acmlt_in_first_item_fp16_d3; // 延迟3clk的是否第1项(标志)
+	reg[31:0] acmlt_nml_s0_frac_highest_num_bit_pos_onehot; // 待标准化尾数最高数值位的位置独热码
 	// 累加计算(第4级流水线)
 	wire signed[60:0] acmlt_frac_sum; // 求和后的尾数(Q23)
 	reg[39:0] acmlt_frac_shifted_fp16; // 移出的尾数
@@ -369,8 +375,6 @@ module conv_middle_res_accumulate #(
 	reg signed[8:0] acmlt_exp_larger_fp16_d2; // 延迟2clk的max(原中间结果的绝对指数, 待累加数的绝对指数)
 	reg acmlt_in_first_item_fp16_d4; // 延迟4clk的是否第1项(标志)
 	// 累加计算(第5级流水线)
-	wire[32:0] acmlt_nml_s1_i_frac_high33_rvs; // 颠倒的高33位待标准化尾数
-	wire[31:0] acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot; // 待标准化尾数最高数值位的位置独热码
 	wire[5:0] acmlt_nml_s1_i_frac_arsh_n; // 本轮标准化作算术右移的位数
 	wire signed[60:0] acmlt_nml_s1_i_frac_arsh; // 本轮标准化作算术右移后的尾数(Q23)
 	reg signed[28:0] acmlt_frac_nml_s1; // 标准化阶段1后的尾数(Q23)
@@ -424,77 +428,61 @@ module conv_middle_res_accumulate #(
 			{{7{acmlt_frac_exp_lg_fp16_d1[24]}}, acmlt_frac_exp_lg_fp16_d1[24:0]}; // 原中间结果的绝对指数 >= 待累加数的绝对指数
 	assign adder_0_ce_fp16 = aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3 & (~acmlt_in_first_item_fp16_d3);
 	
+	assign acmlt_nml_s0_frac_high38 = 
+		acmlt_in_first_item_fp16_d3 ? 
+			{acmlt_frac_exp_lg_fp16_d1[36], acmlt_frac_exp_lg_fp16_d1}:
+			adder_0_res;
+	assign acmlt_nml_s0_frac_high33_rvs = {
+		acmlt_nml_s0_frac_high38[5], acmlt_nml_s0_frac_high38[6], acmlt_nml_s0_frac_high38[7], acmlt_nml_s0_frac_high38[8],
+		acmlt_nml_s0_frac_high38[9], acmlt_nml_s0_frac_high38[10], acmlt_nml_s0_frac_high38[11], acmlt_nml_s0_frac_high38[12],
+		acmlt_nml_s0_frac_high38[13], acmlt_nml_s0_frac_high38[14], acmlt_nml_s0_frac_high38[15], acmlt_nml_s0_frac_high38[16],
+		acmlt_nml_s0_frac_high38[17], acmlt_nml_s0_frac_high38[18], acmlt_nml_s0_frac_high38[19], acmlt_nml_s0_frac_high38[20],
+		acmlt_nml_s0_frac_high38[21], acmlt_nml_s0_frac_high38[22], acmlt_nml_s0_frac_high38[23], acmlt_nml_s0_frac_high38[24],
+		acmlt_nml_s0_frac_high38[25], acmlt_nml_s0_frac_high38[26], acmlt_nml_s0_frac_high38[27], acmlt_nml_s0_frac_high38[28],
+		acmlt_nml_s0_frac_high38[29], acmlt_nml_s0_frac_high38[30], acmlt_nml_s0_frac_high38[31], acmlt_nml_s0_frac_high38[32],
+		acmlt_nml_s0_frac_high38[33], acmlt_nml_s0_frac_high38[34], acmlt_nml_s0_frac_high38[35], acmlt_nml_s0_frac_high38[36],
+		acmlt_nml_s0_frac_high38[37]
+	};
+	
 	assign acmlt_frac_sum[60:23] = 
 		acmlt_in_first_item_fp16_d4 ? 
 			{acmlt_frac_exp_lg_fp16_d2[36], acmlt_frac_exp_lg_fp16_d2}:
 			adder_0_out;
 	assign acmlt_frac_sum[22:0] = acmlt_frac_shifted_fp16[39:17];
 	
-	assign acmlt_nml_s1_i_frac_high33_rvs = {
-		acmlt_frac_sum[28], acmlt_frac_sum[29], acmlt_frac_sum[30], acmlt_frac_sum[31],
-		acmlt_frac_sum[32], acmlt_frac_sum[33], acmlt_frac_sum[34], acmlt_frac_sum[35],
-		acmlt_frac_sum[36], acmlt_frac_sum[37], acmlt_frac_sum[38], acmlt_frac_sum[39],
-		acmlt_frac_sum[40], acmlt_frac_sum[41], acmlt_frac_sum[42], acmlt_frac_sum[43],
-		acmlt_frac_sum[44], acmlt_frac_sum[45], acmlt_frac_sum[46], acmlt_frac_sum[47],
-		acmlt_frac_sum[48], acmlt_frac_sum[49], acmlt_frac_sum[50], acmlt_frac_sum[51],
-		acmlt_frac_sum[52], acmlt_frac_sum[53], acmlt_frac_sum[54], acmlt_frac_sum[55],
-		acmlt_frac_sum[56], acmlt_frac_sum[57], acmlt_frac_sum[58], acmlt_frac_sum[59],
-		acmlt_frac_sum[60]
-	};
-	/*
-	当"待标准化尾数" < 0时, 从MSB开始找第1个"0"的位置;当"待标准化尾数" >= 0时, 从MSB开始找第1个"1"的位置
-	
-	((~A) + 1) & A就是第1个"1"的位置独热码, 比如:
-		---------------------------------
-		|   A   | A的补码 | A & A的补码 |
-		---------------------------------
-		| 1000  |  1000   |    1000     |
-		---------------------------------
-		| 0000  |  0000   |    0000     |
-		---------------------------------
-		| 0110  |  1010   |    0010     |
-		---------------------------------
-		| 0111  |  1001   |    0001     |
-		---------------------------------
-		| 0101  |  1011   |    0001     |
-		---------------------------------
-	*/
-	assign acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot = 
-		({32{acmlt_nml_s1_i_frac_high33_rvs[0]}} ^ acmlt_nml_s1_i_frac_high33_rvs[32:1]) & 
-		((~({32{acmlt_nml_s1_i_frac_high33_rvs[0]}} ^ acmlt_nml_s1_i_frac_high33_rvs[32:1])) + 1'b1);
 	assign acmlt_nml_s1_i_frac_arsh_n = 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[0]}}  & 6'd36) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[1]}}  & 6'd35) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[2]}}  & 6'd34) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[3]}}  & 6'd33) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[4]}}  & 6'd32) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[5]}}  & 6'd31) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[6]}}  & 6'd30) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[7]}}  & 6'd29) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[8]}}  & 6'd28) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[9]}}  & 6'd27) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[10]}} & 6'd26) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[11]}} & 6'd25) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[12]}} & 6'd24) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[13]}} & 6'd23) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[14]}} & 6'd22) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[15]}} & 6'd21) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[16]}} & 6'd20) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[17]}} & 6'd19) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[18]}} & 6'd18) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[19]}} & 6'd17) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[20]}} & 6'd16) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[21]}} & 6'd15) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[22]}} & 6'd14) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[23]}} & 6'd13) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[24]}} & 6'd12) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[25]}} & 6'd11) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[26]}} & 6'd10) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[27]}} &  6'd9) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[28]}} &  6'd8) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[29]}} &  6'd7) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[30]}} &  6'd6) | 
-		({6{acmlt_nml_s1_i_frac_highest_num_bit_pos_onehot[31]}} &  6'd5);
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[0]}}  & 6'd36) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[1]}}  & 6'd35) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[2]}}  & 6'd34) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[3]}}  & 6'd33) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[4]}}  & 6'd32) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[5]}}  & 6'd31) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[6]}}  & 6'd30) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[7]}}  & 6'd29) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[8]}}  & 6'd28) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[9]}}  & 6'd27) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[10]}} & 6'd26) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[11]}} & 6'd25) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[12]}} & 6'd24) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[13]}} & 6'd23) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[14]}} & 6'd22) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[15]}} & 6'd21) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[16]}} & 6'd20) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[17]}} & 6'd19) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[18]}} & 6'd18) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[19]}} & 6'd17) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[20]}} & 6'd16) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[21]}} & 6'd15) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[22]}} & 6'd14) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[23]}} & 6'd13) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[24]}} & 6'd12) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[25]}} & 6'd11) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[26]}} & 6'd10) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[27]}} &  6'd9) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[28]}} &  6'd8) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[29]}} &  6'd7) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[30]}} &  6'd6) | 
+		({6{acmlt_nml_s0_frac_highest_num_bit_pos_onehot[31]}} &  6'd5);
 	assign acmlt_nml_s1_i_frac_arsh = acmlt_frac_sum >>> acmlt_nml_s1_i_frac_arsh_n;
 	
 	assign acmlt_out_valid_fp16 = acmlt_in_valid_d7;
@@ -626,6 +614,35 @@ module conv_middle_res_accumulate #(
 	begin
 		if(aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3)
 			acmlt_frac_shifted_fp16 <= # SIM_DELAY {40{~acmlt_in_first_item_fp16_d3}} & ars_res[39:0];
+	end
+	
+	// 待标准化尾数最高数值位的位置独热码
+	always @(posedge aclk)
+	begin
+		if(aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3)
+		begin
+			/*
+			当"待标准化尾数" < 0时, 从MSB开始找第1个"0"的位置;当"待标准化尾数" >= 0时, 从MSB开始找第1个"1"的位置
+			
+			((~A) + 1) & A就是第1个"1"的位置独热码, 比如:
+				---------------------------------
+				|   A   | A的补码 | A & A的补码 |
+				---------------------------------
+				| 1000  |  1000   |    1000     |
+				---------------------------------
+				| 0000  |  0000   |    0000     |
+				---------------------------------
+				| 0110  |  1010   |    0010     |
+				---------------------------------
+				| 0111  |  1001   |    0001     |
+				---------------------------------
+				| 0101  |  1011   |    0001     |
+				---------------------------------
+			*/
+			acmlt_nml_s0_frac_highest_num_bit_pos_onehot <= # SIM_DELAY 
+				({32{acmlt_nml_s0_frac_high33_rvs[0]}} ^ acmlt_nml_s0_frac_high33_rvs[32:1]) & 
+				((~({32{acmlt_nml_s0_frac_high33_rvs[0]}} ^ acmlt_nml_s0_frac_high33_rvs[32:1])) + 1'b1);
+		end
 	end
 	
 	// 标准化阶段1后的尾数(Q23), 标准化阶段1后的绝对指数
