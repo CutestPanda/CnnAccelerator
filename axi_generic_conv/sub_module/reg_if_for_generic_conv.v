@@ -56,6 +56,8 @@ SOFTWARE.
 	|  info4   | 0x18/6  |7~0: BN与激活并行数 - 1        |      RO      |                                  |
 	|          |         |31~16: 最大的卷积核个数 - 1    |              |                                  |
 	--------------------------------------------------------------------------------------------------------
+	|  info5   | 0x1C/7  |3~0: 中间结果缓存时钟倍率      |      RO      |                                  |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
 	|  ctrl0   | 0x40/16 | 0: 使能加速器                 |      RW      |                                  |
@@ -194,6 +196,7 @@ BLK CTRL
 
 
 module reg_if_for_generic_conv #(
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter BN_SUPPORTED = 1'b1, // 是否支持批归一化处理
 	parameter LEAKY_RELU_SUPPORTED = 1'b1, // 是否支持Leaky-Relu激活
 	parameter SIGMOID_SUPPORTED = 1'b1, // 是否支持Sigmoid激活
@@ -488,7 +491,7 @@ module reg_if_for_generic_conv #(
 	end
 	
 	/**
-	寄存器(version, acc_name, info0, info1, info2, info3, info4)
+	寄存器(version, acc_name, info0, info1, info2, info3, info4, info5)
 	
 	--------------------------------------------------------------------------------------------------------
     | version  | 0x00/0  |31~0: 版本号                   |      RO      | 用日期表示的版本号,              |
@@ -516,6 +519,8 @@ module reg_if_for_generic_conv #(
 	|  info4   | 0x18/6  |7~0: BN与激活并行数 - 1        |      RO      |                                  |
 	|          |         |31~16: 最大的卷积核个数 - 1    |              |                                  |
 	--------------------------------------------------------------------------------------------------------
+	|  info5   | 0x1C/7  |3~0: 中间结果缓存时钟倍率      |      RO      |                                  |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire[31:0] version_r; // 版本号
 	wire[29:0] accelerator_type_r; // 加速器类型
@@ -532,6 +537,7 @@ module reg_if_for_generic_conv #(
 	wire[15:0] mid_res_buf_bank_depth_r; // 中间结果缓存BANK深度 - 1
 	wire[7:0] bn_act_prl_n_r; // BN与激活并行数 - 1
 	wire[15:0] max_kernal_n_r; // 最大的卷积核个数 - 1
+	wire[3:0] mid_res_buf_clk_rate_r; // 中间结果缓存时钟倍率
 	
 	assign version_r = {4'd0, 4'd3, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.30
 	assign accelerator_type_r = {5'd26, 5'd26, 5'd21, 5'd13, 5'd14, 5'd2}; // "conv\0\0"
@@ -548,6 +554,7 @@ module reg_if_for_generic_conv #(
 	assign mid_res_buf_bank_depth_r = RBUF_DEPTH - 1;
 	assign bn_act_prl_n_r = BN_ACT_PRL_N - 1;
 	assign max_kernal_n_r = MAX_KERNAL_N - 1;
+	assign mid_res_buf_clk_rate_r = MID_RES_BUF_CLK_RATE;
 	
 	/**
 	寄存器(ctrl0)
@@ -1410,6 +1417,7 @@ module reg_if_for_generic_conv #(
 				4: regs_dout <= # SIM_DELAY {max_fmbuf_rown_r[15:0], phy_buf_bank_depth_r[15:0]};
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
 				6: regs_dout <= # SIM_DELAY {max_kernal_n_r[15:0], 8'd0, bn_act_prl_n_r[7:0]};
+				7: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 8'd0, 4'd0, mid_res_buf_clk_rate_r[3:0]};
 				
 				16: regs_dout <= # SIM_DELAY {28'd0, en_bn_act_proc_r, en_pm_cnt_r, en_cal_sub_sys_r, en_accelerator_r};
 				

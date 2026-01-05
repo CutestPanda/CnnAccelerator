@@ -50,6 +50,8 @@ SOFTWARE.
 	| info3    | 0x14/5  |15~0: 中间结果缓存BANK数       |      RO      |                                  |
 	|          |         |31~16: 中间结果每个BANK的深度  |      RO      |                                  |
 	--------------------------------------------------------------------------------------------------------
+	| info4    | 0x18/6  |3~0: 中间结果缓存时钟倍率      |      RO      |                                  |
+	--------------------------------------------------------------------------------------------------------
 	********************************************************************************************************
 	--------------------------------------------------------------------------------------------------------
 	| ctrl0    | 0x40/16 |0: 启动表面行访问请求生成单元  |      WO      | 向该字段写1以启动                |
@@ -149,6 +151,7 @@ BLK CTRL
 
 
 module reg_if_for_generic_pool #(
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter MAX_POOL_SUPPORTED = 1'b1, // 是否支持最大池化
 	parameter AVG_POOL_SUPPORTED = 1'b0, // 是否支持平均池化
@@ -415,7 +418,7 @@ module reg_if_for_generic_pool #(
 	end
 	
 	/**
-	寄存器(version, acc_name, info0, info1, info2, info3)
+	寄存器(version, acc_name, info0, info1, info2, info3, info4)
 	
 	--------------------------------------------------------------------------------------------------------
     | version  | 0x00/0  |31~0: 版本号                   |      RO      | 用日期表示的版本号,              |
@@ -438,6 +441,8 @@ module reg_if_for_generic_pool #(
 	| info3    | 0x14/5  |15~0: 中间结果缓存BANK数       |      RO      |                                  |
 	|          |         |31~16: 中间结果每个BANK的深度  |      RO      |                                  |
 	--------------------------------------------------------------------------------------------------------
+	| info4    | 0x18/6  |3~0: 中间结果缓存时钟倍率      |      RO      |                                  |
+	--------------------------------------------------------------------------------------------------------
 	**/
 	wire[31:0] version_r; // 版本号
 	wire[29:0] acc_type_r; // 加速器类型
@@ -451,6 +456,7 @@ module reg_if_for_generic_pool #(
 	wire[15:0] phy_buffer_bank_depth_r; // 物理缓存每个BANK的深度
 	wire[15:0] mid_res_buf_bank_n_r; // 中间结果缓存BANK数
 	wire[15:0] mid_res_buf_bank_depth_r; // 中间结果每个BANK的深度
+	wire[3:0] mid_res_buf_clk_rate_r; // 中间结果缓存时钟倍率
 	
 	assign version_r = {4'd6, 4'd2, 4'd2, 4'd1, 4'd5, 4'd2, 4'd0, 4'd2}; // 2025.12.26
 	assign acc_type_r = {5'd26, 5'd26, 5'd11, 5'd14, 5'd14, 5'd15}; // "pool\0\0"
@@ -464,6 +470,7 @@ module reg_if_for_generic_pool #(
 	assign phy_buffer_bank_depth_r = CBUF_DEPTH_FOREACH_BANK;
 	assign mid_res_buf_bank_n_r = RBUF_BANK_N;
 	assign mid_res_buf_bank_depth_r = RBUF_DEPTH;
+	assign mid_res_buf_clk_rate_r = MID_RES_BUF_CLK_RATE;
 	
 	/**
 	寄存器(ctrl0)
@@ -1073,6 +1080,7 @@ module reg_if_for_generic_pool #(
 				3: regs_dout <= # SIM_DELAY {s2mm_strm_data_width_r[15:0], mm2s_strm_data_width_r[15:0]};
 				4: regs_dout <= # SIM_DELAY {phy_buffer_bank_depth_r[15:0], phy_buffer_bank_n_r[15:0]};
 				5: regs_dout <= # SIM_DELAY {mid_res_buf_bank_depth_r[15:0], mid_res_buf_bank_n_r[15:0]};
+				6: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 8'd0, 4'd0, mid_res_buf_clk_rate_r[3:0]};
 				
 				16: regs_dout <= # SIM_DELAY {8'd0, 8'd0, 4'd0, en_pm_cnt_r, to_use_post_mac_r, en_cal_sub_sys_r, en_accelerator_r, 8'd0};
 				

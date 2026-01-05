@@ -726,6 +726,9 @@ module generic_pool_sim #(
 	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
 	wire[RBUF_BANK_N*(ATOMIC_C*4*8+ATOMIC_C)-1:0] mid_res_mem_dout_b;
 	// 池化中间结果更新单元
+	wire pool_upd_aclk;
+	wire pool_upd_aresetn;
+	wire pool_upd_aclken;
 	// [更新单元组输入]
 	wire[ATOMIC_C*48-1:0] pool_upd_i_new_res; // 新结果
 	wire[ATOMIC_C*32-1:0] pool_upd_i_org_mid_res; // 原中间结果
@@ -773,9 +776,9 @@ module generic_pool_sim #(
 				.INFO_ALONG_WIDTH(ATOMIC_C+3),
 				.SIM_DELAY(SIM_DELAY)
 			)pool_middle_res_upd_u(
-				.aclk(aclk),
-				.aresetn(aresetn),
-				.aclken(1'b1),
+				.aclk(pool_upd_aclk),
+				.aresetn(pool_upd_aresetn),
+				.aclken(pool_upd_aclken),
 				
 				.pool_mode(pool_mode),
 				.calfmt(calfmt),
@@ -800,6 +803,7 @@ module generic_pool_sim #(
 	assign m_adapter_fm_axis_ready = s_axis_mid_res_buf_ready;
 	
 	conv_middle_res_acmlt_buf #(
+		.TSF_N_FOREACH_SFC(1),
 		.ATOMIC_K(ATOMIC_C),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
@@ -840,6 +844,9 @@ module generic_pool_sim #(
 		.mem_addr_b(mid_res_mem_addr_b),
 		.mem_dout_b(mid_res_mem_dout_b),
 		
+		.acmlt_aclk(pool_upd_aclk),
+		.acmlt_aresetn(pool_upd_aresetn),
+		.acmlt_aclken(pool_upd_aclken),
 		.acmlt_in_new_res(pool_upd_i_new_res),
 		.acmlt_in_org_mid_res(pool_upd_i_org_mid_res),
 		.acmlt_in_mask(pool_upd_i_mask),

@@ -52,6 +52,7 @@ AXIS MASTER/SLAVE
 
 module axi_generic_conv_core #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -217,6 +218,8 @@ module axi_generic_conv_core #(
 	input wire fnl_res_trans_blk_done,
 	
 	// (共享)中间结果缓存
+	// [使能信号]
+	output wire en_mid_res_buf_dup, // 使能中间结果缓存
 	// [运行时参数]
 	output wire[1:0] mid_res_buf_calfmt, // 运算数据格式
 	output wire[3:0] mid_res_buf_row_n_bufferable_dup, // 可缓存行数 - 1
@@ -404,6 +407,7 @@ module axi_generic_conv_core #(
 	assign en_bn_act_proc_dup = en_bn_act_proc;
 	
 	reg_if_for_generic_conv #(
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED ? 1'b1:1'b0),
@@ -774,6 +778,7 @@ module axi_generic_conv_core #(
 	conv_cal_sub_system #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.BN_ACT_CLK_RATE(1),
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -1031,6 +1036,7 @@ module axi_generic_conv_core #(
 	assign fnl_res_tr_req_gen_is_grp_conv_mode = is_grp_conv_mode;
 	assign fnl_res_tr_req_gen_n_foreach_group = n_foreach_group;
 	
+	assign en_mid_res_buf_dup = en_mac_array;
 	assign mid_res_buf_calfmt = calfmt;
 	assign mid_res_buf_row_n_bufferable_dup = mid_res_buf_row_n_bufferable;
 	assign mid_res_buf_bank_n_foreach_ofmap_row = conv_cal_sub_system_u.bank_n_foreach_ofmap_row;

@@ -9,6 +9,7 @@
         2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
         2025.12.22 1.10 为最大池化增加非0常量填充模式
         2025.12.26 1.11 修改ctrl0寄存器
+        2026.01.05 1.12 支持中间结果缓存时钟倍率
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -148,6 +149,8 @@ int axi_generic_pool_init(AxiGnrPoolHandler* handler, uint32_t baseaddr){
 		handler->property.performance_monitor_supported = 0;
 	}
 	handler->reg_region_ctrl->ctrl0 = 0x00000000;
+
+	handler->property.mid_res_buf_clk_rate = (uint8_t)(handler->reg_region_prop->info4 & 0x0000000F);
 
 	return 0;
 }
@@ -351,10 +354,10 @@ int axi_generic_pool_cfg_in_pool_mode(
 	if(fmbuf_row_n > (uint32_t)handler->property.max_fmbuf_row_n){
 		fmbuf_row_n = (uint32_t)handler->property.max_fmbuf_row_n;
 	}
-
+	
 	bank_n_foreach_mid_res_row =
-		ofmap_w / handler->property.mid_res_buf_bank_depth +
-		(ofmap_w % handler->property.mid_res_buf_bank_depth ? 1:0);
+		(ofmap_w * ((uint16_t)handler->property.mid_res_buf_clk_rate)) / handler->property.mid_res_buf_bank_depth +
+		((ofmap_w * ((uint16_t)handler->property.mid_res_buf_clk_rate)) % handler->property.mid_res_buf_bank_depth ? 1:0);
 	mid_res_buf_row_n_bufferable =
 		handler->property.mid_res_buf_bank_n / bank_n_foreach_mid_res_row;
 
@@ -510,8 +513,8 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 	}
 
 	bank_n_foreach_mid_res_row =
-		ofmap_w / handler->property.mid_res_buf_bank_depth +
-		(ofmap_w % handler->property.mid_res_buf_bank_depth ? 1:0);
+		(ofmap_w * ((uint16_t)handler->property.mid_res_buf_clk_rate)) / handler->property.mid_res_buf_bank_depth +
+		((ofmap_w * ((uint16_t)handler->property.mid_res_buf_clk_rate)) % handler->property.mid_res_buf_bank_depth ? 1:0);
 	mid_res_buf_row_n_bufferable =
 		handler->property.mid_res_buf_bank_n / bank_n_foreach_mid_res_row;
 

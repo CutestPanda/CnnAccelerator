@@ -14,6 +14,7 @@
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
         2025.12.26 1.23 修改ctrl0寄存器
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
+        2026.01.05 1.31 支持中间结果缓存时钟倍率
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -193,6 +194,8 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	}
 
 	axi_generic_conv_disable_cal_sub_sys(handler);
+
+	handler->property.mid_res_buf_clk_rate = (uint8_t)(handler->reg_region_prop->info5 & 0x0000000F);
 
 	return 0;
 }
@@ -554,8 +557,8 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 
 	uint32_t mid_res_item_n_foreach_row = ((uint32_t)cfg->cal_cfg.cal_round_n) * ofmap_width;
 	uint32_t bank_n_foreach_mid_res_row =
-		mid_res_item_n_foreach_row / handler->property.mid_res_buf_bank_depth +
-		(mid_res_item_n_foreach_row % handler->property.mid_res_buf_bank_depth ? 1:0);
+		(mid_res_item_n_foreach_row * ((uint32_t)handler->property.mid_res_buf_clk_rate)) / handler->property.mid_res_buf_bank_depth +
+		((mid_res_item_n_foreach_row * ((uint32_t)handler->property.mid_res_buf_clk_rate)) % handler->property.mid_res_buf_bank_depth ? 1:0);
 	uint32_t mid_res_buf_row_n_bufferable = handler->property.mid_res_buf_bank_n / bank_n_foreach_mid_res_row;
 
 	if(mid_res_buf_row_n_bufferable == 0){

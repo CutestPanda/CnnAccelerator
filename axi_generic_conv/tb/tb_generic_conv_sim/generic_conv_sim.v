@@ -43,6 +43,7 @@ SOFTWARE.
 module generic_conv_sim #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -494,6 +495,9 @@ module generic_conv_sim #(
 	// BN与激活单元时钟和复位
 	wire bn_act_aclk;
 	wire bn_act_aresetn;
+	// 中间结果缓存时钟和复位
+	wire mid_res_buf_aclk;
+	wire mid_res_buf_aresetn;
 	// 特征图切块信息(AXIS从机)
 	wire[7:0] s_fm_cake_info_axis_data; // {保留(4bit), 每个切片里的有效表面行数(4bit)}
 	wire s_fm_cake_info_axis_valid;
@@ -598,10 +602,13 @@ module generic_conv_sim #(
 	assign mac_array_aresetn = aresetn;
 	assign bn_act_aclk = aclk;
 	assign bn_act_aresetn = aresetn;
+	assign mid_res_buf_aclk = aclk;
+	assign mid_res_buf_aresetn = aresetn;
 	
 	conv_cal_sub_system #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
@@ -626,6 +633,9 @@ module generic_conv_sim #(
 		.bn_act_aclk(bn_act_aclk),
 		.bn_act_aresetn(bn_act_aresetn),
 		.bn_act_aclken(1'b1),
+		.mid_res_buf_aclk(mid_res_buf_aclk),
+		.mid_res_buf_aresetn(mid_res_buf_aresetn),
+		.mid_res_buf_aclken(1'b1),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -978,7 +988,7 @@ module generic_conv_sim #(
 		.clk_b(bn_mem_clk_b),
 		
 		.ena(1'b1),
-		.wea(bn_mem_wen_a),
+		.wea({8{bn_mem_wen_a}}),
 		.addra(bn_mem_addr_a),
 		.dina(bn_mem_din_a),
 		.douta(),

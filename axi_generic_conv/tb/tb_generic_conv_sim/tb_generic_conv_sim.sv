@@ -67,7 +67,6 @@ module tb_generic_conv_sim();
 	parameter integer RBUF_DEPTH = 512; // 中间结果缓存MEM深度(16 | ...)
 	
 	配置参数#3:
-	parameter integer MAC_ARRAY_CLK_RATE = 2; // 计算核心时钟倍率(>=1)
 	parameter integer ATOMIC_K = 16; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 16; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -83,9 +82,10 @@ module tb_generic_conv_sim();
 	*/
 	parameter integer MAC_ARRAY_CLK_RATE = 1; // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1; // BN与激活单元的时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1; // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ATOMIC_K = 16; // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 16; // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
-	parameter integer BN_ACT_PRL_N = 1; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
+	parameter integer BN_ACT_PRL_N = 2; // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer MAX_CAL_ROUND = 2; // 最大的计算轮次(1~16)
 	parameter integer STREAM_DATA_WIDTH = 64; // DMA数据流的位宽(32 | 64 | 128 | 256)
 	parameter integer FNL_RES_DATA_WIDTH = 64; // 最终结果数据流的位宽(32 | 64 | 128 | 256)
@@ -502,6 +502,7 @@ module tb_generic_conv_sim();
 	generic_conv_sim #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),

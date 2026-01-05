@@ -50,6 +50,7 @@ AXIS MASTER/SLAVE
 
 
 module axi_generic_pool_core #(
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer MAX_POOL_SUPPORTED = 1, // 是否支持最大池化
 	parameter integer AVG_POOL_SUPPORTED = 0, // 是否支持平均池化
@@ -156,6 +157,8 @@ module axi_generic_pool_core #(
 	input wire fnl_res_tr_req_gen_blk_done,
 	
 	// (共享)中间结果缓存
+	// [使能信号]
+	output wire en_mid_res_buf_dup, // 使能中间结果缓存
 	// [运行时参数]
 	output wire[1:0] mid_res_buf_calfmt, // 运算数据格式
 	output wire[3:0] mid_res_buf_row_n_bufferable_dup, // 可缓存行数 - 1
@@ -324,6 +327,7 @@ module axi_generic_pool_core #(
 	assign en_bn_act_proc_dup = en_post_mac;
 	
 	reg_if_for_generic_pool #(
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.ACCELERATOR_ID(ACCELERATOR_ID),
 		.MAX_POOL_SUPPORTED(MAX_POOL_SUPPORTED ? 1'b1:1'b0),
 		.AVG_POOL_SUPPORTED(AVG_POOL_SUPPORTED ? 1'b1:1'b0),
@@ -430,10 +434,13 @@ module axi_generic_pool_core #(
 	);
 	
 	/** 补充运行时参数 **/
+	wire[15:0] ofmap_w_async_clk_considered; // 输出特征图宽度 - 1
 	wire[15:0] ofmap_w_for_adapter; // 对适配器来说的"输出特征图宽度 - 1"
 	wire[15:0] ofmap_h_for_sfc_row_access; // 对池化表面行缓存访问控制单元来说的"输出特征图高度 - 1"
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的中间结果缓存MEM个数
 	wire[1:0] post_mac_calfmt; // 后乘加处理的数据格式
+	
+	assign ofmap_w_async_clk_considered = (ofmap_w * MID_RES_BUF_CLK_RATE) | (MID_RES_BUF_CLK_RATE - 1);
 	
 	// 提示: 上采样水平复制量(upsample_horizontal_n)恒为1时, 始终为"输出特征图宽度 - 1"(ofmap_w)即可
 	assign ofmap_w_for_adapter = 
@@ -446,7 +453,7 @@ module axi_generic_pool_core #(
 			ext_ifmap_h:
 			ofmap_h;
 	assign bank_n_foreach_ofmap_row = 
-		(ofmap_w[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
+		(ofmap_w_async_clk_considered[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	assign post_mac_calfmt = 
 		(calfmt == CAL_FMT_INT8)  ? POST_MAC_CAL_FMT_INT16:
 		(calfmt == CAL_FMT_INT16) ? POST_MAC_CAL_FMT_INT32:
@@ -814,12 +821,13 @@ module axi_generic_pool_core #(
 	assign fnl_res_tr_req_gen_is_grp_conv_mode = 1'b0;
 	assign fnl_res_tr_req_gen_en_send_sub_row_msg = 1'b0;
 	
+	assign en_mid_res_buf_dup = en_adapter;
 	assign mid_res_buf_calfmt = calfmt;
 	assign mid_res_buf_row_n_bufferable_dup = mid_res_buf_row_n_bufferable;
 	assign mid_res_buf_bank_n_foreach_ofmap_row = bank_n_foreach_ofmap_row;
 	assign mid_res_buf_max_upd_latency = 2 + 6;
 	assign mid_res_buf_en_cal_round_ext = 1'b0;
-	assign mid_res_buf_ofmap_w = ofmap_w;
+	assign mid_res_buf_ofmap_w = ofmap_w_async_clk_considered;
 	assign mid_res_buf_pool_mode = pool_mode;
 	
 	assign bn_act_calfmt = post_mac_calfmt;

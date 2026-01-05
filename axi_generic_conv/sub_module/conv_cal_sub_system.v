@@ -62,6 +62,7 @@ module conv_cal_sub_system #(
 	// [子系统配置参数]
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -97,6 +98,10 @@ module conv_cal_sub_system #(
 	input wire bn_act_aclk,
 	input wire bn_act_aresetn,
 	input wire bn_act_aclken,
+	// 中间结果缓存时钟和复位
+	input wire mid_res_buf_aclk,
+	input wire mid_res_buf_aresetn,
+	input wire mid_res_buf_aclken,
 	
 	// 计算子系统控制/状态
 	// [物理特征图表面行适配器]
@@ -307,10 +312,13 @@ module conv_cal_sub_system #(
 	localparam CAL_FMT_FP16 = 2'b10;
 	
 	/** 补充运行时参数 **/
+	wire[15:0] mid_res_item_n_foreach_row_async_clk_considered; // 每个输出特征图表面行的中间结果项数 - 1
 	wire[3:0] kernal_w; // (膨胀前)卷积核宽度 - 1
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的缓存MEM个数
 	wire[1:0] bn_act_calfmt; // BN与激活处理的数据格式
 	
+	assign mid_res_item_n_foreach_row_async_clk_considered = 
+		(mid_res_item_n_foreach_row * MID_RES_BUF_CLK_RATE) | (MID_RES_BUF_CLK_RATE - 1);
 	assign kernal_w = 
 		(
 			(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
@@ -321,7 +329,7 @@ module conv_cal_sub_system #(
 											 4'd11
 	    ) - 1;
 	assign bank_n_foreach_ofmap_row = 
-		(mid_res_item_n_foreach_row[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
+		(mid_res_item_n_foreach_row_async_clk_considered[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	assign bn_act_calfmt = 
 		(calfmt == CAL_FMT_INT8)  ? BN_ACT_CAL_FMT_INT16:
 		(calfmt == CAL_FMT_INT16) ? BN_ACT_CAL_FMT_INT32:
@@ -563,22 +571,25 @@ module conv_cal_sub_system #(
 	wire m_axis_mid_res_buf_valid;
 	wire m_axis_mid_res_buf_ready;
 	// 中间结果累加单元组
+	wire acmlt_aclk;
+	wire acmlt_aresetn;
+	wire acmlt_aclken;
 	// [累加单元组输入]
-	wire[ATOMIC_K*48-1:0] acmlt_in_new_res; // 新结果
-	wire[ATOMIC_K*32-1:0] acmlt_in_org_mid_res; // 原中间结果
-	wire[ATOMIC_K+2-1:0] acmlt_in_info_along[0:ATOMIC_K-1]; // 随路数据
-	wire[ATOMIC_K-1:0] acmlt_in_mask; // 项掩码
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*48-1:0] acmlt_in_new_res; // 新结果
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*32-1:0] acmlt_in_org_mid_res; // 原中间结果
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE+2-1:0] acmlt_in_info_along[0:ATOMIC_K/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_in_mask; // 项掩码
 	wire acmlt_in_first_item; // 是否第1项(标志)
 	wire acmlt_in_last_grp; // 是否最后1组(标志)
 	wire acmlt_in_last_res; // 本行最后1个中间结果(标志)
-	wire[ATOMIC_K-1:0] acmlt_in_valid; // 输入有效指示
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_in_valid; // 输入有效指示
 	// [累加单元组输出]
-	wire[ATOMIC_K*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
-	wire[ATOMIC_K+2-1:0] acmlt_out_info_along[0:ATOMIC_K-1]; // 随路数据
-	wire[ATOMIC_K-1:0] acmlt_out_mask; // 输出项掩码
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE+2-1:0] acmlt_out_info_along[0:ATOMIC_K/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_out_mask; // 输出项掩码
 	wire acmlt_out_last_grp; // 是否最后1组(标志)
 	wire acmlt_out_last_res; // 本行最后1个中间结果(标志)
-	wire[ATOMIC_K-1:0] acmlt_out_valid; // 输出有效指示
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_out_valid; // 输出有效指示
 	
 	assign s_axis_mid_res_buf_data = m_axis_pkt_out_data;
 	assign s_axis_mid_res_buf_keep = m_axis_pkt_out_keep;
@@ -591,23 +602,23 @@ module conv_cal_sub_system #(
 	
 	genvar acmlt_i;
 	generate
-		for(acmlt_i = 0;acmlt_i < ATOMIC_K;acmlt_i = acmlt_i + 1)
+		for(acmlt_i = 0;acmlt_i < ATOMIC_K/MID_RES_BUF_CLK_RATE;acmlt_i = acmlt_i + 1)
 		begin:acmlt_blk
 			assign acmlt_in_info_along[acmlt_i] = 
 				(acmlt_i == 0) ? 
 					{acmlt_in_last_res, acmlt_in_last_grp, acmlt_in_mask}:
-					{(ATOMIC_K+2){1'bx}};
+					{(ATOMIC_K/MID_RES_BUF_CLK_RATE+2){1'bx}};
 			
 			if(USE_EXT_MID_RES_BUF == "false")
 			begin
 				conv_middle_res_accumulate #(
 					.EN_SMALL_FP32(EN_SMALL_FP32),
-					.INFO_ALONG_WIDTH(ATOMIC_K+2),
+					.INFO_ALONG_WIDTH(ATOMIC_K/MID_RES_BUF_CLK_RATE+2),
 					.SIM_DELAY(SIM_DELAY)
 				)conv_middle_res_accumulate_u(
-					.aclk(aclk),
-					.aresetn(aresetn),
-					.aclken(aclken),
+					.aclk(acmlt_aclk),
+					.aresetn(acmlt_aresetn),
+					.aclken(acmlt_aclken),
 					
 					.calfmt(calfmt),
 					
@@ -626,7 +637,7 @@ module conv_cal_sub_system #(
 			else
 			begin
 				assign acmlt_out_data[acmlt_i*32+31:acmlt_i*32+0] = 32'dx;
-				assign acmlt_out_info_along[acmlt_i] = {(ATOMIC_K+2){1'bx}};
+				assign acmlt_out_info_along[acmlt_i] = {(ATOMIC_K/MID_RES_BUF_CLK_RATE+2){1'bx}};
 				assign acmlt_out_valid[acmlt_i] = 1'b0;
 			end
 		end
@@ -649,63 +660,139 @@ module conv_cal_sub_system #(
 			
 			assign s_axis_ext_fnl_res_ready = 1'b1;
 			
-			conv_middle_res_acmlt_buf #(
-				.ATOMIC_K(ATOMIC_K),
-				.RBUF_BANK_N(RBUF_BANK_N),
-				.RBUF_DEPTH(RBUF_DEPTH),
-				.INFO_ALONG_WIDTH(1),
-				.SIM_DELAY(SIM_DELAY)
-			)conv_middle_res_acmlt_buf_u(
-				.aclk(aclk),
-				.aresetn(aresetn),
-				.aclken(aclken),
-				
-				.calfmt(calfmt),
-				.row_n_bufferable(mid_res_buf_row_n_bufferable),
-				.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
-				.max_upd_latency(2 + 7),
-				.en_cal_round_ext(1'b1),
-				.ofmap_w(16'dx),
-				
-				.s_axis_mid_res_data(s_axis_mid_res_buf_data),
-				.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
-				.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
-				.s_axis_mid_res_last(s_axis_mid_res_buf_last),
-				.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
-				.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
-				
-				.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
-				.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
-				.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
-				.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
-				.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
-				.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
-				
-				.mem_clk_a(mid_res_mem_clk_a),
-				.mem_wen_a(mid_res_mem_wen_a),
-				.mem_addr_a(mid_res_mem_addr_a),
-				.mem_din_a(mid_res_mem_din_a),
-				.mem_clk_b(mid_res_mem_clk_b),
-				.mem_ren_b(mid_res_mem_ren_b),
-				.mem_addr_b(mid_res_mem_addr_b),
-				.mem_dout_b(mid_res_mem_dout_b),
-				
-				.acmlt_in_new_res(acmlt_in_new_res),
-				.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
-				.acmlt_in_mask(acmlt_in_mask),
-				.acmlt_in_first_item(acmlt_in_first_item),
-				.acmlt_in_last_grp(acmlt_in_last_grp),
-				.acmlt_in_last_res(acmlt_in_last_res),
-				.acmlt_in_info_along(),
-				.acmlt_in_valid(acmlt_in_valid),
-				
-				.acmlt_out_data(acmlt_out_data),
-				.acmlt_out_mask(acmlt_out_mask),
-				.acmlt_out_last_grp(acmlt_out_last_grp),
-				.acmlt_out_last_res(acmlt_out_last_res),
-				.acmlt_out_to_upd_mem(1'b1),
-				.acmlt_out_valid(acmlt_out_valid)
-			);
+			if(MID_RES_BUF_CLK_RATE == 1)
+			begin
+				conv_middle_res_acmlt_buf #(
+					.TSF_N_FOREACH_SFC(1),
+					.ATOMIC_K(ATOMIC_K),
+					.RBUF_BANK_N(RBUF_BANK_N),
+					.RBUF_DEPTH(RBUF_DEPTH),
+					.INFO_ALONG_WIDTH(1),
+					.SIM_DELAY(SIM_DELAY)
+				)conv_middle_res_acmlt_buf_u0(
+					.aclk(aclk),
+					.aresetn(aresetn),
+					.aclken(aclken),
+					
+					.calfmt(calfmt),
+					.row_n_bufferable(mid_res_buf_row_n_bufferable),
+					.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
+					.max_upd_latency(2 + 7),
+					.en_cal_round_ext(1'b1),
+					.ofmap_w(16'dx),
+					
+					.s_axis_mid_res_data(s_axis_mid_res_buf_data),
+					.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
+					.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
+					.s_axis_mid_res_last(s_axis_mid_res_buf_last),
+					.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
+					.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
+					
+					.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
+					.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
+					.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
+					.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
+					.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
+					.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
+					
+					.mem_clk_a(mid_res_mem_clk_a),
+					.mem_wen_a(mid_res_mem_wen_a),
+					.mem_addr_a(mid_res_mem_addr_a),
+					.mem_din_a(mid_res_mem_din_a),
+					.mem_clk_b(mid_res_mem_clk_b),
+					.mem_ren_b(mid_res_mem_ren_b),
+					.mem_addr_b(mid_res_mem_addr_b),
+					.mem_dout_b(mid_res_mem_dout_b),
+					
+					.acmlt_aclk(acmlt_aclk),
+					.acmlt_aresetn(acmlt_aresetn),
+					.acmlt_aclken(acmlt_aclken),
+					.acmlt_in_new_res(acmlt_in_new_res),
+					.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+					.acmlt_in_mask(acmlt_in_mask),
+					.acmlt_in_first_item(acmlt_in_first_item),
+					.acmlt_in_last_grp(acmlt_in_last_grp),
+					.acmlt_in_last_res(acmlt_in_last_res),
+					.acmlt_in_info_along(),
+					.acmlt_in_valid(acmlt_in_valid),
+					
+					.acmlt_out_data(acmlt_out_data),
+					.acmlt_out_mask(acmlt_out_mask),
+					.acmlt_out_last_grp(acmlt_out_last_grp),
+					.acmlt_out_last_res(acmlt_out_last_res),
+					.acmlt_out_to_upd_mem(1'b1),
+					.acmlt_out_valid(acmlt_out_valid)
+				);
+			end
+			else
+			begin
+				async_conv_middle_res_acmlt_buf #(
+					.BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+					.ATOMIC_K(ATOMIC_K),
+					.RBUF_BANK_N(RBUF_BANK_N),
+					.RBUF_DEPTH(RBUF_DEPTH),
+					.INFO_ALONG_WIDTH(1),
+					.SIM_DELAY(SIM_DELAY)
+				)conv_middle_res_acmlt_buf_u1(
+					.aclk(aclk),
+					.aresetn(aresetn),
+					.aclken(aclken),
+					.mid_res_buf_aclk(mid_res_buf_aclk),
+					.mid_res_buf_aresetn(mid_res_buf_aresetn),
+					.mid_res_buf_aclken(mid_res_buf_aclken),
+					
+					.runtime_params_vld(en_mac_array),
+					
+					.calfmt(calfmt),
+					.row_n_bufferable(mid_res_buf_row_n_bufferable),
+					.bank_n_foreach_ofmap_row(bank_n_foreach_ofmap_row),
+					.max_upd_latency(2 + 7),
+					.en_cal_round_ext(1'b1),
+					.ofmap_w(16'dx),
+					
+					.s_axis_mid_res_data(s_axis_mid_res_buf_data),
+					.s_axis_mid_res_keep(s_axis_mid_res_buf_keep),
+					.s_axis_mid_res_user({1'b0, s_axis_mid_res_buf_user}),
+					.s_axis_mid_res_last(s_axis_mid_res_buf_last),
+					.s_axis_mid_res_valid(s_axis_mid_res_buf_valid),
+					.s_axis_mid_res_ready(s_axis_mid_res_buf_ready),
+					
+					.m_axis_fnl_res_data(m_axis_mid_res_buf_data),
+					.m_axis_fnl_res_keep(m_axis_mid_res_buf_keep),
+					.m_axis_fnl_res_user(m_axis_mid_res_buf_user),
+					.m_axis_fnl_res_last(m_axis_mid_res_buf_last),
+					.m_axis_fnl_res_valid(m_axis_mid_res_buf_valid),
+					.m_axis_fnl_res_ready(m_axis_mid_res_buf_ready),
+					
+					.mem_clk_a(mid_res_mem_clk_a),
+					.mem_wen_a(mid_res_mem_wen_a),
+					.mem_addr_a(mid_res_mem_addr_a),
+					.mem_din_a(mid_res_mem_din_a),
+					.mem_clk_b(mid_res_mem_clk_b),
+					.mem_ren_b(mid_res_mem_ren_b),
+					.mem_addr_b(mid_res_mem_addr_b),
+					.mem_dout_b(mid_res_mem_dout_b),
+					
+					.acmlt_aclk(acmlt_aclk),
+					.acmlt_aresetn(acmlt_aresetn),
+					.acmlt_aclken(acmlt_aclken),
+					.acmlt_in_new_res(acmlt_in_new_res),
+					.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+					.acmlt_in_mask(acmlt_in_mask),
+					.acmlt_in_first_item(acmlt_in_first_item),
+					.acmlt_in_last_grp(acmlt_in_last_grp),
+					.acmlt_in_last_res(acmlt_in_last_res),
+					.acmlt_in_info_along(),
+					.acmlt_in_valid(acmlt_in_valid),
+					
+					.acmlt_out_data(acmlt_out_data),
+					.acmlt_out_mask(acmlt_out_mask),
+					.acmlt_out_last_grp(acmlt_out_last_grp),
+					.acmlt_out_last_res(acmlt_out_last_res),
+					.acmlt_out_to_upd_mem(1'b1),
+					.acmlt_out_valid(acmlt_out_valid)
+				);
+			end
 		end
 		else
 		begin
@@ -737,9 +824,9 @@ module conv_cal_sub_system #(
 			assign mid_res_mem_ren_b = {RBUF_BANK_N{1'b0}};
 			assign mid_res_mem_addr_b = {(RBUF_BANK_N*16){1'bx}};
 			
-			assign acmlt_in_new_res = {(ATOMIC_K*48){1'bx}};
-			assign acmlt_in_org_mid_res = {(ATOMIC_K*32){1'bx}};
-			assign acmlt_in_mask = {ATOMIC_K{1'bx}};
+			assign acmlt_in_new_res = {(ATOMIC_K/MID_RES_BUF_CLK_RATE*48){1'bx}};
+			assign acmlt_in_org_mid_res = {(ATOMIC_K/MID_RES_BUF_CLK_RATE*32){1'bx}};
+			assign acmlt_in_mask = {(ATOMIC_K/MID_RES_BUF_CLK_RATE){1'bx}};
 			assign acmlt_in_first_item = 1'bx;
 			assign acmlt_in_last_grp = 1'bx;
 			assign acmlt_in_last_res = 1'bx;

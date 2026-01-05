@@ -50,11 +50,12 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/21
+日期: 2026/01/04
 ********************************************************************/
 
 
 module conv_middle_res_acmlt_buf #(
+	parameter integer TSF_N_FOREACH_SFC = 1, // 每个中间结果或最终结果表面的传输次数(1 | 2 | 4 | 8)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer RBUF_BANK_N = 8, // 缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 缓存MEM深度(16 | ...)
@@ -101,6 +102,9 @@ module conv_middle_res_acmlt_buf #(
 	input wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mem_dout_b,
 	
 	// 中间结果更新单元组
+	output wire acmlt_aclk,
+	output wire acmlt_aresetn,
+	output wire acmlt_aclken,
 	// [更新单元组输入]
 	output wire[ATOMIC_K*48-1:0] acmlt_in_new_res, // 新结果
 	output wire[ATOMIC_K*32-1:0] acmlt_in_org_mid_res, // 原中间结果
@@ -370,6 +374,7 @@ module conv_middle_res_acmlt_buf #(
 	// 虚拟行缓存填充向量
 	reg[RBUF_BANK_N-1:0] mid_res_line_buf_filled;
 	// 虚拟行缓存写端口
+	reg[TSF_N_FOREACH_SFC-1:0] tsf_cnt_at_wr; // 传输轮次计数器
 	reg[15:0] col_cnt_at_wr; // 列计数器
 	wire[15:0] col_cnt_at_wr_nxt; // 新的列计数器
 	reg[3:0] cal_round_n_cnt_at_wr; // 计算轮次计数器
@@ -404,6 +409,7 @@ module conv_middle_res_acmlt_buf #(
 	assign ofm_row_extra_msg_fifo_wen = 
 		aclken & en_cal_round_ext & 
 		s_axis_mid_res_valid & s_axis_mid_res_ready & 
+		tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & 
 		s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
 		s_axis_mid_res_last;
 	assign ofm_row_extra_msg_fifo_din[15:0] = 
@@ -426,7 +432,8 @@ module conv_middle_res_acmlt_buf #(
 	assign mid_res_last_grp_s0 = s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND];
 	assign mid_res_info_along_s0 = s_axis_mid_res_user[INFO_ALONG_WIDTH-1+S_AXIS_MID_RES_USER_INFO_ALONG:S_AXIS_MID_RES_USER_INFO_ALONG];
 	assign mid_res_new_item_s0 = s_axis_mid_res_data;
-	assign mid_res_last_s0 = s_axis_mid_res_last;
+	assign mid_res_last_s0 = 
+		tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & s_axis_mid_res_user[S_AXIS_MID_RES_USER_IS_LAST_CAL_ROUND] & s_axis_mid_res_last;
 	assign mid_res_valid_s0 = aclken & s_axis_mid_res_valid & s_axis_mid_res_ready;
 	
 	genvar mid_res_mask_s0_i;
@@ -439,7 +446,12 @@ module conv_middle_res_acmlt_buf #(
 	
 	assign fnl_res_is_last_sub_row_s0 = sub_row_cnt == ofm_row_final_res_cal_round_n;
 	assign fnl_res_sub_rid_s0 = sub_row_cnt;
-	assign fnl_res_last_s0 = (col_cnt_at_rd + ofm_row_final_res_cal_round_n) >= ofm_row_final_res_len;
+	assign fnl_res_last_s0 = 
+		((col_cnt_at_rd & (TSF_N_FOREACH_SFC - 1)) == (TSF_N_FOREACH_SFC - 1)) & 
+		(
+			(col_cnt_at_rd[15:clogb2(TSF_N_FOREACH_SFC)] + ofm_row_final_res_cal_round_n) >= 
+				ofm_row_final_res_len[15:clogb2(TSF_N_FOREACH_SFC)]
+		);
 	assign fnl_res_valid_s0 = 
 		aclken & 
 		mid_res_line_buf_empty_n & 
@@ -448,7 +460,7 @@ module conv_middle_res_acmlt_buf #(
 	assign col_cnt_at_wr_nxt = 
 		(s_axis_mid_res_valid & s_axis_mid_res_ready) ? 
 			(
-				s_axis_mid_res_last ? 
+				(tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & s_axis_mid_res_last) ? 
 					16'd0:
 					(col_cnt_at_wr + 1'b1)
 			):
@@ -457,7 +469,7 @@ module conv_middle_res_acmlt_buf #(
 	assign mid_res_line_buf_wen_at_wr = 
 		aclken & s_axis_mid_res_valid & s_axis_mid_res_ready & 
 		s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
-		s_axis_mid_res_last;
+		tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & s_axis_mid_res_last;
 	assign mid_res_line_buf_ren_at_wr = 
 		aclken & fnl_res_valid_s2 & fnl_res_ready_s2 & fnl_res_last_s2 & fnl_res_is_last_sub_row_s2;
 	assign mid_res_line_buf_full_n = ~(
@@ -473,8 +485,12 @@ module conv_middle_res_acmlt_buf #(
 		(fnl_res_valid_s0 & fnl_res_ready_s0) ? 
 			(
 				fnl_res_last_s0 ? 
-					(sub_row_cnt_nxt | 16'd0):
-					(col_cnt_at_rd + ofm_row_final_res_cal_round_n + 1'b1)
+					((sub_row_cnt_nxt | 16'd0) * TSF_N_FOREACH_SFC):
+					(
+						((col_cnt_at_rd & (TSF_N_FOREACH_SFC - 1)) == (TSF_N_FOREACH_SFC - 1)) ? 
+							((col_cnt_at_rd & (~(TSF_N_FOREACH_SFC - 1))) + ((ofm_row_final_res_cal_round_n + 1'b1) * TSF_N_FOREACH_SFC)):
+							(col_cnt_at_rd + 1'b1)
+					)
 			):
 			col_cnt_at_rd;
 	
@@ -541,6 +557,15 @@ module conv_middle_res_acmlt_buf #(
 			mid_res_upd_pipl_cid <= # SIM_DELAY col_cnt_at_wr;
 	end
 	
+	// 位于写端口的传输轮次计数器
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			tsf_cnt_at_wr <= 1;
+		else if(s_axis_mid_res_valid & s_axis_mid_res_ready)
+			tsf_cnt_at_wr <= # SIM_DELAY (tsf_cnt_at_wr << 1) | (tsf_cnt_at_wr >> (TSF_N_FOREACH_SFC-1));
+	end
+	
 	// 位于写端口的列计数器
 	always @(posedge aclk or negedge aresetn)
 	begin
@@ -558,7 +583,8 @@ module conv_middle_res_acmlt_buf #(
 		else if(
 			(~en_cal_round_ext) | 
 			(
-				s_axis_mid_res_valid & s_axis_mid_res_ready & s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
+				s_axis_mid_res_valid & s_axis_mid_res_ready & 
+				tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
 				(
 					((~cal_round_n_cnt_at_wr_locked) & (~s_axis_mid_res_user[S_AXIS_MID_RES_USER_IS_LAST_CAL_ROUND])) | 
 					s_axis_mid_res_last
@@ -579,7 +605,8 @@ module conv_middle_res_acmlt_buf #(
 		else if(
 			(~en_cal_round_ext) | 
 			(
-				s_axis_mid_res_valid & s_axis_mid_res_ready & s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
+				s_axis_mid_res_valid & s_axis_mid_res_ready & 
+				tsf_cnt_at_wr[TSF_N_FOREACH_SFC-1] & s_axis_mid_res_user[S_AXIS_MID_RES_USER_LAST_ROUND] & 
 				(
 					(~cal_round_n_cnt_at_wr_locked) | 
 					s_axis_mid_res_last
@@ -685,6 +712,10 @@ module conv_middle_res_acmlt_buf #(
 	end
 	
 	/** 卷积中间结果累加单元 **/
+	assign acmlt_aclk = aclk;
+	assign acmlt_aresetn = aresetn;
+	assign acmlt_aclken = aclken;
+	
 	assign acmlt_in_new_res = mid_res_new_item_s2;
 	assign acmlt_in_org_mid_res = mid_res_data_s2;
 	assign acmlt_in_mask = mid_res_mask_s2;
@@ -732,7 +763,7 @@ module conv_middle_res_acmlt_buf #(
 				(~mid_res_line_buf_filled[mem_i]) & 
 				acmlt_out_valid & acmlt_out_to_upd_mem & (upd_row_buffer_wsel == mem_i);
 			assign mem_addr_a[(mem_i+1)*16-1:mem_i*16] = 
-				mem_waddr | 16'h0000;
+				mem_waddr[clogb2(RBUF_DEPTH-1):0] | 16'h0000;
 			assign mem_din_a[(mem_i+1)*(32*ATOMIC_K+ATOMIC_K)-1:mem_i*(32*ATOMIC_K+ATOMIC_K)] = 
 				{acmlt_out_mask, acmlt_out_data};
 			
@@ -746,8 +777,8 @@ module conv_middle_res_acmlt_buf #(
 			assign mem_addr_b[(mem_i+1)*16-1:mem_i*16] = 
 				(
 					mid_res_line_buf_filled[mem_i] ? 
-						col_cnt_at_rd:
-						col_cnt_at_wr
+						col_cnt_at_rd[clogb2(RBUF_DEPTH-1):0]:
+						col_cnt_at_wr[clogb2(RBUF_DEPTH-1):0]
 				) | 16'h0000;
 		end
 	endgenerate

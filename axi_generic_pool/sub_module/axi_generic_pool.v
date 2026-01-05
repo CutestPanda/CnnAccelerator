@@ -53,6 +53,7 @@ AXIS MASTER/SLAVE
 
 module axi_generic_pool #(
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ACCELERATOR_ID = 0, // 加速器ID(0~3)
 	parameter integer MAX_POOL_SUPPORTED = 1, // 是否支持最大池化
 	parameter integer AVG_POOL_SUPPORTED = 0, // 是否支持平均池化
@@ -83,6 +84,9 @@ module axi_generic_pool #(
 	// BN与激活单元时钟和复位
 	input wire bn_act_aclk,
 	input wire bn_act_aresetn,
+	// 中间结果缓存时钟和复位
+	input wire mid_res_buf_aclk,
+	input wire mid_res_buf_aresetn,
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -214,6 +218,8 @@ module axi_generic_pool #(
 	wire fnl_res_tr_req_gen_blk_idle;
 	wire fnl_res_tr_req_gen_blk_done;
 	// (共享)中间结果缓存
+	// [使能信号]
+	wire en_mid_res_buf_dup; // 使能中间结果缓存
 	// [运行时参数]
 	wire[1:0] mid_res_buf_calfmt; // 运算数据格式
 	wire[3:0] mid_res_buf_row_n_bufferable_dup; // 可缓存行数 - 1
@@ -292,6 +298,7 @@ module axi_generic_pool #(
 	wire m_axis_ext_collector_ready;
 	
 	axi_generic_pool_core #(
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.ACCELERATOR_ID(ACCELERATOR_ID),
 		.MAX_POOL_SUPPORTED(MAX_POOL_SUPPORTED),
 		.AVG_POOL_SUPPORTED(AVG_POOL_SUPPORTED),
@@ -376,6 +383,7 @@ module axi_generic_pool #(
 		.fnl_res_tr_req_gen_blk_idle(fnl_res_tr_req_gen_blk_idle),
 		.fnl_res_tr_req_gen_blk_done(fnl_res_tr_req_gen_blk_done),
 		
+		.en_mid_res_buf_dup(en_mid_res_buf_dup),
 		.mid_res_buf_calfmt(mid_res_buf_calfmt),
 		.mid_res_buf_row_n_bufferable_dup(mid_res_buf_row_n_bufferable_dup),
 		.mid_res_buf_bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
@@ -728,24 +736,27 @@ module axi_generic_pool #(
 	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
 	wire[RBUF_BANK_N*(ATOMIC_C*4*8+ATOMIC_C)-1:0] mid_res_mem_dout_b;
 	// 池化中间结果更新单元
+	wire pool_upd_aclk;
+	wire pool_upd_aresetn;
+	wire pool_upd_aclken;
 	// [更新单元组输入]
-	wire[ATOMIC_C*48-1:0] pool_upd_i_new_res; // 新结果
-	wire[ATOMIC_C*32-1:0] pool_upd_i_org_mid_res; // 原中间结果
-	wire[3+ATOMIC_C-1:0] pool_upd_i_info_along[0:ATOMIC_C-1]; // 随路数据
-	wire[ATOMIC_C-1:0] pool_upd_i_mask; // 项掩码
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE*48-1:0] pool_upd_i_new_res; // 新结果
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE*32-1:0] pool_upd_i_org_mid_res; // 原中间结果
+	wire[3+ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_i_info_along[0:ATOMIC_C/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_i_mask; // 项掩码
 	wire pool_upd_i_first_item; // 是否第1项(标志)
 	wire pool_upd_i_last_grp; // 是否最后1组(标志)
 	wire pool_upd_i_last_res; // 本行最后1个中间结果(标志)
 	wire pool_upd_i_is_zero_sfc; // 是否空表面(标志)
-	wire[ATOMIC_C-1:0] pool_upd_i_valid; // 输入有效指示
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_i_valid; // 输入有效指示
 	// [更新单元组输出]
-	wire[ATOMIC_C*32-1:0] pool_upd_o_data; // 单精度浮点数或定点数
-	wire[3+ATOMIC_C-1:0] pool_upd_o_info_along[0:ATOMIC_C-1]; // 随路数据
-	wire[ATOMIC_C-1:0] pool_upd_o_mask; // 输出项掩码
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE*32-1:0] pool_upd_o_data; // 单精度浮点数或定点数
+	wire[3+ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_o_info_along[0:ATOMIC_C/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_o_mask; // 输出项掩码
 	wire pool_upd_o_last_grp; // 是否最后1组(标志)
 	wire pool_upd_o_last_res; // 本行最后1个中间结果(标志)
 	wire pool_upd_o_to_upd_mem; // 更新缓存MEM(标志)
-	wire[ATOMIC_C-1:0] pool_upd_o_valid; // 输出有效指示
+	wire[ATOMIC_C/MID_RES_BUF_CLK_RATE-1:0] pool_upd_o_valid; // 输出有效指示
 	// [性能监测]
 	reg[31:0] upd_grp_run_cnt; // 更新单元组运行周期数(计数器)
 	
@@ -768,67 +779,9 @@ module axi_generic_pool #(
 					32'd0;
 	end
 	
-	conv_middle_res_acmlt_buf #(
-		.ATOMIC_K(ATOMIC_C),
-		.RBUF_BANK_N(RBUF_BANK_N),
-		.RBUF_DEPTH(RBUF_DEPTH),
-		.INFO_ALONG_WIDTH(1),
-		.SIM_DELAY(SIM_DELAY)
-	)pool_middle_res_buf_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(1'b1),
-		
-		.calfmt(mid_res_buf_calfmt),
-		.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
-		.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
-		.max_upd_latency(mid_res_buf_max_upd_latency),
-		.en_cal_round_ext(mid_res_buf_en_cal_round_ext),
-		.ofmap_w(mid_res_buf_ofmap_w),
-		
-		.s_axis_mid_res_data(m_axis_ext_mid_res_data),
-		.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
-		.s_axis_mid_res_user(m_axis_ext_mid_res_user),
-		.s_axis_mid_res_last(m_axis_ext_mid_res_last),
-		.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
-		.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
-		
-		.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
-		.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
-		.m_axis_fnl_res_user(),
-		.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
-		.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
-		.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
-		
-		.mem_clk_a(mid_res_mem_clk_a),
-		.mem_wen_a(mid_res_mem_wen_a),
-		.mem_addr_a(mid_res_mem_addr_a),
-		.mem_din_a(mid_res_mem_din_a),
-		.mem_clk_b(mid_res_mem_clk_b),
-		.mem_ren_b(mid_res_mem_ren_b),
-		.mem_addr_b(mid_res_mem_addr_b),
-		.mem_dout_b(mid_res_mem_dout_b),
-		
-		.acmlt_in_new_res(pool_upd_i_new_res),
-		.acmlt_in_org_mid_res(pool_upd_i_org_mid_res),
-		.acmlt_in_mask(pool_upd_i_mask),
-		.acmlt_in_first_item(pool_upd_i_first_item),
-		.acmlt_in_last_grp(pool_upd_i_last_grp),
-		.acmlt_in_last_res(pool_upd_i_last_res),
-		.acmlt_in_info_along(pool_upd_i_is_zero_sfc),
-		.acmlt_in_valid(pool_upd_i_valid),
-		
-		.acmlt_out_data(pool_upd_o_data),
-		.acmlt_out_mask(pool_upd_o_mask),
-		.acmlt_out_last_grp(pool_upd_o_last_grp),
-		.acmlt_out_last_res(pool_upd_o_last_res),
-		.acmlt_out_to_upd_mem(pool_upd_o_to_upd_mem),
-		.acmlt_out_valid(pool_upd_o_valid[0])
-	);
-	
 	genvar mid_res_i;
 	generate
-		for(mid_res_i = 0;mid_res_i < ATOMIC_C;mid_res_i = mid_res_i + 1)
+		for(mid_res_i = 0;mid_res_i < ATOMIC_C/MID_RES_BUF_CLK_RATE;mid_res_i = mid_res_i + 1)
 		begin:mid_res_blk
 			assign pool_upd_i_info_along[mid_res_i] = 
 				(mid_res_i == 0) ? 
@@ -839,15 +792,15 @@ module axi_generic_pool #(
 						pool_upd_i_last_res,
 						pool_upd_i_mask
 					}:
-					{(3+ATOMIC_C){1'bx}};
+					{(3+ATOMIC_C/MID_RES_BUF_CLK_RATE){1'bx}};
 			
 			pool_middle_res_upd #(
-				.INFO_ALONG_WIDTH(ATOMIC_C+3),
+				.INFO_ALONG_WIDTH(ATOMIC_C/MID_RES_BUF_CLK_RATE+3),
 				.SIM_DELAY(SIM_DELAY)
 			)pool_middle_res_upd_u(
-				.aclk(aclk),
-				.aresetn(aresetn),
-				.aclken(1'b1),
+				.aclk(pool_upd_aclk),
+				.aresetn(pool_upd_aresetn),
+				.aclken(pool_upd_aclken),
 				
 				.pool_mode(mid_res_buf_pool_mode),
 				.calfmt(mid_res_buf_calfmt),
@@ -862,6 +815,140 @@ module axi_generic_pool #(
 				.pool_upd_out_data(pool_upd_o_data[mid_res_i*32+31:mid_res_i*32]),
 				.pool_upd_out_info_along(pool_upd_o_info_along[mid_res_i]),
 				.pool_upd_out_valid(pool_upd_o_valid[mid_res_i])
+			);
+		end
+		
+		if(MID_RES_BUF_CLK_RATE == 1)
+		begin
+			conv_middle_res_acmlt_buf #(
+				.TSF_N_FOREACH_SFC(1),
+				.ATOMIC_K(ATOMIC_C),
+				.RBUF_BANK_N(RBUF_BANK_N),
+				.RBUF_DEPTH(RBUF_DEPTH),
+				.INFO_ALONG_WIDTH(1),
+				.SIM_DELAY(SIM_DELAY)
+			)pool_middle_res_buf_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				
+				.calfmt(mid_res_buf_calfmt),
+				.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
+				.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+				.max_upd_latency(mid_res_buf_max_upd_latency),
+				.en_cal_round_ext(mid_res_buf_en_cal_round_ext),
+				.ofmap_w(mid_res_buf_ofmap_w),
+				
+				.s_axis_mid_res_data(m_axis_ext_mid_res_data),
+				.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
+				.s_axis_mid_res_user(m_axis_ext_mid_res_user),
+				.s_axis_mid_res_last(m_axis_ext_mid_res_last),
+				.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
+				.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
+				
+				.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
+				.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
+				.m_axis_fnl_res_user(),
+				.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
+				.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
+				.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
+				
+				.mem_clk_a(mid_res_mem_clk_a),
+				.mem_wen_a(mid_res_mem_wen_a),
+				.mem_addr_a(mid_res_mem_addr_a),
+				.mem_din_a(mid_res_mem_din_a),
+				.mem_clk_b(mid_res_mem_clk_b),
+				.mem_ren_b(mid_res_mem_ren_b),
+				.mem_addr_b(mid_res_mem_addr_b),
+				.mem_dout_b(mid_res_mem_dout_b),
+				
+				.acmlt_aclk(pool_upd_aclk),
+				.acmlt_aresetn(pool_upd_aresetn),
+				.acmlt_aclken(pool_upd_aclken),
+				.acmlt_in_new_res(pool_upd_i_new_res),
+				.acmlt_in_org_mid_res(pool_upd_i_org_mid_res),
+				.acmlt_in_mask(pool_upd_i_mask),
+				.acmlt_in_first_item(pool_upd_i_first_item),
+				.acmlt_in_last_grp(pool_upd_i_last_grp),
+				.acmlt_in_last_res(pool_upd_i_last_res),
+				.acmlt_in_info_along(pool_upd_i_is_zero_sfc),
+				.acmlt_in_valid(pool_upd_i_valid),
+				
+				.acmlt_out_data(pool_upd_o_data),
+				.acmlt_out_mask(pool_upd_o_mask),
+				.acmlt_out_last_grp(pool_upd_o_last_grp),
+				.acmlt_out_last_res(pool_upd_o_last_res),
+				.acmlt_out_to_upd_mem(pool_upd_o_to_upd_mem),
+				.acmlt_out_valid(pool_upd_o_valid[0])
+			);
+		end
+		else
+		begin
+			async_conv_middle_res_acmlt_buf #(
+				.BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+				.ATOMIC_K(ATOMIC_C),
+				.RBUF_BANK_N(RBUF_BANK_N),
+				.RBUF_DEPTH(RBUF_DEPTH),
+				.INFO_ALONG_WIDTH(1),
+				.SIM_DELAY(SIM_DELAY)
+			)pool_middle_res_buf_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				.mid_res_buf_aclk(mid_res_buf_aclk),
+				.mid_res_buf_aresetn(mid_res_buf_aresetn),
+				.mid_res_buf_aclken(1'b1),
+				
+				.runtime_params_vld(en_mid_res_buf_dup),
+				
+				.calfmt(mid_res_buf_calfmt),
+				.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
+				.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+				.max_upd_latency(mid_res_buf_max_upd_latency),
+				.en_cal_round_ext(mid_res_buf_en_cal_round_ext),
+				.ofmap_w(mid_res_buf_ofmap_w),
+				
+				.s_axis_mid_res_data(m_axis_ext_mid_res_data),
+				.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
+				.s_axis_mid_res_user(m_axis_ext_mid_res_user),
+				.s_axis_mid_res_last(m_axis_ext_mid_res_last),
+				.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
+				.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
+				
+				.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
+				.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
+				.m_axis_fnl_res_user(),
+				.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
+				.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
+				.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
+				
+				.mem_clk_a(mid_res_mem_clk_a),
+				.mem_wen_a(mid_res_mem_wen_a),
+				.mem_addr_a(mid_res_mem_addr_a),
+				.mem_din_a(mid_res_mem_din_a),
+				.mem_clk_b(mid_res_mem_clk_b),
+				.mem_ren_b(mid_res_mem_ren_b),
+				.mem_addr_b(mid_res_mem_addr_b),
+				.mem_dout_b(mid_res_mem_dout_b),
+				
+				.acmlt_aclk(pool_upd_aclk),
+				.acmlt_aresetn(pool_upd_aresetn),
+				.acmlt_aclken(pool_upd_aclken),
+				.acmlt_in_new_res(pool_upd_i_new_res),
+				.acmlt_in_org_mid_res(pool_upd_i_org_mid_res),
+				.acmlt_in_mask(pool_upd_i_mask),
+				.acmlt_in_first_item(pool_upd_i_first_item),
+				.acmlt_in_last_grp(pool_upd_i_last_grp),
+				.acmlt_in_last_res(pool_upd_i_last_res),
+				.acmlt_in_info_along(pool_upd_i_is_zero_sfc),
+				.acmlt_in_valid(pool_upd_i_valid),
+				
+				.acmlt_out_data(pool_upd_o_data),
+				.acmlt_out_mask(pool_upd_o_mask),
+				.acmlt_out_last_grp(pool_upd_o_last_grp),
+				.acmlt_out_last_res(pool_upd_o_last_res),
+				.acmlt_out_to_upd_mem(pool_upd_o_to_upd_mem),
+				.acmlt_out_valid(pool_upd_o_valid[0])
 			);
 		end
 	endgenerate

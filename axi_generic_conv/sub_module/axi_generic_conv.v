@@ -55,6 +55,7 @@ AXIS MASTER/SLAVE
 module axi_generic_conv #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
+	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -96,6 +97,9 @@ module axi_generic_conv #(
 	// BN与激活单元时钟和复位
 	input wire bn_act_aclk,
 	input wire bn_act_aresetn,
+	// 中间结果缓存时钟和复位
+	input wire mid_res_buf_aclk,
+	input wire mid_res_buf_aresetn,
 	
 	// 寄存器配置接口(AXI-Lite从机)
     // 读地址通道
@@ -277,6 +281,8 @@ module axi_generic_conv #(
 	wire fnl_res_trans_blk_idle;
 	wire fnl_res_trans_blk_done;
 	// (共享)中间结果缓存
+	// [使能信号]
+	wire en_mid_res_buf_dup; // 使能中间结果缓存
 	// [运行时参数]
 	wire[1:0] mid_res_buf_calfmt; // 运算数据格式
 	wire[3:0] mid_res_buf_row_n_bufferable_dup; // 可缓存行数 - 1
@@ -358,6 +364,7 @@ module axi_generic_conv #(
 	
 	axi_generic_conv_core #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 		.BN_SUPPORTED(BN_SUPPORTED),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED),
@@ -490,6 +497,7 @@ module axi_generic_conv #(
 		.fnl_res_trans_blk_idle(fnl_res_trans_blk_idle),
 		.fnl_res_trans_blk_done(fnl_res_trans_blk_done),
 		
+		.en_mid_res_buf_dup(en_mid_res_buf_dup),
 		.mid_res_buf_calfmt(mid_res_buf_calfmt),
 		.mid_res_buf_row_n_bufferable_dup(mid_res_buf_row_n_bufferable_dup),
 		.mid_res_buf_bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
@@ -708,42 +716,45 @@ module axi_generic_conv #(
 	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
 	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b;
 	// 中间结果累加单元组
+	wire acmlt_aclk;
+	wire acmlt_aresetn;
+	wire acmlt_aclken;
 	// [累加单元组输入]
-	wire[ATOMIC_K*48-1:0] acmlt_in_new_res; // 新结果
-	wire[ATOMIC_K*32-1:0] acmlt_in_org_mid_res; // 原中间结果
-	wire[ATOMIC_K+2-1:0] acmlt_in_info_along[0:ATOMIC_K-1]; // 随路数据
-	wire[ATOMIC_K-1:0] acmlt_in_mask; // 项掩码
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*48-1:0] acmlt_in_new_res; // 新结果
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*32-1:0] acmlt_in_org_mid_res; // 原中间结果
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE+2-1:0] acmlt_in_info_along[0:ATOMIC_K/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_in_mask; // 项掩码
 	wire acmlt_in_first_item; // 是否第1项(标志)
 	wire acmlt_in_last_grp; // 是否最后1组(标志)
 	wire acmlt_in_last_res; // 本行最后1个中间结果(标志)
-	wire[ATOMIC_K-1:0] acmlt_in_valid; // 输入有效指示
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_in_valid; // 输入有效指示
 	// [累加单元组输出]
-	wire[ATOMIC_K*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
-	wire[ATOMIC_K+2-1:0] acmlt_out_info_along[0:ATOMIC_K-1]; // 随路数据
-	wire[ATOMIC_K-1:0] acmlt_out_mask; // 输出项掩码
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE*32-1:0] acmlt_out_data; // 单精度浮点数或定点数
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE+2-1:0] acmlt_out_info_along[0:ATOMIC_K/MID_RES_BUF_CLK_RATE-1]; // 随路数据
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_out_mask; // 输出项掩码
 	wire acmlt_out_last_grp; // 是否最后1组(标志)
 	wire acmlt_out_last_res; // 本行最后1个中间结果(标志)
-	wire[ATOMIC_K-1:0] acmlt_out_valid; // 输出有效指示
+	wire[ATOMIC_K/MID_RES_BUF_CLK_RATE-1:0] acmlt_out_valid; // 输出有效指示
 	
 	assign {acmlt_out_last_res, acmlt_out_last_grp, acmlt_out_mask} = acmlt_out_info_along[0];
 	
 	genvar acmlt_i;
 	generate
-		for(acmlt_i = 0;acmlt_i < ATOMIC_K;acmlt_i = acmlt_i + 1)
+		for(acmlt_i = 0;acmlt_i < ATOMIC_K/MID_RES_BUF_CLK_RATE;acmlt_i = acmlt_i + 1)
 		begin:acmlt_blk
 			assign acmlt_in_info_along[acmlt_i] = 
 				(acmlt_i == 0) ? 
 					{acmlt_in_last_res, acmlt_in_last_grp, acmlt_in_mask}:
-					{(ATOMIC_K+2){1'bx}};
+					{(ATOMIC_K/MID_RES_BUF_CLK_RATE+2){1'bx}};
 			
 			conv_middle_res_accumulate #(
 				.EN_SMALL_FP32("true"),
-				.INFO_ALONG_WIDTH(ATOMIC_K+2),
+				.INFO_ALONG_WIDTH(ATOMIC_K/MID_RES_BUF_CLK_RATE+2),
 				.SIM_DELAY(SIM_DELAY)
 			)conv_middle_res_accumulate_u(
-				.aclk(aclk),
-				.aresetn(aresetn),
-				.aclken(1'b1),
+				.aclk(acmlt_aclk),
+				.aresetn(acmlt_aresetn),
+				.aclken(acmlt_aclken),
 				
 				.calfmt(mid_res_buf_calfmt),
 				
@@ -759,65 +770,141 @@ module axi_generic_conv #(
 				.acmlt_out_valid(acmlt_out_valid[acmlt_i])
 			);
 		end
+		
+		if(MID_RES_BUF_CLK_RATE == 1)
+		begin
+			conv_middle_res_acmlt_buf #(
+				.TSF_N_FOREACH_SFC(1),
+				.ATOMIC_K(ATOMIC_K),
+				.RBUF_BANK_N(RBUF_BANK_N),
+				.RBUF_DEPTH(RBUF_DEPTH),
+				.INFO_ALONG_WIDTH(1),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_middle_res_acmlt_buf_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				
+				.calfmt(mid_res_buf_calfmt),
+				.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
+				.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+				.max_upd_latency(mid_res_buf_max_upd_latency),
+				.en_cal_round_ext(1'b1),
+				.ofmap_w(16'dx),
+				
+				.s_axis_mid_res_data(m_axis_ext_mid_res_data),
+				.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
+				.s_axis_mid_res_user({1'b0, m_axis_ext_mid_res_user}),
+				.s_axis_mid_res_last(m_axis_ext_mid_res_last),
+				.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
+				.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
+				
+				.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
+				.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
+				.m_axis_fnl_res_user(s_axis_ext_fnl_res_user),
+				.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
+				.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
+				.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
+				
+				.mem_clk_a(mid_res_mem_clk_a),
+				.mem_wen_a(mid_res_mem_wen_a),
+				.mem_addr_a(mid_res_mem_addr_a),
+				.mem_din_a(mid_res_mem_din_a),
+				.mem_clk_b(mid_res_mem_clk_b),
+				.mem_ren_b(mid_res_mem_ren_b),
+				.mem_addr_b(mid_res_mem_addr_b),
+				.mem_dout_b(mid_res_mem_dout_b),
+				
+				.acmlt_aclk(acmlt_aclk),
+				.acmlt_aresetn(acmlt_aresetn),
+				.acmlt_aclken(acmlt_aclken),
+				.acmlt_in_new_res(acmlt_in_new_res),
+				.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+				.acmlt_in_mask(acmlt_in_mask),
+				.acmlt_in_first_item(acmlt_in_first_item),
+				.acmlt_in_last_grp(acmlt_in_last_grp),
+				.acmlt_in_last_res(acmlt_in_last_res),
+				.acmlt_in_info_along(),
+				.acmlt_in_valid(acmlt_in_valid),
+				
+				.acmlt_out_data(acmlt_out_data),
+				.acmlt_out_mask(acmlt_out_mask),
+				.acmlt_out_last_grp(acmlt_out_last_grp),
+				.acmlt_out_last_res(acmlt_out_last_res),
+				.acmlt_out_to_upd_mem(1'b1),
+				.acmlt_out_valid(acmlt_out_valid)
+			);
+		end
+		else
+		begin
+			async_conv_middle_res_acmlt_buf #(
+				.BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+				.ATOMIC_K(ATOMIC_K),
+				.RBUF_BANK_N(RBUF_BANK_N),
+				.RBUF_DEPTH(RBUF_DEPTH),
+				.INFO_ALONG_WIDTH(1),
+				.SIM_DELAY(SIM_DELAY)
+			)conv_middle_res_acmlt_buf_u(
+				.aclk(aclk),
+				.aresetn(aresetn),
+				.aclken(1'b1),
+				.mid_res_buf_aclk(mid_res_buf_aclk),
+				.mid_res_buf_aresetn(mid_res_buf_aresetn),
+				.mid_res_buf_aclken(1'b1),
+				
+				.runtime_params_vld(en_mid_res_buf_dup),
+				
+				.calfmt(mid_res_buf_calfmt),
+				.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
+				.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
+				.max_upd_latency(mid_res_buf_max_upd_latency),
+				.en_cal_round_ext(1'b1),
+				.ofmap_w(16'dx),
+				
+				.s_axis_mid_res_data(m_axis_ext_mid_res_data),
+				.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
+				.s_axis_mid_res_user({1'b0, m_axis_ext_mid_res_user}),
+				.s_axis_mid_res_last(m_axis_ext_mid_res_last),
+				.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
+				.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
+				
+				.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
+				.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
+				.m_axis_fnl_res_user(s_axis_ext_fnl_res_user),
+				.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
+				.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
+				.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
+				
+				.mem_clk_a(mid_res_mem_clk_a),
+				.mem_wen_a(mid_res_mem_wen_a),
+				.mem_addr_a(mid_res_mem_addr_a),
+				.mem_din_a(mid_res_mem_din_a),
+				.mem_clk_b(mid_res_mem_clk_b),
+				.mem_ren_b(mid_res_mem_ren_b),
+				.mem_addr_b(mid_res_mem_addr_b),
+				.mem_dout_b(mid_res_mem_dout_b),
+				
+				.acmlt_aclk(acmlt_aclk),
+				.acmlt_aresetn(acmlt_aresetn),
+				.acmlt_aclken(acmlt_aclken),
+				.acmlt_in_new_res(acmlt_in_new_res),
+				.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
+				.acmlt_in_mask(acmlt_in_mask),
+				.acmlt_in_first_item(acmlt_in_first_item),
+				.acmlt_in_last_grp(acmlt_in_last_grp),
+				.acmlt_in_last_res(acmlt_in_last_res),
+				.acmlt_in_info_along(),
+				.acmlt_in_valid(acmlt_in_valid),
+				
+				.acmlt_out_data(acmlt_out_data),
+				.acmlt_out_mask(acmlt_out_mask),
+				.acmlt_out_last_grp(acmlt_out_last_grp),
+				.acmlt_out_last_res(acmlt_out_last_res),
+				.acmlt_out_to_upd_mem(1'b1),
+				.acmlt_out_valid(acmlt_out_valid)
+			);
+		end
 	endgenerate
-	
-	conv_middle_res_acmlt_buf #(
-		.ATOMIC_K(ATOMIC_K),
-		.RBUF_BANK_N(RBUF_BANK_N),
-		.RBUF_DEPTH(RBUF_DEPTH),
-		.INFO_ALONG_WIDTH(1),
-		.SIM_DELAY(SIM_DELAY)
-	)conv_middle_res_acmlt_buf_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(1'b1),
-		
-		.calfmt(mid_res_buf_calfmt),
-		.row_n_bufferable(mid_res_buf_row_n_bufferable_dup),
-		.bank_n_foreach_ofmap_row(mid_res_buf_bank_n_foreach_ofmap_row),
-		.max_upd_latency(mid_res_buf_max_upd_latency),
-		.en_cal_round_ext(1'b1),
-		.ofmap_w(16'dx),
-		
-		.s_axis_mid_res_data(m_axis_ext_mid_res_data),
-		.s_axis_mid_res_keep(m_axis_ext_mid_res_keep),
-		.s_axis_mid_res_user({1'b0, m_axis_ext_mid_res_user}),
-		.s_axis_mid_res_last(m_axis_ext_mid_res_last),
-		.s_axis_mid_res_valid(m_axis_ext_mid_res_valid),
-		.s_axis_mid_res_ready(m_axis_ext_mid_res_ready),
-		
-		.m_axis_fnl_res_data(s_axis_ext_fnl_res_data),
-		.m_axis_fnl_res_keep(s_axis_ext_fnl_res_keep),
-		.m_axis_fnl_res_user(s_axis_ext_fnl_res_user),
-		.m_axis_fnl_res_last(s_axis_ext_fnl_res_last),
-		.m_axis_fnl_res_valid(s_axis_ext_fnl_res_valid),
-		.m_axis_fnl_res_ready(s_axis_ext_fnl_res_ready),
-		
-		.mem_clk_a(mid_res_mem_clk_a),
-		.mem_wen_a(mid_res_mem_wen_a),
-		.mem_addr_a(mid_res_mem_addr_a),
-		.mem_din_a(mid_res_mem_din_a),
-		.mem_clk_b(mid_res_mem_clk_b),
-		.mem_ren_b(mid_res_mem_ren_b),
-		.mem_addr_b(mid_res_mem_addr_b),
-		.mem_dout_b(mid_res_mem_dout_b),
-		
-		.acmlt_in_new_res(acmlt_in_new_res),
-		.acmlt_in_org_mid_res(acmlt_in_org_mid_res),
-		.acmlt_in_mask(acmlt_in_mask),
-		.acmlt_in_first_item(acmlt_in_first_item),
-		.acmlt_in_last_grp(acmlt_in_last_grp),
-		.acmlt_in_last_res(acmlt_in_last_res),
-		.acmlt_in_info_along(),
-		.acmlt_in_valid(acmlt_in_valid),
-		
-		.acmlt_out_data(acmlt_out_data),
-		.acmlt_out_mask(acmlt_out_mask),
-		.acmlt_out_last_grp(acmlt_out_last_grp),
-		.acmlt_out_last_res(acmlt_out_last_res),
-		.acmlt_out_to_upd_mem(1'b1),
-		.acmlt_out_valid(acmlt_out_valid)
-	);
 	
 	/** 最终结果传输请求生成单元 **/
 	// 子表面行信息(AXIS主机)

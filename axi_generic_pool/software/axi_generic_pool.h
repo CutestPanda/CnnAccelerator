@@ -9,6 +9,7 @@
         2025.12.22 1.02 增加性能监测计数器组(运行周期数, MM2S通道传输字节数, S2MM通道传输字节数, 更新单元组运行周期数)
         2025.12.22 1.10 为最大池化增加非0常量填充模式
         2025.12.26 1.11 修改ctrl0寄存器
+        2026.01.05 1.12 支持中间结果缓存时钟倍率
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -91,6 +92,7 @@ typedef struct{
 	uint16_t mm2s_stream_data_width; // MM2S通道DMA数据流的位宽
 	uint16_t s2mm_stream_data_width; // S2MM通道DMA数据流的位宽
 
+	uint8_t mid_res_buf_clk_rate; // 中间结果缓存的时钟倍率
 	uint16_t phy_buf_bank_n; // 物理缓存BANK数
 	uint16_t phy_buf_bank_depth; // 物理缓存BANK深度
 	uint16_t max_fmbuf_row_n; // 特征图缓存最大表面行数
@@ -106,6 +108,7 @@ typedef struct{
 	uint32_t info1;
 	uint32_t info2;
 	uint32_t info3;
+	uint32_t info4;
 }AxiGnrPoolRegRgnProp;
 
 // 结构体: 寄存器域(控制)

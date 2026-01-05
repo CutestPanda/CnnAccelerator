@@ -205,7 +205,7 @@ class generic_conv_sim_base_test extends panda_test_single_clk_base #(
 		
 		this.clk_period = 10ns;
 		this.rst_duration = 1us;
-		this.main_phase_drain_time = 100us;
+		this.main_phase_drain_time = 20us;
 	endfunction
 	
 	function void build_phase(uvm_phase phase);
@@ -1815,7 +1815,7 @@ CASE#17:
 
 常规普通卷积测试
 
-使用配置参数#0
+使用配置参数#3
 
 输入特征图 = w30 h6 c19
 卷积核 = 3x3 c19 n7
@@ -1892,6 +1892,91 @@ class generic_conv_sim_test_17 extends generic_conv_sim_base_test;
 	
 	`tue_component_default_constructor(generic_conv_sim_test_17)
 	`uvm_component_utils(generic_conv_sim_test_17)
+	
+endclass
+
+/**
+CASE#18:
+
+常规普通卷积测试
+
+使用配置参数#3
+
+输入特征图 = w30 h6 c3
+卷积核 = 3x3 c3 n16
+步长 = h1 v1
+外填充(上, 下, 左, 右) = (1, 1, 1, 1)
+内填充(上下, 左右) = (0, 0)
+计算轮次 = 1
+**/
+class generic_conv_sim_test_18 extends generic_conv_sim_base_test;
+	
+	virtual protected function void build_test_cfg();
+		this.fmap_cfg = FmapCfg::type_id::create();
+		if(!fmap_cfg.randomize() with{
+			fmap_mem_baseaddr == 1024;
+			ofmap_baseaddr == 512;
+			fmap_w == 30;
+			fmap_h == 6;
+			fmap_c == 3;
+			ofmap_data_type == DATA_4_BYTE;
+		})
+			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
+		
+		this.kernal_cfg = KernalCfg::type_id::create();
+		if(!kernal_cfg.randomize() with{
+			kernal_mem_baseaddr == 2048;
+			kernal_shape == KBUFGRPSZ_3x3;
+			kernal_num_n == 16;
+			kernal_chn_n == 3;
+		})
+			`uvm_error(this.get_name(), "cannot randomize kernal_cfg!")
+		
+		this.conv_cal_cfg = ConvCalCfg::type_id::create();
+		if(!conv_cal_cfg.randomize() with{
+			atomic_c == ATOMIC_C;
+			atomic_k == ATOMIC_K;
+			calfmt == CAL_FMT_FP16;
+			conv_vertical_stride == 1;
+			conv_horizontal_stride == 1;
+			cal_round == 1;
+			is_grp_conv_mode == 1'b0;
+			group_n == 1;
+			external_padding_left == 1;
+			external_padding_right == 1;
+			external_padding_top == 1;
+			external_padding_bottom == 1;
+			inner_padding_left_right == 0;
+			inner_padding_top_bottom == 0;
+			kernal_dilation_n == 0;
+			max_wgtblk_w == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize conv_cal_cfg!")
+		
+		this.buf_cfg = BufferCfg::type_id::create();
+		if(!buf_cfg.randomize() with{
+			stream_data_width == STREAM_DATA_WIDTH;
+			fnl_res_data_width == FNL_RES_DATA_WIDTH;
+			fmbufbankn == 10;
+			fmbufcoln == COLN_32;
+			fmbufrown == 40;
+			sfc_n_each_wgtblk == WGTBLK_SFC_N_16;
+			kbufgrpn == 5;
+			mid_res_item_n_foreach_row == 30;
+			mid_res_buf_row_n_bufferable == 16;
+		})
+			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
+		
+		this.bn_cfg = BNCfg::type_id::create();
+		if(!bn_cfg.randomize() with{
+			bn_is_a_eq_1 == 1'b1;
+			bn_is_b_eq_0 == 1'b0;
+		})
+			`uvm_error(this.get_name(), "cannot randomize bn_cfg!")
+	endfunction
+	
+	`tue_component_default_constructor(generic_conv_sim_test_18)
+	`uvm_component_utils(generic_conv_sim_test_18)
 	
 endclass
 

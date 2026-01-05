@@ -14,6 +14,7 @@
         2025.12.22 1.22 增加性能监测计数器组(已计算的特征图表面数)
         2025.12.26 1.23 修改ctrl0寄存器
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
+        2026.01.05 1.31 支持中间结果缓存时钟倍率
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -125,6 +126,7 @@ typedef struct{
 	uint16_t mm2s_stream_data_width; // MM2S通道DMA数据流的位宽
 	uint16_t s2mm_stream_data_width; // S2MM通道DMA数据流的位宽
 
+	uint8_t mid_res_buf_clk_rate; // 中间结果缓存的时钟倍率
 	uint16_t phy_buf_bank_n; // 物理缓存BANK数
 	uint16_t phy_buf_bank_depth; // 物理缓存BANK深度
 	uint16_t max_fmbuf_row_n; // 特征图缓存最大表面行数
@@ -142,6 +144,7 @@ typedef struct{
 	uint32_t info2;
 	uint32_t info3;
 	uint32_t info4;
+	uint32_t info5;
 }AxiGnrConvRegRgnProp;
 
 // 结构体: 寄存器域(控制)
