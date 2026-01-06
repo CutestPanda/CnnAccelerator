@@ -53,7 +53,6 @@ n输入流水有符号加法树
 module add_tree_2_4_8_16_32 #(
     parameter integer add_input_n = 16, // 加法输入数量(2 | 4 | 8 | 16 | 32)
 	parameter integer add_width = 32, // 加法位宽
-	parameter USE_DSP_MACRO = "false", // 是否使用DSP单元作为加法器
 	parameter real simulation_delay = 1 // 仿真延时
 )(
     // 时钟和复位
@@ -70,13 +69,10 @@ module add_tree_2_4_8_16_32 #(
 	output wire add_out_vld
 );
     
-	/** 常量 **/
-	localparam USE_DSP_ATRB = (USE_DSP_MACRO == "true") ? "yes":"no";
-	
     /** 第1级流水线 **/
 	wire signed[add_width-1:0] add_s0_in[0:31];
 	wire add_s0_in_vld;
-	(* use_dsp=USE_DSP_ATRB *)reg signed[add_width+1-1:0] add_s0_out[0:15];
+	reg signed[add_width+1-1:0] add_s0_out[0:15];
 	reg add_s0_out_vld;
 	
 	genvar add_s0_i;
@@ -102,7 +98,7 @@ module add_tree_2_4_8_16_32 #(
 	/** 第2级流水线 **/
 	wire signed[add_width+1-1:0] add_s1_in[0:15];
 	wire add_s1_in_vld;
-	(* use_dsp=USE_DSP_ATRB *)reg signed[add_width+2-1:0] add_s1_out[0:7];
+	reg signed[add_width+2-1:0] add_s1_out[0:7];
 	reg add_s1_out_vld;
 	
 	genvar add_s1_i;
@@ -128,7 +124,7 @@ module add_tree_2_4_8_16_32 #(
 	/** 第3级流水线 **/
 	wire signed[add_width+2-1:0] add_s2_in[0:7];
 	wire add_s2_in_vld;
-	(* use_dsp=USE_DSP_ATRB *)reg signed[add_width+3-1:0] add_s2_out[0:3];
+	reg signed[add_width+3-1:0] add_s2_out[0:3];
 	reg add_s2_out_vld;
 	
 	genvar add_s2_i;
@@ -154,7 +150,7 @@ module add_tree_2_4_8_16_32 #(
 	/** 第4级流水线 **/
 	wire signed[add_width+3-1:0] add_s3_in[0:3];
 	wire add_s3_in_vld;
-	(* use_dsp=USE_DSP_ATRB *)reg signed[add_width+4-1:0] add_s3_out[0:1];
+	reg signed[add_width+4-1:0] add_s3_out[0:1];
 	reg add_s3_out_vld;
 	
 	genvar add_s3_i;
@@ -180,7 +176,7 @@ module add_tree_2_4_8_16_32 #(
 	/** 第5级流水线 **/
 	wire signed[add_width+4-1:0] add_s4_in[0:1];
 	wire add_s4_in_vld;
-	(* use_dsp=USE_DSP_ATRB *)reg signed[add_width+5-1:0] add_s4_out;
+	reg signed[add_width+5-1:0] add_s4_out;
 	reg add_s4_out_vld;
 	
 	assign add_out = add_s4_out;

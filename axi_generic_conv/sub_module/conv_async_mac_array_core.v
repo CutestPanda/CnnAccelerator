@@ -48,7 +48,6 @@ module conv_async_mac_array_core #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer INFO_ALONG_WIDTH = 1, // 随路数据的位宽(必须>=1)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
-	parameter USE_DSP_MACRO_FOR_ADD_TREE = "false", // 是否使用DSP单元作为加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -256,7 +255,6 @@ module conv_async_mac_array_core #(
 					.ATOMIC_C(ATOMIC_C),
 					.EN_SMALL_FP16(EN_SMALL_FP16),
 					.INFO_ALONG_WIDTH(INFO_ALONG_WIDTH),
-					.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE),
 					.SIM_DELAY(SIM_DELAY)
 				)conv_mac_cell_u(
 					.aclk(mac_array_aclk),

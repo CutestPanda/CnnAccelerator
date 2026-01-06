@@ -72,7 +72,6 @@ module conv_cal_sub_system #(
 	parameter USE_EXT_BN_ACT_UNIT = "false", // 是否使用外部的BN与激活单元
 	parameter USE_EXT_FNL_RES_COLLECTOR = "false", // 是否使用外部的最终结果数据收集器
 	parameter USE_EXT_ROUND_GRP = "false", // 是否使用外部的输出数据舍入单元组
-	parameter USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = "false", // 是否使用DSP单元作为乘加阵列里的加法器
 	// [计算配置参数]
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter EN_SMALL_FP16 = "true", // 乘加阵列是否处理极小FP16
@@ -448,7 +447,6 @@ module conv_cal_sub_system #(
 		.INFO_ALONG_WIDTH(1),
 		.USE_INNER_SFC_CNT("true"),
 		.TO_SKIP_EMPTY_CAL_ROUND("true"),
-		.USE_DSP_MACRO_FOR_ADD_TREE(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_mac_array_u(
 		.aclk(aclk),

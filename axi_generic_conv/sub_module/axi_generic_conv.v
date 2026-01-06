@@ -85,7 +85,6 @@ module axi_generic_conv #(
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
 	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt", // sigmoid函数值查找表存储器的初始化文件路径
-	parameter integer USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = 0, // 是否使用DSP单元作为乘加阵列里的加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -392,7 +391,6 @@ module axi_generic_conv #(
 		.MAX_KERNAL_N(MAX_KERNAL_N),
 		.RBUF_BANK_N(RBUF_BANK_N),
 		.RBUF_DEPTH(RBUF_DEPTH),
-		.USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY),
 		.SIM_DELAY(SIM_DELAY)
 	)axi_generic_conv_core_u(
 		.aclk(aclk),

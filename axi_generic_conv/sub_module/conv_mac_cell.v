@@ -56,7 +56,6 @@ module conv_mac_cell #(
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter EN_SMALL_FP16 = "true", // 是否处理极小FP16
 	parameter integer INFO_ALONG_WIDTH = 2, // 随路数据的位宽
-	parameter USE_DSP_MACRO_FOR_ADD_TREE = "false", // 是否使用DSP单元作为加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 时钟和复位
@@ -182,7 +181,6 @@ module conv_mac_cell #(
 			add_tree_2_4_8_16_32 #(
 				.add_input_n(ATOMIC_C),
 				.add_width(32),
-				.USE_DSP_MACRO(USE_DSP_MACRO_FOR_ADD_TREE),
 				.simulation_delay(SIM_DELAY)
 			)add_tree_u(
 				.aclk(aclk),

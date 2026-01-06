@@ -80,7 +80,6 @@ module axi_generic_conv_core #(
 	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
-	parameter integer USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY = 0, // 是否使用DSP单元作为乘加阵列里的加法器
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -788,7 +787,6 @@ module axi_generic_conv_core #(
 		.USE_EXT_BN_ACT_UNIT("true"),
 		.USE_EXT_FNL_RES_COLLECTOR("true"),
 		.USE_EXT_ROUND_GRP("true"),
-		.USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY(USE_DSP_MACRO_FOR_ADD_TREE_IN_MAC_ARRAY ? "true":"false"),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.EN_SMALL_FP16("true"),
 		.EN_SMALL_FP32("true"),

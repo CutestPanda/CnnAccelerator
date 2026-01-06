@@ -36,7 +36,7 @@ SOFTWARE.
 -----------------------
 | INT8或INT16  |  2   |
 -----------------------
-|     FP16     |  6   |
+|     FP16     |  7   |
 -----------------------
 
 --------------------------------------------------------------------
@@ -76,7 +76,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2025/12/07
+日期: 2026/01/06
 ********************************************************************/
 
 
@@ -120,19 +120,19 @@ module pool_middle_res_upd #(
 	localparam CAL_FMT_NONE = 2'b11;
 	
 	/** 输入有效指示延迟链 **/
-	reg[6:1] pool_upd_in_valid_delayed;
+	reg[7:1] pool_upd_in_valid_delayed;
 	
 	always @(posedge aclk or negedge aresetn)
 	begin
 		if(~aresetn)
-			pool_upd_in_valid_delayed <= 6'b000000;
+			pool_upd_in_valid_delayed <= 7'b0000000;
 		else if(aclken)
-			pool_upd_in_valid_delayed <= # SIM_DELAY {pool_upd_in_valid_delayed[5:1], pool_upd_in_valid};
+			pool_upd_in_valid_delayed <= # SIM_DELAY {pool_upd_in_valid_delayed[6:1], pool_upd_in_valid};
 	end
 	
 	/** 输入操作数延迟链 **/
-	reg[15:0] pool_upd_in_new_res_delayed[1:4];
-	reg[31:0] pool_upd_in_org_mid_res_delayed[1:4];
+	reg[15:0] pool_upd_in_new_res_delayed[1:6];
+	reg[31:0] pool_upd_in_org_mid_res_delayed[1:6];
 	
 	always @(posedge aclk)
 	begin
@@ -166,10 +166,26 @@ module pool_middle_res_upd #(
 			pool_upd_in_org_mid_res_delayed[4] <= # SIM_DELAY pool_upd_in_org_mid_res_delayed[3];
 		end
 	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[4])
+		begin
+			pool_upd_in_new_res_delayed[5] <= # SIM_DELAY pool_upd_in_new_res_delayed[4];
+			pool_upd_in_org_mid_res_delayed[5] <= # SIM_DELAY pool_upd_in_org_mid_res_delayed[4];
+		end
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[5])
+		begin
+			pool_upd_in_new_res_delayed[6] <= # SIM_DELAY pool_upd_in_new_res_delayed[5];
+			pool_upd_in_org_mid_res_delayed[6] <= # SIM_DELAY pool_upd_in_org_mid_res_delayed[5];
+		end
+	end
 	
 	/** 输入特例标志延迟链 **/
-	reg[5:1] pool_upd_in_is_first_item_delayed;
-	reg[5:1] pool_upd_in_is_zero_sfc_delayed;
+	reg[6:1] pool_upd_in_is_first_item_delayed;
+	reg[6:1] pool_upd_in_is_zero_sfc_delayed;
 	
 	always @(posedge aclk)
 	begin
@@ -211,9 +227,17 @@ module pool_middle_res_upd #(
 			pool_upd_in_is_zero_sfc_delayed[5] <= # SIM_DELAY pool_upd_in_is_zero_sfc_delayed[4];
 		end
 	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[5])
+		begin
+			pool_upd_in_is_first_item_delayed[6] <= # SIM_DELAY pool_upd_in_is_first_item_delayed[5];
+			pool_upd_in_is_zero_sfc_delayed[6] <= # SIM_DELAY pool_upd_in_is_zero_sfc_delayed[5];
+		end
+	end
 	
 	/** 随路数据延迟链 **/
-	reg[INFO_ALONG_WIDTH-1:0] pool_upd_in_info_along_delayed[1:6];
+	reg[INFO_ALONG_WIDTH-1:0] pool_upd_in_info_along_delayed[1:7];
 	
 	always @(posedge aclk)
 	begin
@@ -244,6 +268,11 @@ module pool_middle_res_upd #(
 	begin
 		if(aclken & pool_upd_in_valid_delayed[5])
 			pool_upd_in_info_along_delayed[6] <= # SIM_DELAY pool_upd_in_info_along_delayed[5];
+	end
+	always @(posedge aclk)
+	begin
+		if(aclken & pool_upd_in_valid_delayed[6])
+			pool_upd_in_info_along_delayed[7] <= # SIM_DELAY pool_upd_in_info_along_delayed[6];
 	end
 	
 	/**
@@ -430,12 +459,14 @@ module pool_middle_res_upd #(
 	-------------------------------------------------| 最大池化时, 计算      |
 	|    3     | 尾数求和                            | 原中间结果 - 新结果   |
 	--------------------------------------------------------------------------
-	|    4     | 标准化(>>>1, <<0~29)                |                       |
+	|    4     | 初步标准化(>>>1, 不变)              |                       |
 	--------------------------------------------------------------------------
-	|    5     | 修正(>>>1), 下溢处理                |                       |
+	|    5     | 继续标准化(<<1~29)                  |                       |
+	--------------------------------------------------------------------------
+	|    6     | 修正(>>>1), 下溢处理                |                       |
 	|          | 选出较大者                          |                       |
 	--------------------------------------------------------------------------
-	|    6     | 浮点数打包                          |                       |
+	|    7     | 浮点数打包                          |                       |
 	--------------------------------------------------------------------------
 	**/
 	// [浮点运算给出的共享加法器#0端口]
@@ -475,24 +506,37 @@ module pool_middle_res_upd #(
 	reg signed[31:0] fp_align_rsh_new_res; // 对阶后的新结果(Q30)
 	reg signed[7:0] fp_align_rsh_exp; // 对阶后的指数(在[-126, 127]范围内)
 	reg signed[4:0] fp_align_rsh_new_res_exp; // 延迟2clk的新结果的指数(在[-14, 15]范围内)
-	(*dont_touch="true"*)reg signed[30:0] fp_align_rsh_new_res_mts; // 延迟2clk的新结果的补码形式尾数(Q29)
+	reg signed[30:0] fp_align_rsh_new_res_mts; // 延迟2clk的新结果的补码形式尾数(Q29)
 	// [尾数求和]
 	wire fp_added_in_vld;
 	wire fp_added_in_is_first_item;
 	wire fp_added_in_is_zero_sfc;
 	wire fp_added_in_org_mid_res_geq0;
+	reg signed[4:0] fp_added_rsh_new_res_exp; // 延迟3clk的新结果的指数(在[-14, 15]范围内)
+	reg signed[30:0] fp_added_new_res_mts; // 延迟3clk的新结果的补码形式尾数(Q29)
 	reg signed[7:0] fp_added_exp; // 延迟1clk的对阶后的指数(在[-126, 127]范围内)
 	reg signed[31:0] fp_added_mts; // 求和后的尾数(Q29)
-	wire signed[31:0] fp_added_mts_rvs; // 位翻转的求和后的尾数(Q29)
+	reg fp_added_to_sel_new_res; // 选择新结果(标志)
 	reg fp_added_is_org_mid_res_geq_new_res; // 原中间结果 >= 新结果(标志)
-	// [标准化]
+	// [初步标准化]
+	wire fp_pre_nml_in_vld;
+	wire fp_pre_nml_in_is_first_item;
+	wire fp_pre_nml_in_is_zero_sfc;
+	wire signed[7:0] fp_pre_nml_in_exp; // 待标准化的指数(在[-126, 127]范围内)
+	wire signed[31:0] fp_pre_nml_in_mts; // 待标准化的尾数(Q29)
+	wire[31:0] fp_pre_nml_in_mts_rvs; // 位翻转的待标准化的尾数(Q29)
+	wire[30:0] fp_pre_nml_in_shift_n_onehot;
+	reg signed[31:0] fp_pre_nml_mts; // 初步标准化之后的尾数(Q29)
+	reg signed[8:0] fp_pre_nml_exp; // 初步标准化之后的指数
+	reg[4:0] fp_pre_nml_continue_to_lsh_n; // 继续左移的位数(在范围[0, 29]内)
+	reg fp_pre_nml_is_org_mid_res_geq_new_res; // 延迟1clk的"原中间结果 >= 新结果"(标志)
+	// [继续标准化]
 	wire fp_nml_in_vld;
 	wire fp_nml_in_is_first_item;
 	wire fp_nml_in_is_zero_sfc;
-	wire[30:0] fp_nml_in_shift_n_onehot;
 	reg signed[31:0] fp_nml_mts; // 标准化之后的尾数(Q29)
 	reg signed[8:0] fp_nml_exp; // 标准化之后的指数(在范围[-155, 128]内)
-	reg fp_nml_is_org_mid_res_geq_new_res; // 延迟1clk的"原中间结果 >= 新结果"(标志)
+	reg fp_nml_is_org_mid_res_geq_new_res; // 延迟2clk的"原中间结果 >= 新结果"(标志)
 	// [修正, 下溢处理, 选出较大者]
 	wire fp_fix_in_vld;
 	wire fp_fix_in_is_first_item;
@@ -595,21 +639,29 @@ module pool_middle_res_upd #(
 	assign fp_added_in_is_first_item = pool_upd_in_is_first_item_delayed[2];
 	assign fp_added_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[2];
 	assign fp_added_in_org_mid_res_geq0 = ~pool_upd_in_org_mid_res_delayed[2][31];
-	assign fp_added_mts_rvs = 
-		{
-			fp_added_mts[0], fp_added_mts[1], fp_added_mts[2], fp_added_mts[3],
-			fp_added_mts[4], fp_added_mts[5], fp_added_mts[6], fp_added_mts[7],
-			fp_added_mts[8], fp_added_mts[9], fp_added_mts[10], fp_added_mts[11],
-			fp_added_mts[12], fp_added_mts[13], fp_added_mts[14], fp_added_mts[15],
-			fp_added_mts[16], fp_added_mts[17], fp_added_mts[18], fp_added_mts[19],
-			fp_added_mts[20], fp_added_mts[21], fp_added_mts[22], fp_added_mts[23],
-			fp_added_mts[24], fp_added_mts[25], fp_added_mts[26], fp_added_mts[27],
-			fp_added_mts[28], fp_added_mts[29], fp_added_mts[30], fp_added_mts[31]
-		};
 	
-	assign fp_nml_in_vld = pool_upd_in_valid_delayed[3];
-	assign fp_nml_in_is_first_item = pool_upd_in_is_first_item_delayed[3];
-	assign fp_nml_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[3];
+	assign fp_pre_nml_in_vld = pool_upd_in_valid_delayed[3];
+	assign fp_pre_nml_in_is_first_item = pool_upd_in_is_first_item_delayed[3];
+	assign fp_pre_nml_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[3];
+	assign fp_pre_nml_in_exp = 
+		fp_added_to_sel_new_res ? 
+			{{3{fp_added_rsh_new_res_exp[4]}}, fp_added_rsh_new_res_exp[4:0]}:
+			fp_added_exp;
+	assign fp_pre_nml_in_mts = 
+		fp_added_to_sel_new_res ? 
+			{fp_added_new_res_mts[30], fp_added_new_res_mts[30:0]}:
+			fp_added_mts;
+	assign fp_pre_nml_in_mts_rvs = 
+		{
+			fp_pre_nml_in_mts[0], fp_pre_nml_in_mts[1], fp_pre_nml_in_mts[2], fp_pre_nml_in_mts[3],
+			fp_pre_nml_in_mts[4], fp_pre_nml_in_mts[5], fp_pre_nml_in_mts[6], fp_pre_nml_in_mts[7],
+			fp_pre_nml_in_mts[8], fp_pre_nml_in_mts[9], fp_pre_nml_in_mts[10], fp_pre_nml_in_mts[11],
+			fp_pre_nml_in_mts[12], fp_pre_nml_in_mts[13], fp_pre_nml_in_mts[14], fp_pre_nml_in_mts[15],
+			fp_pre_nml_in_mts[16], fp_pre_nml_in_mts[17], fp_pre_nml_in_mts[18], fp_pre_nml_in_mts[19],
+			fp_pre_nml_in_mts[20], fp_pre_nml_in_mts[21], fp_pre_nml_in_mts[22], fp_pre_nml_in_mts[23],
+			fp_pre_nml_in_mts[24], fp_pre_nml_in_mts[25], fp_pre_nml_in_mts[26], fp_pre_nml_in_mts[27],
+			fp_pre_nml_in_mts[28], fp_pre_nml_in_mts[29], fp_pre_nml_in_mts[30], fp_pre_nml_in_mts[31]
+		};
 	/*
 	当"求和后的尾数" < 0时, 从MSB开始找第1个"0"的位置;当"求和后的尾数" >= 0时, 从MSB开始找第1个"1"的位置
 	
@@ -628,26 +680,30 @@ module pool_middle_res_upd #(
 		| 0101  |  1011   |    0001     |
 		---------------------------------
 	*/
-	assign fp_nml_in_shift_n_onehot = 
-		({31{fp_added_mts_rvs[0]}} ^ fp_added_mts_rvs[31:1]) & 
-		((~({31{fp_added_mts_rvs[0]}} ^ fp_added_mts_rvs[31:1])) + 1'b1);
+	assign fp_pre_nml_in_shift_n_onehot = 
+		({31{fp_pre_nml_in_mts_rvs[0]}} ^ fp_pre_nml_in_mts_rvs[31:1]) & 
+		((~({31{fp_pre_nml_in_mts_rvs[0]}} ^ fp_pre_nml_in_mts_rvs[31:1])) + 1'b1);
 	
-	assign fp_fix_in_vld = pool_upd_in_valid_delayed[4];
-	assign fp_fix_in_is_first_item = pool_upd_in_is_first_item_delayed[4];
-	assign fp_fix_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[4];
-	assign fp_fix_in_org_mid_res = pool_upd_in_org_mid_res_delayed[4];
+	assign fp_nml_in_vld = pool_upd_in_valid_delayed[4];
+	assign fp_nml_in_is_first_item = pool_upd_in_is_first_item_delayed[4];
+	assign fp_nml_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[4];
+	
+	assign fp_fix_in_vld = pool_upd_in_valid_delayed[5];
+	assign fp_fix_in_is_first_item = pool_upd_in_is_first_item_delayed[5];
+	assign fp_fix_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[5];
+	assign fp_fix_in_org_mid_res = pool_upd_in_org_mid_res_delayed[5];
 	assign fp_fix_in_to_corr_flag = (fp_nml_mts[31:29] == 3'b110) & (fp_nml_mts[28:6] == 23'd0);
 	assign fp_fix_in_udf_flag = (fp_fix_in_exp < -9'sd126) | (fp_nml_mts[31:29] == 3'b000);
 	assign fp_fix_in_mts = fp_nml_mts[31:0];
 	assign fp_fix_in_exp = fp_nml_exp + (fp_fix_in_to_corr_flag ? 1'b1:1'b0);
 	
-	assign fp_pack_in_vld = pool_upd_in_valid_delayed[5];
-	assign fp_pack_in_is_first_item = pool_upd_in_is_first_item_delayed[5];
-	assign fp_pack_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[5];
+	assign fp_pack_in_vld = pool_upd_in_valid_delayed[6];
+	assign fp_pack_in_is_first_item = pool_upd_in_is_first_item_delayed[6];
+	assign fp_pack_in_is_zero_sfc = pool_upd_in_is_zero_sfc_delayed[6];
 	
-	assign fp_fnl_out_vld = pool_upd_in_valid_delayed[6];
+	assign fp_fnl_out_vld = pool_upd_in_valid_delayed[7];
 	assign fp_fnl_res = {fp_pack_sgn, fp_pack_ec, fp_pack_mts};
-	assign fp_fnl_info_along = pool_upd_in_info_along_delayed[6];
+	assign fp_fnl_info_along = pool_upd_in_info_along_delayed[7];
 	
 	// 原中间结果的指数更大(标志), 对齐到的指数(在[-126, 127]范围内), 右移位数, 延迟1clk的原中间结果的补码形式尾数(Q23)
 	always @(posedge aclk)
@@ -715,7 +771,8 @@ module pool_middle_res_upd #(
 		end
 	end
 	
-	// 延迟1clk的对阶后的指数(在[-126, 127]范围内), 求和后的尾数(Q29)
+	// 延迟3clk的新结果的指数(在[-14, 15]范围内), 延迟3clk的新结果的补码形式尾数(Q29)
+	// 延迟1clk的对阶后的指数(在[-126, 127]范围内), 求和后的尾数(Q29), 选择新结果(标志)
 	always @(posedge aclk)
 	begin
 		if(
@@ -724,21 +781,18 @@ module pool_middle_res_upd #(
 			(~fp_added_in_is_zero_sfc)
 		)
 		begin
-			fp_added_exp <= # SIM_DELAY 
-				(
-					((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
-					((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25])
-				) ? 
-					{{3{fp_align_rsh_new_res_exp[4]}}, fp_align_rsh_new_res_exp[4:0]}:
-					fp_align_rsh_exp;
+			fp_added_rsh_new_res_exp <= # SIM_DELAY 
+				fp_align_rsh_new_res_exp;
+			fp_added_new_res_mts <= # SIM_DELAY 
+				fp_align_rsh_new_res_mts;
 			
+			fp_added_exp <= # SIM_DELAY 
+				fp_align_rsh_exp;
 			fp_added_mts <= # SIM_DELAY 
-				(
-					((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
-					((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25])
-				) ? 
-					{fp_align_rsh_new_res_mts[30], fp_align_rsh_new_res_mts[30:0]}:
-					{shared_adder0_res[25:0], fp_align_rsh_org_res[6:1] | fp_align_rsh_new_res[6:1]};
+				{shared_adder0_res[25:0], fp_align_rsh_org_res[6:1] | fp_align_rsh_new_res[6:1]};
+			fp_added_to_sel_new_res <= # SIM_DELAY 
+				((pool_mode == POOL_MODE_UPSP) | fp_added_in_is_first_item) | 
+				((pool_mode == POOL_MODE_MAX) & shared_adder0_res[25]);
 		end
 	end
 	
@@ -757,6 +811,69 @@ module pool_middle_res_upd #(
 					(~shared_adder0_res[25]);
 	end
 	
+	// 初步标准化之后的尾数(Q29), 初步标准化之后的指数, 继续左移的位数(在范围[0, 29]内)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			fp_pre_nml_in_vld & 
+			(~fp_pre_nml_in_is_zero_sfc)
+		)
+		begin
+			fp_pre_nml_mts <= # SIM_DELAY 
+				fp_pre_nml_in_shift_n_onehot[0] ? 
+					{fp_pre_nml_in_mts[31], fp_pre_nml_in_mts[31:1]}: // 算术右移1位
+					fp_pre_nml_in_mts; // 不变
+			fp_pre_nml_exp <= # SIM_DELAY 
+				{fp_pre_nml_in_exp[7], fp_pre_nml_in_exp[7:0]} + fp_pre_nml_in_shift_n_onehot[0];
+			fp_pre_nml_continue_to_lsh_n <= # SIM_DELAY 
+				({5{fp_pre_nml_in_shift_n_onehot[0]}}  & 5'd0) | 
+				({5{fp_pre_nml_in_shift_n_onehot[1]}}  & 5'd0) | 
+				({5{fp_pre_nml_in_shift_n_onehot[2]}}  & 5'd1) | 
+				({5{fp_pre_nml_in_shift_n_onehot[3]}}  & 5'd2) | 
+				({5{fp_pre_nml_in_shift_n_onehot[4]}}  & 5'd3) | 
+				({5{fp_pre_nml_in_shift_n_onehot[5]}}  & 5'd4) | 
+				({5{fp_pre_nml_in_shift_n_onehot[6]}}  & 5'd5) | 
+				({5{fp_pre_nml_in_shift_n_onehot[7]}}  & 5'd6) | 
+				({5{fp_pre_nml_in_shift_n_onehot[8]}}  & 5'd7) | 
+				({5{fp_pre_nml_in_shift_n_onehot[9]}}  & 5'd8) | 
+				({5{fp_pre_nml_in_shift_n_onehot[10]}} & 5'd9) | 
+				({5{fp_pre_nml_in_shift_n_onehot[11]}} & 5'd10) | 
+				({5{fp_pre_nml_in_shift_n_onehot[12]}} & 5'd11) | 
+				({5{fp_pre_nml_in_shift_n_onehot[13]}} & 5'd12) | 
+				({5{fp_pre_nml_in_shift_n_onehot[14]}} & 5'd13) | 
+				({5{fp_pre_nml_in_shift_n_onehot[15]}} & 5'd14) | 
+				({5{fp_pre_nml_in_shift_n_onehot[16]}} & 5'd15) | 
+				({5{fp_pre_nml_in_shift_n_onehot[17]}} & 5'd16) | 
+				({5{fp_pre_nml_in_shift_n_onehot[18]}} & 5'd17) | 
+				({5{fp_pre_nml_in_shift_n_onehot[19]}} & 5'd18) | 
+				({5{fp_pre_nml_in_shift_n_onehot[20]}} & 5'd19) | 
+				({5{fp_pre_nml_in_shift_n_onehot[21]}} & 5'd20) | 
+				({5{fp_pre_nml_in_shift_n_onehot[22]}} & 5'd21) | 
+				({5{fp_pre_nml_in_shift_n_onehot[23]}} & 5'd22) | 
+				({5{fp_pre_nml_in_shift_n_onehot[24]}} & 5'd23) | 
+				({5{fp_pre_nml_in_shift_n_onehot[25]}} & 5'd24) | 
+				({5{fp_pre_nml_in_shift_n_onehot[26]}} & 5'd25) | 
+				({5{fp_pre_nml_in_shift_n_onehot[27]}} & 5'd26) | 
+				({5{fp_pre_nml_in_shift_n_onehot[28]}} & 5'd27) | 
+				({5{fp_pre_nml_in_shift_n_onehot[29]}} & 5'd28) | 
+				({5{fp_pre_nml_in_shift_n_onehot[30] | (~(|fp_pre_nml_in_shift_n_onehot))}} & 5'd29);
+		end
+	end
+	
+	// 延迟1clk的"原中间结果 >= 新结果"(标志)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			fp_pre_nml_in_vld & 
+			(pool_mode == POOL_MODE_MAX) & 
+			(~fp_pre_nml_in_is_first_item)
+		)
+			fp_pre_nml_is_org_mid_res_geq_new_res <= # SIM_DELAY 
+				fp_added_is_org_mid_res_geq_new_res;
+	end
+	
 	// 标准化之后的尾数(Q29), 标准化之后的指数(在范围[-155, 128]内)
 	always @(posedge aclk)
 	begin
@@ -766,78 +883,12 @@ module pool_middle_res_upd #(
 			(~fp_nml_in_is_zero_sfc)
 		)
 		begin
-			fp_nml_mts <= # SIM_DELAY 
-				({32{fp_nml_in_shift_n_onehot[0]}} & {fp_added_mts[31], fp_added_mts[31:1]}) | // 算术右移1位
-				({32{fp_nml_in_shift_n_onehot[1]}} & fp_added_mts) | 
-				({32{fp_nml_in_shift_n_onehot[2]}} & (fp_added_mts << 1)) | 
-				({32{fp_nml_in_shift_n_onehot[3]}} & (fp_added_mts << 2)) | 
-				({32{fp_nml_in_shift_n_onehot[4]}} & (fp_added_mts << 3)) | 
-				({32{fp_nml_in_shift_n_onehot[5]}} & (fp_added_mts << 4)) | 
-				({32{fp_nml_in_shift_n_onehot[6]}} & (fp_added_mts << 5)) | 
-				({32{fp_nml_in_shift_n_onehot[7]}} & (fp_added_mts << 6)) | 
-				({32{fp_nml_in_shift_n_onehot[8]}} & (fp_added_mts << 7)) | 
-				({32{fp_nml_in_shift_n_onehot[9]}} & (fp_added_mts << 8)) | 
-				({32{fp_nml_in_shift_n_onehot[10]}} & (fp_added_mts << 9)) | 
-				({32{fp_nml_in_shift_n_onehot[11]}} & (fp_added_mts << 10)) | 
-				({32{fp_nml_in_shift_n_onehot[12]}} & (fp_added_mts << 11)) | 
-				({32{fp_nml_in_shift_n_onehot[13]}} & (fp_added_mts << 12)) | 
-				({32{fp_nml_in_shift_n_onehot[14]}} & (fp_added_mts << 13)) | 
-				({32{fp_nml_in_shift_n_onehot[15]}} & (fp_added_mts << 14)) | 
-				({32{fp_nml_in_shift_n_onehot[16]}} & (fp_added_mts << 15)) | 
-				({32{fp_nml_in_shift_n_onehot[17]}} & (fp_added_mts << 16)) | 
-				({32{fp_nml_in_shift_n_onehot[18]}} & (fp_added_mts << 17)) | 
-				({32{fp_nml_in_shift_n_onehot[19]}} & (fp_added_mts << 18)) | 
-				({32{fp_nml_in_shift_n_onehot[20]}} & (fp_added_mts << 19)) | 
-				({32{fp_nml_in_shift_n_onehot[21]}} & (fp_added_mts << 20)) | 
-				({32{fp_nml_in_shift_n_onehot[22]}} & (fp_added_mts << 21)) | 
-				({32{fp_nml_in_shift_n_onehot[23]}} & (fp_added_mts << 22)) | 
-				({32{fp_nml_in_shift_n_onehot[24]}} & (fp_added_mts << 23)) | 
-				({32{fp_nml_in_shift_n_onehot[25]}} & (fp_added_mts << 24)) | 
-				({32{fp_nml_in_shift_n_onehot[26]}} & (fp_added_mts << 25)) | 
-				({32{fp_nml_in_shift_n_onehot[27]}} & (fp_added_mts << 26)) | 
-				({32{fp_nml_in_shift_n_onehot[28]}} & (fp_added_mts << 27)) | 
-				({32{fp_nml_in_shift_n_onehot[29]}} & (fp_added_mts << 28)) | 
-				({32{fp_nml_in_shift_n_onehot[30] | (~(|fp_nml_in_shift_n_onehot))}} & (fp_added_mts << 29));
-			
-			fp_nml_exp <= # SIM_DELAY 
-				{fp_added_exp[7], fp_added_exp[7:0]} + 
-				(
-					({9{fp_nml_in_shift_n_onehot[0]}}  & 9'b000000001) | // 1
-					({9{fp_nml_in_shift_n_onehot[1]}}  & 9'b000000000) | // 0
-					({9{fp_nml_in_shift_n_onehot[2]}}  & 9'b111111111) | // -1
-					({9{fp_nml_in_shift_n_onehot[3]}}  & 9'b111111110) | // -2
-					({9{fp_nml_in_shift_n_onehot[4]}}  & 9'b111111101) | // -3
-					({9{fp_nml_in_shift_n_onehot[5]}}  & 9'b111111100) | // -4
-					({9{fp_nml_in_shift_n_onehot[6]}}  & 9'b111111011) | // -5
-					({9{fp_nml_in_shift_n_onehot[7]}}  & 9'b111111010) | // -6
-					({9{fp_nml_in_shift_n_onehot[8]}}  & 9'b111111001) | // -7
-					({9{fp_nml_in_shift_n_onehot[9]}}  & 9'b111111000) | // -8
-					({9{fp_nml_in_shift_n_onehot[10]}} & 9'b111110111) | // -9
-					({9{fp_nml_in_shift_n_onehot[11]}} & 9'b111110110) | // -10
-					({9{fp_nml_in_shift_n_onehot[12]}} & 9'b111110101) | // -11
-					({9{fp_nml_in_shift_n_onehot[13]}} & 9'b111110100) | // -12
-					({9{fp_nml_in_shift_n_onehot[14]}} & 9'b111110011) | // -13
-					({9{fp_nml_in_shift_n_onehot[15]}} & 9'b111110010) | // -14
-					({9{fp_nml_in_shift_n_onehot[16]}} & 9'b111110001) | // -15
-					({9{fp_nml_in_shift_n_onehot[17]}} & 9'b111110000) | // -16
-					({9{fp_nml_in_shift_n_onehot[18]}} & 9'b111101111) | // -17
-					({9{fp_nml_in_shift_n_onehot[19]}} & 9'b111101110) | // -18
-					({9{fp_nml_in_shift_n_onehot[20]}} & 9'b111101101) | // -19
-					({9{fp_nml_in_shift_n_onehot[21]}} & 9'b111101100) | // -20
-					({9{fp_nml_in_shift_n_onehot[22]}} & 9'b111101011) | // -21
-					({9{fp_nml_in_shift_n_onehot[23]}} & 9'b111101010) | // -22
-					({9{fp_nml_in_shift_n_onehot[24]}} & 9'b111101001) | // -23
-					({9{fp_nml_in_shift_n_onehot[25]}} & 9'b111101000) | // -24
-					({9{fp_nml_in_shift_n_onehot[26]}} & 9'b111100111) | // -25
-					({9{fp_nml_in_shift_n_onehot[27]}} & 9'b111100110) | // -26
-					({9{fp_nml_in_shift_n_onehot[28]}} & 9'b111100101) | // -27
-					({9{fp_nml_in_shift_n_onehot[29]}} & 9'b111100100) | // -28
-					({9{fp_nml_in_shift_n_onehot[30] | (~(|fp_nml_in_shift_n_onehot))}} & 9'b111100011) // -29
-				);
+			fp_nml_mts <= # SIM_DELAY fp_pre_nml_mts << fp_pre_nml_continue_to_lsh_n;
+			fp_nml_exp <= # SIM_DELAY fp_pre_nml_exp - fp_pre_nml_continue_to_lsh_n;
 		end
 	end
 	
-	// 延迟1clk的"原中间结果 >= 新结果"(标志)
+	// 延迟2clk的"原中间结果 >= 新结果"(标志)
 	always @(posedge aclk)
 	begin
 		if(
@@ -847,7 +898,7 @@ module pool_middle_res_upd #(
 			(~fp_nml_in_is_first_item)
 		)
 			fp_nml_is_org_mid_res_geq_new_res <= # SIM_DELAY 
-				fp_added_is_org_mid_res_geq_new_res;
+				fp_pre_nml_is_org_mid_res_geq_new_res;
 	end
 	
 	// 修正后的尾数(Q23), 修正后的尾数需要取负数(标志), 修正后的阶码
