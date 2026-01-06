@@ -15,6 +15,7 @@
         2025.12.26 1.23 修改ctrl0寄存器
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
         2026.01.05 1.31 支持中间结果缓存时钟倍率
+        2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -306,6 +307,7 @@ typedef struct{
 	AxiGnrConvRegRgnBNActCfg* reg_region_bn_act_cfg; // 寄存器域(批归一化与激活配置)
 
 	BNParam* bn_params_mem; // BN参数存储器域
+	uint16_t* sigmoid_lut_mem; // Sigmoid函数值查找表存储器域
 
 	AxiGnrConvProp property; // 加速器属性
 }AxiGnrConvHandler;
@@ -327,6 +329,7 @@ uint8_t axi_generic_conv_is_busy(AxiGnrConvHandler* handler); // 判断通用卷
 
 int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg); // 配置通用卷积处理单元
 void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_param_buf, uint32_t num); // 写BN参数存储器
+void axi_generic_conv_wr_sigmoid_lut_mem(AxiGnrConvHandler* handler, uint16_t* sigmoid_lut_buf, uint32_t depth); // 写Sigmoid函数值查找表存储器
 
 uint32_t axi_generic_conv_get_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNQueryType query_type); // 查询DMA命令完成数
 int axi_generic_conv_clr_cmd_fns_n(AxiGnrConvHandler* handler, AxiGnrConvCmdFnsNClrType clr_type); // 清除DMA命令完成数计数器

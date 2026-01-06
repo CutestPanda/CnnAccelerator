@@ -15,6 +15,7 @@
         2025.12.26 1.23 修改ctrl0寄存器
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
         2026.01.05 1.31 支持中间结果缓存时钟倍率
+        2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -37,6 +38,9 @@
 
 // BN参数存储器域的偏移地址
 #define MEM_REGION_BN_PARAMS_OFS 0x10000
+
+// Sigmoid函数值查找表存储器域的偏移地址
+#define MEM_REGION_SIGMOID_LUT_OFS 0x18000
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -67,6 +71,7 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	handler->reg_region_bn_act_cfg = (AxiGnrConvRegRgnBNActCfg*)(baseaddr + REG_REGION_BN_ACT_CFG_OFS);
 
 	handler->bn_params_mem = (BNParam*)(baseaddr + MEM_REGION_BN_PARAMS_OFS);
+	handler->sigmoid_lut_mem = (uint16_t*)(baseaddr + MEM_REGION_SIGMOID_LUT_OFS);
 
 	uint32_t version_encoded = handler->reg_region_prop->version;
 	handler->property.version[8] = '\0';
@@ -636,6 +641,19 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 *************************/
 void axi_generic_conv_wr_bn_param_mem(AxiGnrConvHandler* handler, BNParam* bn_param_buf, uint32_t num){
 	memcpy((void*)handler->bn_params_mem, (void*)bn_param_buf, num * 2 * 4);
+}
+
+/*************************
+@cfg
+@public
+@brief  写Sigmoid函数值查找表存储器
+@param  handler 通用卷积处理单元(加速器句柄)
+        sigmoid_lut_buf Sigmoid函数值查找表缓存区(指针)
+        depth 查找表深度
+@return none
+*************************/
+void axi_generic_conv_wr_sigmoid_lut_mem(AxiGnrConvHandler* handler, uint16_t* sigmoid_lut_buf, uint32_t depth){
+	memcpy((void*)handler->sigmoid_lut_mem, (void*)sigmoid_lut_buf, depth * 2);
 }
 
 /*************************

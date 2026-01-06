@@ -27,7 +27,7 @@ SOFTWARE.
 本模块: AXI-通用卷积处理单元(核心)
 
 描述:
-包括寄存器配置接口、BN参数MEM控制器、控制子系统、(数据枢纽)、计算子系统
+包括寄存器配置接口、BN参数与Sigmoid函数值查找表MEM控制器、控制子系统、(数据枢纽)、计算子系统
 
 已将可共享部分(数据枢纽、最终结果传输请求生成单元、中间结果缓存、BN与激活单元、输出数据舍入单元组、最终结果数据收集器)引出
 
@@ -273,6 +273,13 @@ module axi_generic_conv_core #(
 	output wire[15:0] bn_mem_addr_a,
 	output wire[63:0] bn_mem_din_a, // {参数B(32bit), 参数A(32bit)}
 	input wire[63:0] bn_mem_dout_a, // {参数B(32bit), 参数A(32bit)}
+	// [Sigmoid函数值查找表MEM接口]
+	output wire sigmoid_lut_mem_clk_b,
+	output wire sigmoid_lut_mem_en_b,
+	output wire[3:0] sigmoid_lut_mem_wen_b,
+	output wire[15:0] sigmoid_lut_mem_addr_b,
+	output wire[31:0] sigmoid_lut_mem_din_b,
+	input wire[31:0] sigmoid_lut_mem_dout_b,
 	
 	// (共享)输出数据舍入单元组
 	// [运行时参数]
@@ -539,8 +546,18 @@ module axi_generic_conv_core #(
 		.s2mm_cmd_done(s2mm_cmd_done)
 	);
 	
-	/** BN参数MEM控制器 **/
-	// [AXI-SRAM控制器给出的存储器接口]
+	/**
+	BN参数与Sigmoid函数值查找表MEM控制器
+	
+	-----------------------------------------
+	| 偏移地址区间 |     所访问的存储器     |
+	-----------------------------------------
+	| 0x0000~0x7FFF|       BN参数MEM        |
+	-----------------------------------------
+	| 0x8000~0xFFFF| Sigmoid函数值查找表MEM |
+	-----------------------------------------
+	**/
+	// AXI-SRAM控制器给出的存储器接口
 	wire axi_sram_ctrler_ram_clk;
     wire axi_sram_ctrler_ram_rst;
     wire axi_sram_ctrler_ram_en;
@@ -548,16 +565,21 @@ module axi_generic_conv_core #(
     wire[29:0] axi_sram_ctrler_ram_addr;
     wire[31:0] axi_sram_ctrler_ram_din;
     wire[31:0] axi_sram_ctrler_ram_dout;
-	// [读数据重对齐]
+	// 存储器读数据字选择
 	reg axi_sram_ctrler_word_sel;
+	reg axi_sram_ctrler_mem_sel;
 	
 	assign axi_sram_ctrler_ram_dout = 
-		axi_sram_ctrler_word_sel ? 
-			bn_mem_dout_a[63:32]:
-			bn_mem_dout_a[31:0];
+		axi_sram_ctrler_mem_sel ? 
+			sigmoid_lut_mem_dout_b:
+			(
+				axi_sram_ctrler_word_sel ? 
+					bn_mem_dout_a[63:32]:
+					bn_mem_dout_a[31:0]
+			);
 	
 	assign bn_mem_clk_a = axi_sram_ctrler_ram_clk;
-	assign bn_mem_en_a = axi_sram_ctrler_ram_en;
+	assign bn_mem_en_a = BN_SUPPORTED & axi_sram_ctrler_ram_en & (~axi_sram_ctrler_ram_addr[13]);
 	assign bn_mem_wen_a = 
 		axi_sram_ctrler_ram_addr[0] ? 
 			{axi_sram_ctrler_ram_wen, 4'b0000}:
@@ -569,14 +591,23 @@ module axi_generic_conv_core #(
 			{axi_sram_ctrler_ram_din, 32'dx}:
 			{32'dx, axi_sram_ctrler_ram_din};
 	
+	assign sigmoid_lut_mem_clk_b = axi_sram_ctrler_ram_clk;
+	assign sigmoid_lut_mem_en_b = SIGMOID_SUPPORTED & axi_sram_ctrler_ram_en & axi_sram_ctrler_ram_addr[13];
+	assign sigmoid_lut_mem_wen_b = axi_sram_ctrler_ram_wen;
+	assign sigmoid_lut_mem_addr_b = axi_sram_ctrler_ram_addr[15:0];
+	assign sigmoid_lut_mem_din_b = axi_sram_ctrler_ram_din;
+	
 	always @(posedge axi_sram_ctrler_ram_clk)
 	begin
 		if(axi_sram_ctrler_ram_en)
+		begin
 			axi_sram_ctrler_word_sel <= # SIM_DELAY axi_sram_ctrler_ram_addr[0];
+			axi_sram_ctrler_mem_sel <= # SIM_DELAY axi_sram_ctrler_ram_addr[13];
+		end
 	end
 	
 	axi_bram_ctrler #(
-		.bram_depth(MAX_KERNAL_N*2),
+		.bram_depth(64 * 1024 / 4),
 		.bram_read_la(1),
 		.en_read_buf_fifo("false"),
 		.simulation_delay(SIM_DELAY)

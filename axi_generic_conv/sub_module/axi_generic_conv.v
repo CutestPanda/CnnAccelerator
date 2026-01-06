@@ -84,7 +84,6 @@ module axi_generic_conv #(
 	parameter integer MAX_KERNAL_N = 1024, // 最大的卷积核个数(512 | 1024 | 2048 | 4096 | 8192)
 	parameter integer RBUF_BANK_N = 8, // 中间结果缓存MEM个数(>=2)
 	parameter integer RBUF_DEPTH = 512, // 中间结果缓存MEM深度(16 | ...)
-	parameter SIGMOID_LUT_MEM_INIT_FILE = "act_sigmoid.txt", // sigmoid函数值查找表存储器的初始化文件路径
 	parameter real SIM_DELAY = 1 // 仿真延时
 )(
 	// 主时钟和复位
@@ -335,6 +334,13 @@ module axi_generic_conv #(
 	wire[15:0] bn_mem_addr_a;
 	wire[63:0] bn_mem_din_a; // {参数B(32bit), 参数A(32bit)}
 	wire[63:0] bn_mem_dout_a; // {参数B(32bit), 参数A(32bit)}
+	// [Sigmoid函数值查找表MEM接口]
+	wire sigmoid_lut_mem_clk_b;
+	wire sigmoid_lut_mem_en_b;
+	wire[3:0] sigmoid_lut_mem_wen_b;
+	wire[15:0] sigmoid_lut_mem_addr_b;
+	wire[31:0] sigmoid_lut_mem_din_b;
+	wire[31:0] sigmoid_lut_mem_dout_b[0:BN_ACT_PRL_N-1];
 	// (共享)输出数据舍入单元组
 	// [运行时参数]
 	wire[1:0] round_calfmt; // 运算数据格式
@@ -541,6 +547,12 @@ module axi_generic_conv #(
 		.bn_mem_addr_a(bn_mem_addr_a),
 		.bn_mem_din_a(bn_mem_din_a),
 		.bn_mem_dout_a(bn_mem_dout_a),
+		.sigmoid_lut_mem_clk_b(sigmoid_lut_mem_clk_b),
+		.sigmoid_lut_mem_en_b(sigmoid_lut_mem_en_b),
+		.sigmoid_lut_mem_wen_b(sigmoid_lut_mem_wen_b),
+		.sigmoid_lut_mem_addr_b(sigmoid_lut_mem_addr_b),
+		.sigmoid_lut_mem_din_b(sigmoid_lut_mem_din_b),
+		.sigmoid_lut_mem_dout_b(sigmoid_lut_mem_dout_b[0]),
 		
 		.round_calfmt(round_calfmt),
 		.round_fixed_point_quat_accrc(round_fixed_point_quat_accrc),
@@ -1090,6 +1102,8 @@ module axi_generic_conv #(
 	wire[BN_ACT_PRL_N-1:0] sigmoid_lut_mem_ren_a;
 	wire[12*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_addr_a;
 	wire[16*BN_ACT_PRL_N-1:0] sigmoid_lut_mem_dout_a;
+	wire[31:0] sigmoid_lut_mem_dout_a_32[0:BN_ACT_PRL_N-1];
+	reg[BN_ACT_PRL_N-1:0] sigmoid_lut_mem_dout_a_half_word_sel;
 	
 	conv_bn_act_proc #(
 		.BN_ACT_CLK_RATE(BN_ACT_CLK_RATE),
@@ -1492,22 +1506,41 @@ module axi_generic_conv #(
 	generate
 		for(sigmoid_lut_mem_i = 0;sigmoid_lut_mem_i < BN_ACT_PRL_N;sigmoid_lut_mem_i = sigmoid_lut_mem_i + 1)
 		begin:sigmoid_lut_mem_blk
-			bram_single_port #(
-				.style("LOW_LATENCY"),
-				.rw_mode("read_first"),
-				.mem_width(16),
-				.mem_depth(4096),
-				.INIT_FILE(SIGMOID_LUT_MEM_INIT_FILE),
-				.byte_write_mode("false"),
+			assign sigmoid_lut_mem_dout_a[sigmoid_lut_mem_i*16+15:sigmoid_lut_mem_i*16] = 
+				sigmoid_lut_mem_dout_a_half_word_sel[sigmoid_lut_mem_i] ? 
+					sigmoid_lut_mem_dout_a_32[sigmoid_lut_mem_i][31:16]:
+					sigmoid_lut_mem_dout_a_32[sigmoid_lut_mem_i][15:0];
+			
+			always @(posedge sigmoid_lut_mem_clk_a)
+			begin
+				if(sigmoid_lut_mem_ren_a[sigmoid_lut_mem_i])
+					sigmoid_lut_mem_dout_a_half_word_sel[sigmoid_lut_mem_i] <= # SIM_DELAY 
+						sigmoid_lut_mem_addr_a[12*sigmoid_lut_mem_i+0];
+			end
+			
+			bram_true_dual_port_async #(
+				.mem_width(32),
+				.mem_depth(4096/2),
+				.INIT_FILE("no_init"),
+				.read_write_mode("read_first"),
+				.use_output_register("false"),
+				.en_byte_write("true"),
 				.simulation_delay(SIM_DELAY)
 			)sigmoid_lut_mem_u(
-				.clk(sigmoid_lut_mem_clk_a),
+				.clk_a(sigmoid_lut_mem_clk_b),
+				.clk_b(sigmoid_lut_mem_clk_a),
 				
-				.en(sigmoid_lut_mem_ren_a[sigmoid_lut_mem_i]),
-				.wen(1'b0),
-				.addr(sigmoid_lut_mem_addr_a[12*(sigmoid_lut_mem_i+1)-1:12*sigmoid_lut_mem_i]),
-				.din(),
-				.dout(sigmoid_lut_mem_dout_a[16*(sigmoid_lut_mem_i+1)-1:16*sigmoid_lut_mem_i])
+				.ena(sigmoid_lut_mem_en_b),
+				.wea(sigmoid_lut_mem_wen_b),
+				.addra(sigmoid_lut_mem_addr_b[10:0]),
+				.dina(sigmoid_lut_mem_din_b),
+				.douta(sigmoid_lut_mem_dout_b[sigmoid_lut_mem_i]),
+				
+				.enb(sigmoid_lut_mem_ren_a[sigmoid_lut_mem_i]),
+				.web(4'b0000),
+				.addrb(sigmoid_lut_mem_addr_a[12*sigmoid_lut_mem_i+11:12*sigmoid_lut_mem_i+1]),
+				.dinb(32'dx),
+				.doutb(sigmoid_lut_mem_dout_a_32[sigmoid_lut_mem_i])
 			);
 		end
 	endgenerate
