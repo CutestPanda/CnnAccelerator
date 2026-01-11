@@ -1000,7 +1000,7 @@ module axi_generic_pool #(
 		.param_b_in_const_mac_mode(bn_act_param_b_in_const_mac_mode),
 		.leaky_relu_fixed_point_quat_accrc(5'dx),
 		.leaky_relu_param_alpha(32'hxxxxxxxx),
-		.sigmoid_fixed_point_quat_accrc(5'dx),
+		.sigmoid_tanh_fixed_point_quat_accrc(5'dx),
 		
 		.s_sub_row_msg_axis_data(16'hxxxx),
 		.s_sub_row_msg_axis_last(1'bx),

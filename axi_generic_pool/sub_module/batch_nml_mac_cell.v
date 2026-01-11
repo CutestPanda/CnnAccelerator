@@ -48,9 +48,9 @@ SOFTWARE.
 -----------------------
 |   数据格式   | 时延 |
 -----------------------
-| INT16或INT32 |  7   |
+| INT16或INT32 |  8   |
 -----------------------
-|     FP32     |  8   |
+|     FP32     |  9   |
 -----------------------
 
 注意:
@@ -70,7 +70,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2025/12/21
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -85,6 +85,9 @@ module batch_nml_mac_cell #(
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	
+	// 控制信号
+	input wire bypass, // 旁路本单元
 	
 	// 运行时参数
 	input wire[1:0] bn_calfmt, // 运算数据格式
@@ -1143,17 +1146,62 @@ module batch_nml_mac_cell #(
 	end
 	
 	/** 乘加单元结果输出 **/
-	assign mac_cell_o_res = 
-		(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
-			fp_mac_fp32_packed:
-			int_mac_final_res;
-	assign mac_cell_o_info_along = 
-		(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
-			fp_mac_pack_out_info_along:
-			int_mac_final_out_info_along;
-	assign mac_cell_o_vld = 
-		(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
-			fp_mac_pack_out_vld:
-			int_mac_final_out_vld;
+	reg[31:0] mac_cell_o_res_r; // 计算结果
+	reg[INFO_ALONG_WIDTH-1:0] mac_cell_o_info_along_r; // 随路数据
+	reg mac_cell_o_vld_r;
+	
+	assign mac_cell_o_res = mac_cell_o_res_r;
+	assign mac_cell_o_info_along = mac_cell_o_info_along_r;
+	assign mac_cell_o_vld = mac_cell_o_vld_r;
+	
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			mac_cell_o_vld_r <= 1'b0;
+		else if(aclken)
+			mac_cell_o_vld_r <= # SIM_DELAY 
+				bypass ? 
+					mac_cell_i_vld:
+					(
+						(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
+							fp_mac_pack_out_vld:
+							int_mac_final_out_vld
+					);
+	end
+	
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			(
+				bypass ? 
+					mac_cell_i_vld:
+					(
+						(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
+							fp_mac_pack_out_vld:
+							int_mac_final_out_vld
+					)
+			)
+		)
+		begin
+			mac_cell_o_res_r <= # SIM_DELAY 
+				bypass ? 
+					mac_cell_i_op_x:
+					(
+						(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
+							fp_mac_fp32_packed:
+							int_mac_final_res
+					);
+			
+			mac_cell_o_info_along_r <= # SIM_DELAY 
+				bypass ? 
+					mac_cell_i_info_along:
+					(
+						(bn_calfmt_inner == BN_CAL_FMT_FP32) ? 
+							fp_mac_pack_out_info_along:
+							int_mac_final_out_info_along
+					);
+		end
+	end
 	
 endmodule

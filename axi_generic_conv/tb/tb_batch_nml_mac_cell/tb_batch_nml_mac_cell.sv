@@ -232,6 +232,8 @@ module tb_batch_nml_mac_cell();
 		.aresetn(rst_n),
 		.aclken(1'b1),
 		
+		.bypass(1'b0),
+		
 		.bn_calfmt(bn_calfmt),
 		.fixed_point_quat_accrc((bn_calfmt == BN_CAL_FMT_FP32) ? 5'dx:fixed_point_quat_accrc),
 		

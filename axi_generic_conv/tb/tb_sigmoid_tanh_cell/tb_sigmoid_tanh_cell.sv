@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module tb_sigmoid_cell();
+module tb_sigmoid_tanh_cell();
 	
 	/** 导入C函数 **/
 	import "DPI-C" function int unsigned encode_fp16(input real d);
@@ -11,6 +11,11 @@ module tb_sigmoid_cell();
 	import "DPI-C" function real get_fixed36_exp(input longint frac, input int exp);
 	
 	/** 常量 **/
+	// 激活函数类型的编码
+	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
+	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_TANH = 3'b010; // tanh
+	localparam ACT_FUNC_TYPE_NONE = 3'b111;
 	// 运算数据格式的编码
 	localparam ACT_CAL_FMT_INT16 = 2'b00;
 	localparam ACT_CAL_FMT_INT32 = 2'b01;
@@ -22,7 +27,9 @@ module tb_sigmoid_cell();
 	localparam INT32_SUPPORTED = 1'b1; // 是否支持INT32运算数据格式
 	localparam FP32_SUPPORTED = 1'b1; // 是否支持FP32运算数据格式
 	localparam integer INFO_ALONG_WIDTH = 2; // 随路数据的位宽
-	localparam LUT_MEM_INIT_FILENAME = "act_sigmoid.txt"; // Sigmoid查找表存储器初始化文件路径
+	localparam LUT_MEM_INIT_FILENAME = "E:/temp/verification/tb_sigmoid_tanh_cell/rtl/act_sigmoid.txt"; // Sigmoid查找表存储器初始化文件路径
+	// 激活模式
+	localparam logic[2:0] act_func_type = ACT_FUNC_TYPE_SIGMOID; // 激活函数类型
 	// 运算数据格式
 	localparam logic[1:0] act_calfmt = ACT_CAL_FMT_FP32;
 	// 输入定点数量化精度
@@ -175,7 +182,7 @@ module tb_sigmoid_cell();
 	wire[11:0] lut_mem_addr_a;
 	wire[15:0] lut_mem_dout_a;
 	
-	sigmoid_cell #(
+	sigmoid_tanh_cell #(
 		.INT16_SUPPORTED(INT16_SUPPORTED),
 		.INT32_SUPPORTED(INT32_SUPPORTED),
 		.FP32_SUPPORTED(FP32_SUPPORTED),
@@ -186,6 +193,9 @@ module tb_sigmoid_cell();
 		.aresetn(rst_n),
 		.aclken(1'b1),
 		
+		.bypass(1'b0),
+		
+		.act_func_type(act_func_type),
 		.act_calfmt(act_calfmt),
 		.in_fixed_point_quat_accrc(in_fixed_point_quat_accrc),
 		

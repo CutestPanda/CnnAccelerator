@@ -24,13 +24,14 @@ SOFTWARE.
 
 `timescale 1ns / 1ps
 /********************************************************************
-本模块: Sigmoid激活单元
+本模块: Sigmoid或tanh激活单元
 
 描述:
 Sigmoid(x) = 1 / (1 + e^(-x))
+Tanh(x) = 2 * Sigmoid(2x) - 1 = (e^x - e^(-x)) / (e^x + e^(-x))
 
 ------------------------------------------------------
-| 输入数据范围 | 量化点数 |        查找表输出        |
+| 输入数据范围 | 量化点数 |  Sigmoid函数值查找表输出 |
 ------------------------------------------------------
 |   [0, 2)     |   2048   | 定点数(Q16)              |
 |              |          | 隐含的整数位(正数1)      |
@@ -41,7 +42,7 @@ Sigmoid(x) = 1 / (1 + e^(-x))
 |   [4, 12)    |   1024   |                          |
 ------------------------------------------------------
 
-无论是哪种运算数据格式, 都有时延 = 5clk
+无论是哪种运算数据格式, 都有时延 = 6clk
 
 支持INT16、INT32、FP32三种运算数据格式
 
@@ -66,11 +67,11 @@ Sigmoid(x) = 1 / (1 + e^(-x))
 MEM MASTER
 
 作者: 陈家耀
-日期: 2025/12/29
+日期: 2026/01/11
 ********************************************************************/
 
 
-module sigmoid_cell #(
+module sigmoid_tanh_cell #(
 	parameter INT16_SUPPORTED = 1'b0, // 是否支持INT16运算数据格式
 	parameter INT32_SUPPORTED = 1'b1, // 是否支持INT32运算数据格式
 	parameter FP32_SUPPORTED = 1'b1, // 是否支持FP32运算数据格式
@@ -82,7 +83,11 @@ module sigmoid_cell #(
 	input wire aresetn,
 	input wire aclken,
 	
+	// 控制信号
+	input wire bypass, // 旁路本单元
+	
 	// 运行时参数
+	input wire[2:0] act_func_type, // 激活函数类型
 	input wire[1:0] act_calfmt, // 运算数据格式
 	input wire[4:0] in_fixed_point_quat_accrc, // 输入定点数量化精度
 	
@@ -105,6 +110,15 @@ module sigmoid_cell #(
 );
 	
 	/** 常量 **/
+	// 激活函数类型的编码
+	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
+	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_TANH = 3'b010; // tanh
+	localparam ACT_FUNC_TYPE_NONE = 3'b111;
+	// 激活模式的编码
+	localparam ACT_MODE_SIGMOID = 2'b00;
+	localparam ACT_MODE_TANH = 2'b01;
+	localparam ACT_MODE_NONE = 2'b10;
 	// 运算数据格式的编码
 	localparam ACT_CAL_FMT_INT16 = 2'b00;
 	localparam ACT_CAL_FMT_INT32 = 2'b01;
@@ -119,6 +133,14 @@ module sigmoid_cell #(
 		(INT32_SUPPORTED & (act_calfmt == ACT_CAL_FMT_INT32)) ? ACT_CAL_FMT_INT32:
 		(FP32_SUPPORTED  & (act_calfmt == ACT_CAL_FMT_FP32))  ? ACT_CAL_FMT_FP32:
 		                                                        ACT_CAL_FMT_NONE;
+	
+	/** 激活模式 **/
+	wire[1:0] act_mode; // 激活模式
+	
+	assign act_mode = 
+		(act_func_type == ACT_FUNC_TYPE_SIGMOID) ? ACT_MODE_SIGMOID:
+		(act_func_type == ACT_FUNC_TYPE_TANH)    ? ACT_MODE_TANH:
+		                                           ACT_MODE_NONE;
 	
 	/** 输入信号延迟链 **/
 	reg[5:1] act_cell_i_vld_delayed; // 延迟的输入有效指示
@@ -251,6 +273,7 @@ module sigmoid_cell #(
 	**/
 	wire round_i_vld;
 	wire round_i_pass;
+	wire[64:0] round_i_fixed_to_query; // 待查定点数(Q32)
 	wire[17:0] round_i_fixed_op; // 待舍入的定点数(整数位 = 4, 小数位 = 10, 保护位 = 4)
 	wire round_i_ovf_flag; // 定点数(在查表范围内)上溢标志
 	wire round_i_to_fwd_carry; // 向前进位标志
@@ -259,16 +282,19 @@ module sigmoid_cell #(
 	
 	assign round_i_vld = act_cell_i_vld_delayed[1];
 	assign round_i_pass = act_cell_i_pass_delayed[1];
-	assign round_i_fixed_op = {query_fixed_gen_res_shifted[35:32], query_fixed_gen_res_shifted[31:18]};
+	assign round_i_fixed_to_query = 
+		(act_mode == ACT_MODE_SIGMOID) ? 
+			{1'b0, query_fixed_gen_res_shifted[63:0]}: // Sigmoid模式: 查询Sigmoid(x)
+			{query_fixed_gen_res_shifted[63:0], 1'b0}; // Tanh模式: 查询Sigmoid(2x)
+	assign round_i_fixed_op = {round_i_fixed_to_query[35:32], round_i_fixed_to_query[31:18]};
 	
 	assign round_i_ovf_flag = 
-		(query_fixed_gen_res_shifted[63:32] >= 32'd12) | 
+		(round_i_fixed_to_query[64:32] >= 33'd12) | 
 		(
-			({query_fixed_gen_res_shifted[35:32], query_fixed_gen_res_shifted[31:22]} == {4'd11, 10'b1111111111}) & 
+			({round_i_fixed_to_query[35:32], round_i_fixed_to_query[31:22]} == {4'd11, 10'b1111111111}) & 
 			round_i_to_fwd_carry
 		);
-	assign round_i_to_fwd_carry = 
-		round_i_fixed_op[3] & ((round_i_fixed_op[2:0] != 3'b000) | round_i_fixed_op[4]);
+	assign round_i_to_fwd_carry = round_i_fixed_op[3] & ((round_i_fixed_op[2:0] != 3'b000) | round_i_fixed_op[4]);
 	
 	// 舍入后的待查定点数(Q10)
 	always @(posedge aclk)
@@ -336,7 +362,7 @@ module sigmoid_cell #(
 	wire func_value_i_set_to_1_flag;
 	wire func_value_i_is_op_x_neg; // 操作数X是负数(标志)
 	wire[17:0] func_value_i_lut; // 查表结果(Q17)
-	reg[17:0] func_value_fixed; // 定点数表示的Sigmoid函数值(Q17)
+	reg[18:0] func_value_fixed; // 定点数表示的Sigmoid函数值(Q17)
 	
 	assign func_value_i_vld = act_cell_i_vld_delayed[3];
 	assign func_value_i_pass = act_cell_i_pass_delayed[3];
@@ -353,10 +379,15 @@ module sigmoid_cell #(
 	begin
 		if(aclken & func_value_i_vld & (~func_value_i_pass))
 			func_value_fixed <= # SIM_DELAY 
-				// 因为Sigmoid函数关于点(x = 0, y = 0.5)对称, 当操作数X是负数时, Sigmoid函数值 = 1 - 查表结果
-				func_value_i_is_op_x_neg ? 
-					({1'b1, 17'd0} - func_value_i_lut):
-					func_value_i_lut;
+				(act_mode == ACT_MODE_SIGMOID) ? 
+					// Sigmoid模式: 因为Sigmoid函数关于点(x = 0, y = 0.5)对称, 当操作数X是负数时, Sigmoid函数值 = 1 - 查表结果
+					(
+						func_value_i_is_op_x_neg ? 
+							({2'b01, 17'd0} - {1'b0, func_value_i_lut}):
+							{1'b0, func_value_i_lut}
+					):
+					// Tanh模式: Tanh函数值的绝对值 = 2 * 查表结果 - 1
+					({func_value_i_lut, 1'b0} - {2'b01, 17'd0});
 	end
 	
 	/**
@@ -375,6 +406,7 @@ module sigmoid_cell #(
 	wire format_i_vld;
 	wire format_i_pass;
 	wire[31:0] format_i_op_x;
+	wire format_i_is_op_x_neg; // 操作数X是负数(标志)
 	wire[17:0] format_i_fixed; // 待格式化的定点数(Q17)
 	wire[17:0] format_i_fixed_rvs; // 位颠倒的待格式化的定点数(Q17)
 	wire[17:0] format_i_fixed_first_1_onehot; // 待格式化的定点数从MSB开始第1个"1"的位置独热码
@@ -383,14 +415,11 @@ module sigmoid_cell #(
 	wire[7:0] format_i_fp32_ec_nml; // 标准化后的FP32阶码
 	reg[31:0] format_res; // 格式化后的数据
 	
-	assign act_cell_o_res = format_res;
-	assign act_cell_o_info_along = act_cell_i_info_along_delayed[5];
-	assign act_cell_o_vld = act_cell_i_vld_delayed[5];
-	
 	assign format_i_vld = act_cell_i_vld_delayed[4];
 	assign format_i_pass = act_cell_i_pass_delayed[4];
 	assign format_i_op_x = act_cell_i_op_x_delayed[4];
-	assign format_i_fixed = func_value_fixed;
+	assign format_i_is_op_x_neg = act_cell_i_op_x_delayed[4][31];
+	assign format_i_fixed = func_value_fixed[17:0];
 	
 	assign format_i_fixed_rvs = {
 		format_i_fixed[0], format_i_fixed[1], format_i_fixed[2],
@@ -467,10 +496,76 @@ module sigmoid_cell #(
 				format_i_pass ? 
 					format_i_op_x:
 					(
-						({32{act_calfmt_inner == ACT_CAL_FMT_FP32}} & {1'b0, format_i_fp32_ec_nml[7:0], format_i_fp32_mts_nml[22:0]}) | 
-						({32{act_calfmt_inner == ACT_CAL_FMT_INT16}} & {16'd0, 1'b0, format_i_fixed[17:3]}) | // Q14
-						({32{act_calfmt_inner == ACT_CAL_FMT_INT32}} & {1'b0, format_i_fixed[17:0], 13'd0}) // Q30
+						(
+							{32{act_calfmt_inner == ACT_CAL_FMT_FP32}} & 
+							{
+								(act_mode == ACT_MODE_TANH) & format_i_is_op_x_neg, // Tanh是奇函数, 满足Tanh(x) = -Tanh(-x)
+								format_i_fp32_ec_nml[7:0],
+								format_i_fp32_mts_nml[22:0]
+							}
+						) | 
+						(
+							{32{act_calfmt_inner == ACT_CAL_FMT_INT16}} & 
+							(
+								(
+									{32{(act_mode == ACT_MODE_TANH) & format_i_is_op_x_neg}} ^ // Tanh是奇函数, 满足Tanh(x) = -Tanh(-x)
+									{16'd0, 1'b0, format_i_fixed[17:3]} // Q14
+								) + ((act_mode == ACT_MODE_TANH) & format_i_is_op_x_neg)
+							)
+						) | 
+						(
+							{32{act_calfmt_inner == ACT_CAL_FMT_INT32}} & 
+							(
+								(
+									{32{(act_mode == ACT_MODE_TANH) & format_i_is_op_x_neg}} ^ // Tanh是奇函数, 满足Tanh(x) = -Tanh(-x)
+									{1'b0, format_i_fixed[17:0], 13'd0} // Q30
+								) + ((act_mode == ACT_MODE_TANH) & format_i_is_op_x_neg)
+							)
+						)
 					);
+	end
+	
+	/** 激活单元结果输出 **/
+	reg[31:0] act_cell_o_res_r; // 计算结果
+	reg[INFO_ALONG_WIDTH-1:0] act_cell_o_info_along_r; // 随路数据
+	reg act_cell_o_vld_r;
+	
+	assign act_cell_o_res = act_cell_o_res_r;
+	assign act_cell_o_info_along = act_cell_o_info_along_r;
+	assign act_cell_o_vld = act_cell_o_vld_r;
+	
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			act_cell_o_vld_r <= 1'b0;
+		else if(aclken)
+			act_cell_o_vld_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_vld:
+					act_cell_i_vld_delayed[5];
+	end
+	
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			(
+				bypass ? 
+					act_cell_i_vld:
+					act_cell_i_vld_delayed[5]
+			)
+		)
+		begin
+			act_cell_o_res_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_op_x:
+					format_res;
+			
+			act_cell_o_info_along_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_info_along:
+					act_cell_i_info_along_delayed[5];
+		end
 	end
 	
 endmodule

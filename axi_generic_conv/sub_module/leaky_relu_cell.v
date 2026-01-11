@@ -34,7 +34,7 @@ SOFTWARE.
 |       |     x      |    ax     |
 ----------------------------------
 
-无论是哪种运算数据格式, 都有时延 = 5clk
+无论是哪种运算数据格式, 都有时延 = 6clk
 
 支持INT16、INT32、FP32三种运算数据格式
 
@@ -59,7 +59,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2025/12/19
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -74,6 +74,9 @@ module leaky_relu_cell #(
 	input wire aclk,
 	input wire aresetn,
 	input wire aclken,
+	
+	// 控制信号
+	input wire bypass, // 旁路本单元
 	
 	// 运行时参数
 	input wire[1:0] act_calfmt, // 运算数据格式
@@ -523,14 +526,64 @@ module leaky_relu_cell #(
 	end
 	
 	/** 激活单元结果输出 **/
-	assign act_cell_o_res = 
-		({32{(act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)}} & int_fnl_o_res) | 
-		({32{act_calfmt_inner == ACT_CAL_FMT_FP32}} & fp_fnl_o_res);
-	assign act_cell_o_info_along = 
-		({INFO_ALONG_WIDTH{(act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)}} & int_fnl_o_info_along) | 
-		({INFO_ALONG_WIDTH{act_calfmt_inner == ACT_CAL_FMT_FP32}} & fp_fnl_o_info_along);
-	assign act_cell_o_vld = 
-		(((act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)) & int_fnl_o_vld) | 
-		((act_calfmt_inner == ACT_CAL_FMT_FP32) & fp_fnl_o_vld);
+	reg[31:0] act_cell_o_res_r; // 计算结果
+	reg[INFO_ALONG_WIDTH-1:0] act_cell_o_info_along_r; // 随路数据
+	reg act_cell_o_vld_r;
+	
+	assign act_cell_o_res = act_cell_o_res_r;
+	assign act_cell_o_info_along = act_cell_o_info_along_r;
+	assign act_cell_o_vld = act_cell_o_vld_r;
+	
+	always @(posedge aclk or negedge aresetn)
+	begin
+		if(~aresetn)
+			act_cell_o_vld_r <= 1'b0;
+		else if(aclken)
+			act_cell_o_vld_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_vld:
+					(
+						(((act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)) & int_fnl_o_vld) | 
+						((act_calfmt_inner == ACT_CAL_FMT_FP32) & fp_fnl_o_vld)
+					);
+	end
+	
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			(
+				bypass ? 
+					act_cell_i_vld:
+					(
+						(((act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)) & int_fnl_o_vld) | 
+						((act_calfmt_inner == ACT_CAL_FMT_FP32) & fp_fnl_o_vld)
+					)
+			)
+		)
+		begin
+			act_cell_o_res_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_op_x:
+					(
+						({32{(act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)}} & int_fnl_o_res) | 
+						({32{act_calfmt_inner == ACT_CAL_FMT_FP32}} & fp_fnl_o_res)
+					);
+			
+			act_cell_o_info_along_r <= # SIM_DELAY 
+				bypass ? 
+					act_cell_i_info_along:
+					(
+						(
+							{INFO_ALONG_WIDTH{(act_calfmt_inner == ACT_CAL_FMT_INT16) | (act_calfmt_inner == ACT_CAL_FMT_INT32)}} & 
+							int_fnl_o_info_along
+						) | 
+						(
+							{INFO_ALONG_WIDTH{act_calfmt_inner == ACT_CAL_FMT_FP32}} & 
+							fp_fnl_o_info_along
+						)
+					);
+		end
+	end
 	
 endmodule

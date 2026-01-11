@@ -34,7 +34,7 @@ SOFTWARE.
 支持卷积核膨胀
 支持计算轮次拓展
 支持批归一化处理
-支持Leaky-Relu激活
+支持Leaky-Relu激活、Sigmoid激活和Tanh激活
 
 注意：
 需要外接2个DMA(MM2S)通道和1个DMA(S2MM)通道
@@ -48,7 +48,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/31
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -59,6 +59,7 @@ module axi_generic_conv #(
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
+	parameter integer TANH_SUPPORTED = 1, // 是否支持Tanh激活
 	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
@@ -312,7 +313,7 @@ module axi_generic_conv #(
 	wire bn_act_bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
 	wire[4:0] bn_act_leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
 	wire[31:0] bn_act_leaky_relu_param_alpha; // 泄露Relu激活参数
-	wire[4:0] bn_act_sigmoid_fixed_point_quat_accrc; // (Sigmoid输入)定点数量化精度
+	wire[4:0] bn_act_sigmoid_tanh_fixed_point_quat_accrc; // (Sigmoid或Tanh输入)定点数量化精度
 	// [卷积最终结果(AXIS主机)]
 	wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data; // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
 	wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep;
@@ -373,6 +374,7 @@ module axi_generic_conv #(
 		.BN_SUPPORTED(BN_SUPPORTED),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED),
+		.TANH_SUPPORTED(TANH_SUPPORTED),
 		.INT8_SUPPORTED(INT8_SUPPORTED),
 		.INT16_SUPPORTED(INT16_SUPPORTED),
 		.FP16_SUPPORTED(FP16_SUPPORTED),
@@ -528,7 +530,7 @@ module axi_generic_conv #(
 		.bn_act_bn_is_b_eq_0(bn_act_bn_is_b_eq_0),
 		.bn_act_leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
 		.bn_act_leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
-		.bn_act_sigmoid_fixed_point_quat_accrc(bn_act_sigmoid_fixed_point_quat_accrc),
+		.bn_act_sigmoid_tanh_fixed_point_quat_accrc(bn_act_sigmoid_tanh_fixed_point_quat_accrc),
 		.m_axis_ext_bn_act_i_data(m_axis_ext_bn_act_i_data),
 		.m_axis_ext_bn_act_i_keep(m_axis_ext_bn_act_i_keep),
 		.m_axis_ext_bn_act_i_user(m_axis_ext_bn_act_i_user),
@@ -1135,7 +1137,7 @@ module axi_generic_conv #(
 		.param_b_in_const_mac_mode(32'hxxxxxxxx),
 		.leaky_relu_fixed_point_quat_accrc(bn_act_leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(bn_act_leaky_relu_param_alpha),
-		.sigmoid_fixed_point_quat_accrc(bn_act_sigmoid_fixed_point_quat_accrc),
+		.sigmoid_tanh_fixed_point_quat_accrc(bn_act_sigmoid_tanh_fixed_point_quat_accrc),
 		
 		.s_sub_row_msg_axis_data(m_sub_row_msg_axis_data),
 		.s_sub_row_msg_axis_last(m_sub_row_msg_axis_last),

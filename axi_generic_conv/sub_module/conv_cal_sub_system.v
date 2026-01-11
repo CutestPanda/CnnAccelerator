@@ -141,7 +141,7 @@ module conv_cal_sub_system #(
 	input wire bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
 	input wire[4:0] leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
 	input wire[31:0] leaky_relu_param_alpha, // 泄露Relu激活参数
-	input wire[4:0] sigmoid_fixed_point_quat_accrc, // Sigmoid输入定点数量化精度
+	input wire[4:0] sigmoid_tanh_fixed_point_quat_accrc, // Sigmoid或Tanh输入定点数量化精度
 	
 	// 特征图切块信息(AXIS从机)
 	input wire[7:0] s_fm_cake_info_axis_data, // {保留(4bit), 每个切片里的有效表面行数(4bit)}
@@ -903,7 +903,7 @@ module conv_cal_sub_system #(
 				.param_b_in_const_mac_mode(32'hxxxxxxxx),
 				.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 				.leaky_relu_param_alpha(leaky_relu_param_alpha),
-				.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
+				.sigmoid_tanh_fixed_point_quat_accrc(sigmoid_tanh_fixed_point_quat_accrc),
 				
 				.s_sub_row_msg_axis_data(s_sub_row_msg_axis_data),
 				.s_sub_row_msg_axis_last(s_sub_row_msg_axis_last),

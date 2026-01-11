@@ -16,6 +16,7 @@
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
         2026.01.05 1.31 支持中间结果缓存时钟倍率
         2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
+        2026.01.11 1.40 增加对tanh激活函数的支持
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -184,18 +185,25 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	}
 	handler->reg_region_bn_act_cfg->bn_cfg = 0x00000000;
 
-	handler->reg_region_bn_act_cfg->act_cfg0 = (0x00000002 << 8);
-	if((((handler->reg_region_bn_act_cfg->act_cfg0) >> 8) & 0x000000FF) == 2){
+	handler->reg_region_bn_act_cfg->act_cfg0 = (uint32_t)ACT_FUNC_LEAKY_RELU;
+	if((handler->reg_region_bn_act_cfg->act_cfg0 & 0x00000007) == ACT_FUNC_LEAKY_RELU){
 		handler->property.leaky_relu_supported = 1;
 	}else{
 		handler->property.leaky_relu_supported = 0;
 	}
 
-	handler->reg_region_bn_act_cfg->act_cfg0 = (0x00000002 << 16);
-	if((((handler->reg_region_bn_act_cfg->act_cfg0) >> 16) & 0x000000FF) == 2){
+	handler->reg_region_bn_act_cfg->act_cfg0 = (uint32_t)ACT_FUNC_SIGMOID;
+	if((handler->reg_region_bn_act_cfg->act_cfg0 & 0x00000007) == ACT_FUNC_SIGMOID){
 		handler->property.sigmoid_supported = 1;
 	}else{
 		handler->property.sigmoid_supported = 0;
+	}
+
+	handler->reg_region_bn_act_cfg->act_cfg0 = (uint32_t)ACT_FUNC_TANH;
+	if((handler->reg_region_bn_act_cfg->act_cfg0 & 0x00000007) == ACT_FUNC_TANH){
+		handler->property.tanh_supported = 1;
+	}else{
+		handler->property.tanh_supported = 0;
 	}
 
 	axi_generic_conv_disable_cal_sub_sys(handler);
@@ -379,7 +387,8 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 
 	if(
 		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_LEAKY_RELU && (!handler->property.leaky_relu_supported)) ||
-		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_SIGMOID && (!handler->property.sigmoid_supported))
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_SIGMOID && (!handler->property.sigmoid_supported)) ||
+		(cfg->bn_act_cfg.act_func_type == ACT_FUNC_TANH && (!handler->property.tanh_supported))
 	){
 		return -2;
 	}

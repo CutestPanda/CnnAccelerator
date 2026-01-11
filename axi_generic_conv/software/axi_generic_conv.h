@@ -16,6 +16,7 @@
         2025.12.30 1.30 修改批归一化与激活配置, 增加Sigmoid激活配置
         2026.01.05 1.31 支持中间结果缓存时钟倍率
         2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
+        2026.01.11 1.40 增加对tanh激活函数的支持
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -94,6 +95,7 @@ typedef enum{
 typedef enum{
 	ACT_FUNC_LEAKY_RELU = 0b000,
 	ACT_FUNC_SIGMOID = 0b001,
+	ACT_FUNC_TANH = 0b010,
 	ACT_FUNC_NONE = 0b111
 }AxiGnrConvActFuncType;
 
@@ -108,6 +110,7 @@ typedef struct{
 	uint8_t bn_supported; // 是否支持批归一化处理
 	uint8_t leaky_relu_supported; // 是否支持Leaky-Relu激活
 	uint8_t sigmoid_supported; // 是否支持Sigmoid激活
+	uint8_t tanh_supported; // 是否支持Tanh激活
 	uint8_t int8_supported; // 是否支持INT8运算数据格式
 	uint8_t int16_supported; // 是否支持INT16运算数据格式
 	uint8_t fp16_supported; // 是否支持FP16运算数据格式

@@ -186,6 +186,8 @@ module tb_leaky_relu_cell();
 		.aresetn(rst_n),
 		.aclken(1'b1),
 		
+		.bypass(1'b0),
+		
 		.act_calfmt(act_calfmt),
 		.fixed_point_quat_accrc(fixed_point_quat_accrc),
 		.act_param_alpha(act_param_alpha),

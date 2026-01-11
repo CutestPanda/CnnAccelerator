@@ -30,7 +30,7 @@ SOFTWARE.
 根据子表面行的输出通道号, 从BN参数MEM取出参数组(ATOMIC_K个参数)
 进行批归一化处理(aX + b)
 
-进行激活处理(支持Leaky Relu和Sigmoid)
+进行激活处理(支持Leaky Relu、Sigmoid和Tanh)
 
 支持独立的BN与激活计算核心时钟, 实际的BN与激活单元数 = BN_ACT_PRL_N/BN_ACT_CLK_RATE
 
@@ -78,7 +78,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2026/01/02
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -118,8 +118,8 @@ module conv_bn_act_proc #(
 	// [泄露Relu激活参数]
 	input wire[4:0] leaky_relu_fixed_point_quat_accrc, // (激活参数)定点数量化精度
 	input wire[31:0] leaky_relu_param_alpha, // 激活参数
-	// [Sigmoid激活参数]
-	input wire[4:0] sigmoid_fixed_point_quat_accrc, // 输入定点数量化精度
+	// [Sigmoid或Tanh激活参数]
+	input wire[4:0] sigmoid_tanh_fixed_point_quat_accrc, // 输入定点数量化精度
 	
 	// 子表面行信息(AXIS从机)
 	input wire[15:0] s_sub_row_msg_axis_data, // {输出通道号(16bit)}
@@ -197,6 +197,7 @@ module conv_bn_act_proc #(
 	// 激活函数类型的编码
 	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
 	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_TANH = 3'b010; // tanh
 	localparam ACT_FUNC_TYPE_NONE = 3'b111;
 	// 每个表面的最大处理轮次
 	localparam integer MAX_PROC_ROUND_N = ATOMIC_K / (BN_ACT_PRL_N / BN_ACT_CLK_RATE);
@@ -673,9 +674,6 @@ module conv_bn_act_proc #(
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] bn_mac_o_res; // 计算结果
 	wire[BN_ACT_PRL_N+1+5-1:0] bn_mac_o_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] bn_mac_o_vld;
-	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] bn_mac_o_res_actual; // 计算结果
-	wire[BN_ACT_PRL_N+1+5-1:0] bn_mac_o_info_along_actual[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
-	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] bn_mac_o_vld_actual;
 	
 	assign s_axis_fnl_res_ready = 
 		aclken & en_bn_act_proc & 
@@ -756,15 +754,6 @@ module conv_bn_act_proc #(
 		is_in_const_mac_mode ? 
 			{(BN_ACT_PRL_N/BN_ACT_CLK_RATE){param_b_in_const_mac_mode}}:
 			(bn_param_buf_b[bn_param_buf_rptr[0]] >> (BN_ACT_PRL_N/BN_ACT_CLK_RATE*32*bn_proc_round_id));
-	
-	assign bn_mac_o_res_actual = 
-		use_bn_unit ? 
-			bn_mac_o_res:
-			cur_sfc_data_d1;
-	assign bn_mac_o_vld_actual = 
-		use_bn_unit ? 
-			bn_mac_o_vld:
-			bn_mac_i_vld;
 	
 	// BN与激活输入轮次(计数器)
 	always @(posedge bn_act_aclk or negedge bn_act_aresetn)
@@ -854,11 +843,6 @@ module conv_bn_act_proc #(
 						cur_info_along_d1:
 						{(BN_ACT_PRL_N+1+5){1'bx}};
 				
-				assign bn_mac_o_info_along_actual[bn_cell_i] = 
-					use_bn_unit ? 
-						bn_mac_o_info_along[bn_cell_i]:
-						bn_mac_i_info_along[bn_cell_i];
-				
 				always @(posedge bn_mac_aclk or negedge bn_mac_aresetn)
 				begin
 					if(~bn_mac_aresetn)
@@ -885,6 +869,8 @@ module conv_bn_act_proc #(
 					.aclk(bn_mac_aclk),
 					.aresetn(bn_mac_aresetn),
 					.aclken(bn_mac_aclken),
+					
+					.bypass(~use_bn_unit),
 					
 					.bn_calfmt(calfmt),
 					.fixed_point_quat_accrc(bn_fixed_point_quat_accrc),
@@ -919,16 +905,16 @@ module conv_bn_act_proc #(
 	/**
 	激活处理
 	
-	支持Leaky Relu和Sigmoid
+	支持Leaky Relu、Sigmoid和Tanh
 	**/
 	// [Leaky Relu给出的结果]
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] act_leaky_relu_o_res; // 计算结果
 	wire[BN_ACT_PRL_N+1+5-1:0] act_leaky_relu_o_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] act_leaky_relu_o_vld;
-	// [Sigmoid给出的结果]
-	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] act_sigmoid_o_res; // 计算结果
-	wire[BN_ACT_PRL_N+1+5-1:0] act_sigmoid_o_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
-	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] act_sigmoid_o_vld;
+	// [Sigmoid或Tanh给出的结果]
+	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] act_sigmoid_tanh_o_res; // 计算结果
+	wire[BN_ACT_PRL_N+1+5-1:0] act_sigmoid_tanh_o_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
+	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] act_sigmoid_tanh_o_vld;
 	// [实际选择的结果]
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*32-1:0] act_grp_o_res_actual; // 计算结果
 	wire[BN_ACT_PRL_N+1+5-1:0] act_grp_o_info_along_actual[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
@@ -939,12 +925,22 @@ module conv_bn_act_proc #(
 	
 	assign act_grp_o_res_actual = 
 		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE*32){act_func_type == ACT_FUNC_TYPE_LEAKY_RELU}} & act_leaky_relu_o_res) | 
-		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE*32){act_func_type == ACT_FUNC_TYPE_SIGMOID}} & act_sigmoid_o_res) | 
-		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE*32){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_res_actual);
+		(
+			{(BN_ACT_PRL_N/BN_ACT_CLK_RATE*32){
+				(act_func_type == ACT_FUNC_TYPE_SIGMOID) | 
+				(act_func_type == ACT_FUNC_TYPE_TANH)
+			}} & act_sigmoid_tanh_o_res
+		) | 
+		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE*32){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_res);
 	assign act_grp_o_vld_actual = 
 		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE){act_func_type == ACT_FUNC_TYPE_LEAKY_RELU}} & act_leaky_relu_o_vld) | 
-		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE){act_func_type == ACT_FUNC_TYPE_SIGMOID}} & act_sigmoid_o_vld) | 
-		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_vld_actual);
+		(
+			{(BN_ACT_PRL_N/BN_ACT_CLK_RATE){
+				(act_func_type == ACT_FUNC_TYPE_SIGMOID) | 
+				(act_func_type == ACT_FUNC_TYPE_TANH)
+			}} & act_sigmoid_tanh_o_vld
+		) | 
+		({(BN_ACT_PRL_N/BN_ACT_CLK_RATE){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_vld);
 	
 	genvar act_i;
 	generate
@@ -954,8 +950,13 @@ module conv_bn_act_proc #(
 			begin
 				assign act_grp_o_info_along_actual[act_i] = 
 					({(BN_ACT_PRL_N+1+5){act_func_type == ACT_FUNC_TYPE_LEAKY_RELU}} & act_leaky_relu_o_info_along[act_i]) | 
-					({(BN_ACT_PRL_N+1+5){act_func_type == ACT_FUNC_TYPE_SIGMOID}} & act_sigmoid_o_info_along[act_i]) | 
-					({(BN_ACT_PRL_N+1+5){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_info_along_actual[act_i]);
+					(
+						{(BN_ACT_PRL_N+1+5){
+							(act_func_type == ACT_FUNC_TYPE_SIGMOID) | 
+							(act_func_type == ACT_FUNC_TYPE_TANH)
+						}} & act_sigmoid_tanh_o_info_along[act_i]
+					) | 
+					({(BN_ACT_PRL_N+1+5){act_func_type == ACT_FUNC_TYPE_NONE}} & bn_mac_o_info_along[act_i]);
 				
 				leaky_relu_cell #(
 					.INT16_SUPPORTED(INT16_SUPPORTED),
@@ -968,14 +969,19 @@ module conv_bn_act_proc #(
 					.aresetn((BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn),
 					.aclken((BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken),
 					
+					.bypass(1'b0),
+					
 					.act_calfmt(calfmt),
 					.fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 					.act_param_alpha(leaky_relu_param_alpha),
 					
-					.act_cell_i_op_x(bn_mac_o_res_actual[act_i*32+31:act_i*32]),
+					.act_cell_i_op_x(bn_mac_o_res[act_i*32+31:act_i*32]),
 					.act_cell_i_pass(1'b0),
-					.act_cell_i_info_along(bn_mac_o_info_along_actual[act_i]),
-					.act_cell_i_vld(bn_mac_o_vld_actual[act_i] & (act_func_type == ACT_FUNC_TYPE_LEAKY_RELU)),
+					.act_cell_i_info_along(bn_mac_o_info_along[act_i]),
+					.act_cell_i_vld(
+						bn_mac_o_vld[act_i] & 
+						(act_func_type == ACT_FUNC_TYPE_LEAKY_RELU)
+					),
 					
 					.act_cell_o_res(act_leaky_relu_o_res[act_i*32+31:act_i*32]),
 					.act_cell_o_info_along(act_leaky_relu_o_info_along[act_i]),
@@ -987,7 +993,7 @@ module conv_bn_act_proc #(
 					.mul_res(mul1_res[MUL1_RES_WIDTH*(act_i+1)-1:MUL1_RES_WIDTH*act_i])
 				);
 				
-				sigmoid_cell #(
+				sigmoid_tanh_cell #(
 					.INT16_SUPPORTED(INT16_SUPPORTED),
 					.INT32_SUPPORTED(INT32_SUPPORTED),
 					.FP32_SUPPORTED(FP32_SUPPORTED),
@@ -998,17 +1004,23 @@ module conv_bn_act_proc #(
 					.aresetn((BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn),
 					.aclken((BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken),
 					
+					.bypass(1'b0),
+					
+					.act_func_type(act_func_type),
 					.act_calfmt(calfmt),
-					.in_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
+					.in_fixed_point_quat_accrc(sigmoid_tanh_fixed_point_quat_accrc),
 					
-					.act_cell_i_op_x(bn_mac_o_res_actual[act_i*32+31:act_i*32]),
+					.act_cell_i_op_x(bn_mac_o_res[act_i*32+31:act_i*32]),
 					.act_cell_i_pass(1'b0),
-					.act_cell_i_info_along(bn_mac_o_info_along_actual[act_i]),
-					.act_cell_i_vld(bn_mac_o_vld_actual[act_i] & (act_func_type == ACT_FUNC_TYPE_SIGMOID)),
+					.act_cell_i_info_along(bn_mac_o_info_along[act_i]),
+					.act_cell_i_vld(
+						bn_mac_o_vld[act_i] & 
+						((act_func_type == ACT_FUNC_TYPE_SIGMOID) | (act_func_type == ACT_FUNC_TYPE_TANH))
+					),
 					
-					.act_cell_o_res(act_sigmoid_o_res[act_i*32+31:act_i*32]),
-					.act_cell_o_info_along(act_sigmoid_o_info_along[act_i]),
-					.act_cell_o_vld(act_sigmoid_o_vld[act_i]),
+					.act_cell_o_res(act_sigmoid_tanh_o_res[act_i*32+31:act_i*32]),
+					.act_cell_o_info_along(act_sigmoid_tanh_o_info_along[act_i]),
+					.act_cell_o_vld(act_sigmoid_tanh_o_vld[act_i]),
 					
 					.lut_mem_clk_a(),
 					.lut_mem_ren_a(sigmoid_lut_mem_ren_a[act_i]),

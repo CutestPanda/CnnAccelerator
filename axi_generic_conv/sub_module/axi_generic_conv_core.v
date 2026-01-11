@@ -46,7 +46,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/26
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -56,6 +56,7 @@ module axi_generic_conv_core #(
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
+	parameter integer TANH_SUPPORTED = 1, // 是否支持Tanh激活
 	parameter integer INT8_SUPPORTED = 0, // 是否支持INT8
 	parameter integer INT16_SUPPORTED = 0, // 是否支持INT16
 	parameter integer FP16_SUPPORTED = 1, // 是否支持FP16
@@ -251,7 +252,7 @@ module axi_generic_conv_core #(
 	output wire bn_act_bn_is_b_eq_0, // 批归一化参数B的实际值为0(标志)
 	output wire[4:0] bn_act_leaky_relu_fixed_point_quat_accrc, // (泄露Relu激活参数)定点数量化精度
 	output wire[31:0] bn_act_leaky_relu_param_alpha, // 泄露Relu激活参数
-	output wire[4:0] bn_act_sigmoid_fixed_point_quat_accrc, // (Sigmoid输入)定点数量化精度
+	output wire[4:0] bn_act_sigmoid_tanh_fixed_point_quat_accrc, // (Sigmoid或Tanh输入)定点数量化精度
 	// [卷积最终结果(AXIS主机)]
 	output wire[ATOMIC_K*32-1:0] m_axis_ext_bn_act_i_data, // 对于ATOMIC_K个最终结果 -> {单精度浮点数或定点数(32位)}
 	output wire[ATOMIC_K*4-1:0] m_axis_ext_bn_act_i_keep,
@@ -397,7 +398,7 @@ module axi_generic_conv_core #(
 	wire bn_is_b_eq_0; // 批归一化参数B的实际值为0(标志)
 	wire[4:0] leaky_relu_fixed_point_quat_accrc; // (泄露Relu激活参数)定点数量化精度
 	wire[31:0] leaky_relu_param_alpha; // 泄露Relu激活参数
-	wire[4:0] sigmoid_fixed_point_quat_accrc; // Sigmoid输入定点数量化精度
+	wire[4:0] sigmoid_tanh_fixed_point_quat_accrc; // Sigmoid或Tanh输入定点数量化精度
 	// 块级控制
 	// [卷积核权重访问请求生成单元]
 	wire kernal_access_blk_start;
@@ -417,6 +418,7 @@ module axi_generic_conv_core #(
 		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED ? 1'b1:1'b0),
+		.TANH_SUPPORTED(TANH_SUPPORTED ? 1'b1:1'b0),
 		.INT8_SUPPORTED(INT8_SUPPORTED ? 1'b1:1'b0),
 		.INT16_SUPPORTED(INT16_SUPPORTED ? 1'b1:1'b0),
 		.FP16_SUPPORTED(FP16_SUPPORTED ? 1'b1:1'b0),
@@ -513,7 +515,7 @@ module axi_generic_conv_core #(
 		.bn_is_b_eq_0(bn_is_b_eq_0),
 		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(leaky_relu_param_alpha),
-		.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
+		.sigmoid_tanh_fixed_point_quat_accrc(sigmoid_tanh_fixed_point_quat_accrc),
 		
 		.kernal_access_blk_start(kernal_access_blk_start),
 		.kernal_access_blk_idle(kernal_access_blk_idle),
@@ -866,7 +868,7 @@ module axi_generic_conv_core #(
 		.bn_is_b_eq_0(bn_is_b_eq_0),
 		.leaky_relu_fixed_point_quat_accrc(leaky_relu_fixed_point_quat_accrc),
 		.leaky_relu_param_alpha(leaky_relu_param_alpha),
-		.sigmoid_fixed_point_quat_accrc(sigmoid_fixed_point_quat_accrc),
+		.sigmoid_tanh_fixed_point_quat_accrc(sigmoid_tanh_fixed_point_quat_accrc),
 		
 		.s_fm_cake_info_axis_data(s_fm_cake_info_axis_data),
 		.s_fm_cake_info_axis_valid(s_fm_cake_info_axis_valid),
@@ -1079,7 +1081,7 @@ module axi_generic_conv_core #(
 	assign bn_act_bn_is_b_eq_0 = bn_is_b_eq_0;
 	assign bn_act_leaky_relu_fixed_point_quat_accrc = leaky_relu_fixed_point_quat_accrc;
 	assign bn_act_leaky_relu_param_alpha = leaky_relu_param_alpha;
-	assign bn_act_sigmoid_fixed_point_quat_accrc = sigmoid_fixed_point_quat_accrc;
+	assign bn_act_sigmoid_tanh_fixed_point_quat_accrc = sigmoid_tanh_fixed_point_quat_accrc;
 	
 	assign round_calfmt = calfmt;
 	assign round_fixed_point_quat_accrc = 4'dx; // 警告: 需要给出运行时参数!!!

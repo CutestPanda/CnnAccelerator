@@ -45,7 +45,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/26
+日期: 2026/01/11
 ********************************************************************/
 
 
@@ -272,6 +272,7 @@ module axi_generic_pool_core #(
 	// 激活函数类型的编码
 	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
 	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
+	localparam ACT_FUNC_TYPE_TANH = 3'b010; // tanh
 	localparam ACT_FUNC_TYPE_NONE = 3'b111;
 	
 	/** 寄存器配置接口 **/
