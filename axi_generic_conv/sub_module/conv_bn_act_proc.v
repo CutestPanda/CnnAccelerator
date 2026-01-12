@@ -194,6 +194,20 @@ module conv_bn_act_proc #(
     endfunction
 	
 	/** 常量 **/
+	// 运算数据格式的编码
+	localparam CAL_FMT_INT8 = 2'b00;
+	localparam CAL_FMT_INT16 = 2'b01;
+	localparam CAL_FMT_FP16 = 2'b10;
+	localparam CAL_FMT_NONE = 2'b11;
+	// 目标数据格式的编码
+	localparam TARGET_DATA_FMT_U8 = 3'b000;
+	localparam TARGET_DATA_FMT_S8 = 3'b001;
+	localparam TARGET_DATA_FMT_U16 = 3'b010;
+	localparam TARGET_DATA_FMT_S16 = 3'b011;
+	localparam TARGET_DATA_FMT_U32 = 3'b100;
+	localparam TARGET_DATA_FMT_S32 = 3'b101;
+	localparam TARGET_DATA_FMT_FP16 = 3'b110;
+	localparam TARGET_DATA_FMT_NONE = 3'b111;
 	// 激活函数类型的编码
 	localparam ACT_FUNC_TYPE_LEAKY_RELU = 3'b000; // 泄露Relu
 	localparam ACT_FUNC_TYPE_SIGMOID = 3'b001; // sigmoid
@@ -1041,19 +1055,28 @@ module conv_bn_act_proc #(
 	endgenerate
 	
 	/** 舍入处理 **/
+	wire[2:0] target_data_fmt; // 目标数据格式
+	wire[31:0] round_cell_res[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1];
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE*16-1:0] round_o_res; // 计算结果
 	wire[BN_ACT_PRL_N+1+5-1:0] round_o_info_along[0:BN_ACT_PRL_N/BN_ACT_CLK_RATE-1]; // 随路数据({是否最后1个子行(1bit), 子行号(4bit), 数据有效掩码(BN_ACT_PRL_N bit), 行内最后1个数据块标志(1bit)})
 	wire[BN_ACT_PRL_N/BN_ACT_CLK_RATE-1:0] round_o_vld;
+	
+	assign target_data_fmt = 
+		(FP32_SUPPORTED  & (calfmt == CAL_FMT_FP16))  ? TARGET_DATA_FMT_FP16:
+		(INT32_SUPPORTED & (calfmt == CAL_FMT_INT16)) ? TARGET_DATA_FMT_S16:
+		(INT16_SUPPORTED & (calfmt == CAL_FMT_INT8))  ? TARGET_DATA_FMT_S8:
+		                                                TARGET_DATA_FMT_NONE;
 	
 	genvar round_i;
 	generate
 		for(round_i = 0;round_i < BN_ACT_PRL_N/BN_ACT_CLK_RATE;round_i = round_i + 1)
 		begin:round_blk
+			assign round_o_res[round_i*16+15:round_i*16] = round_cell_res[round_i][15:0];
+			
 			out_round_cell #(
 				.USE_EXT_CE(1'b0),
-				.INT8_SUPPORTED(INT16_SUPPORTED),
-				.INT16_SUPPORTED(INT32_SUPPORTED),
-				.FP16_SUPPORTED(FP32_SUPPORTED),
+				.S33_ROUND_SUPPORTED(INT16_SUPPORTED | INT32_SUPPORTED),
+				.FP32_ROUND_SUPPORTED(FP32_SUPPORTED),
 				.INFO_ALONG_WIDTH(BN_ACT_PRL_N+1+5),
 				.SIM_DELAY(SIM_DELAY)
 			)out_round_cell_u(
@@ -1061,17 +1084,21 @@ module conv_bn_act_proc #(
 				.aresetn((BN_ACT_CLK_RATE == 1) ? aresetn:bn_act_aresetn),
 				.aclken((BN_ACT_CLK_RATE == 1) ? aclken:bn_act_aclken),
 				
-				.calfmt(calfmt),
-				.fixed_point_quat_accrc(4'bxxxx), // 需要给出运行时参数!!!
+				.target_data_fmt(target_data_fmt),
+				.in_fixed_point_quat_accrc(5'dx), // 需要给出运行时参数!!!
+				.out_fixed_point_quat_accrc(5'dx), // 需要给出运行时参数!!!
+				.fixed_point_rounding_digits(5'dx), // 需要给出运行时参数!!!
 				
+				.bypass(1'b0),
 				.s0_ce(1'b0),
 				.s1_ce(1'b0),
+				.s2_ce(1'b0),
 				
-				.round_i_op_x(act_grp_o_res_actual[round_i*32+31:round_i*32]),
+				.round_i_op_x({act_grp_o_res_actual[round_i*32+31], act_grp_o_res_actual[round_i*32+31:round_i*32]}),
 				.round_i_info_along(act_grp_o_info_along_actual[round_i]),
 				.round_i_vld(act_grp_o_vld_actual[round_i]),
 				
-				.round_o_res(round_o_res[round_i*16+15:round_i*16]),
+				.round_o_res(round_cell_res[round_i]),
 				.round_o_info_along(round_o_info_along[round_i]),
 				.round_o_vld(round_o_vld[round_i])
 			);
