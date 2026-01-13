@@ -89,7 +89,7 @@ module out_round_cell #(
 	input wire round_i_vld,
 	
 	// 舍入单元处理结果
-	output wire[31:0] round_o_res, // 结果(定点数或FP16)
+	output wire[31:0] round_o_res, // 结果(定点数或FP16或FP32)
 	output wire[INFO_ALONG_WIDTH-1:0] round_o_info_along, // 随路数据
 	output wire round_o_vld
 );
