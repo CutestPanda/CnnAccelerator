@@ -53,7 +53,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2026/01/08
+日期: 2026/01/13
 ********************************************************************/
 
 
@@ -464,7 +464,20 @@ module element_wise_in_data_cvt_cell #(
 		begin
 			cvt_cell_o_res_r <= # SIM_DELAY 
 				bypass ? 
-					cvt_cell_i_op_x[31:0]:
+					(
+						(
+							{32{(in_data_fmt_inner == IN_DATA_FMT_S33) & (integer_type == INTEGER_TYPE_S16)}} & 
+							{{16{cvt_cell_i_op_x[15]}}, cvt_cell_i_op_x[15:0]}
+						) | 
+						(
+							{32{(in_data_fmt_inner == IN_DATA_FMT_S33) & (integer_type == INTEGER_TYPE_S32)}} & 
+							{cvt_cell_i_op_x[31:0]}
+						) | 
+						(
+							{32{(in_data_fmt_inner == IN_DATA_FMT_FP16) | (in_data_fmt_inner == IN_DATA_FMT_NONE)}} & 
+							{cvt_cell_i_op_x[31:0]}
+						)
+					):
 					(
 						({32{in_data_fmt_inner == IN_DATA_FMT_FP16}} & fp16_out_res) | 
 						({32{in_data_fmt_inner == IN_DATA_FMT_S33}} & s33_out_res)

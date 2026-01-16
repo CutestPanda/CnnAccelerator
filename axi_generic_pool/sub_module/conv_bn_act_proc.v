@@ -78,7 +78,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2026/01/11
+日期: 2026/01/13
 ********************************************************************/
 
 
@@ -901,6 +901,7 @@ module conv_bn_act_proc #(
 					.mac_cell_o_info_along(bn_mac_o_info_along[bn_cell_i]),
 					.mac_cell_o_vld(bn_mac_o_vld[bn_cell_i]),
 					
+					.mul_clk(),
 					.mul_op_a(mul0_op_a[MUL0_OP_WIDTH*(bn_cell_i+1)-1:MUL0_OP_WIDTH*bn_cell_i]),
 					.mul_op_b(mul0_op_b[MUL0_OP_WIDTH*(bn_cell_i+1)-1:MUL0_OP_WIDTH*bn_cell_i]),
 					.mul_ce(mul0_ce[MUL0_CE_WIDTH*(bn_cell_i+1)-1:MUL0_CE_WIDTH*bn_cell_i]),

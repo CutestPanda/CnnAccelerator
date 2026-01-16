@@ -70,7 +70,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2026/01/11
+日期: 2026/01/13
 ********************************************************************/
 
 
@@ -108,6 +108,7 @@ module batch_nml_mac_cell #(
 	output wire mac_cell_o_vld,
 	
 	// 外部有符号乘法器
+	output wire mul_clk,
 	output wire[(INT16_SUPPORTED ? 4*18:(INT32_SUPPORTED ? 32:25))-1:0] mul_op_a, // 操作数A
 	output wire[(INT16_SUPPORTED ? 4*18:(INT32_SUPPORTED ? 32:25))-1:0] mul_op_b, // 操作数B
 	output wire[(INT16_SUPPORTED ? 4:3)-1:0] mul_ce, // 计算使能
@@ -144,6 +145,7 @@ module batch_nml_mac_cell #(
 	reg[17:0] mul_op_b_r[3:0];
 	reg[3:0] mul_in_vld_r;
 	
+	assign mul_clk = aclk;
 	assign mul_op_a = 
 		INT16_SUPPORTED ? 
 			{mul_op_a_r[3], mul_op_a_r[2], mul_op_a_r[1], mul_op_a_r[0]}:
