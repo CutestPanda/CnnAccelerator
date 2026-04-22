@@ -40,7 +40,7 @@ module unsigned_mul #(
     
 	wire[op_a_width-1:0] mul_in1;
 	wire[op_b_width-1:0] mul_in2;
-	(* use_dsp="yes" *)reg[(op_a_width+op_b_width)-1:0] mul_res;
+	reg[(op_a_width+op_b_width)-1:0] mul_res;
 	
 	assign res = mul_res;
 	

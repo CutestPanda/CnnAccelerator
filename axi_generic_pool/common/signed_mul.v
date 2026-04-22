@@ -58,7 +58,7 @@ module signed_mul #(
 	/** 有符号乘法 **/
 	wire signed[op_a_width-1:0] mul_in1;
 	wire signed[op_b_width-1:0] mul_in2;
-	(* use_dsp="yes" *)reg signed[(op_a_width+op_b_width)-1:0] mul_res;
+	reg signed[(op_a_width+op_b_width)-1:0] mul_res;
 	
 	assign mul_in1 = (en_in_reg == "false") ? op_a:op_a_r;
 	assign mul_in2 = (en_in_reg == "false") ? op_b:op_b_r;

@@ -48,11 +48,12 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2026/01/11
+日期: 2026/04/22
 ********************************************************************/
 
 
 module axi_generic_conv #(
+	parameter ASYNC_MAC_ARRAY_OPT_MODE = "area", // 异步计算核心的优化模式("area" | "performance")(仅在计算核心时钟倍率>1时可用)
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
@@ -371,6 +372,7 @@ module axi_generic_conv #(
 	axi_generic_conv_core #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+		.ASYNC_MAC_ARRAY_OPT_MODE(ASYNC_MAC_ARRAY_OPT_MODE),
 		.BN_SUPPORTED(BN_SUPPORTED),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED),
