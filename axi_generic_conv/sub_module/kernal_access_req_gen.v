@@ -133,6 +133,8 @@ module kernal_access_req_gen #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	localparam KBUFGRPSZ_16 = 3'b110; // 4x4
+	localparam KBUFGRPSZ_4 = 3'b111; // 2x2
 	// 权重块访问状态编码
 	localparam KWGTBLK_ACCESS_STS_IDLE = 3'b000; // 状态: 空闲
 	localparam KWGTBLK_ACCESS_STS_BUF_PRE_RST = 3'b001; // 状态: 缓存前复位
@@ -154,19 +156,23 @@ module kernal_access_req_gen #(
 	wire[3:0] kernal_w_h; // 卷积核宽度或高度
 	
 	assign wgtblk_n_foreach_cgrp = 
-		(kernal_shape == KBUFGRPSZ_1)  ? 7'd1:
-		(kernal_shape == KBUFGRPSZ_9)  ? 7'd9:
-		(kernal_shape == KBUFGRPSZ_25) ? 7'd25:
-		(kernal_shape == KBUFGRPSZ_49) ? 7'd49:
-		(kernal_shape == KBUFGRPSZ_81) ? 7'd81:
-		                                 7'd121;
+		(kernal_shape == KBUFGRPSZ_1)   ? 7'd1:
+		(kernal_shape == KBUFGRPSZ_9)   ? 7'd9:
+		(kernal_shape == KBUFGRPSZ_25)  ? 7'd25:
+		(kernal_shape == KBUFGRPSZ_49)  ? 7'd49:
+		(kernal_shape == KBUFGRPSZ_81)  ? 7'd81:
+		(kernal_shape == KBUFGRPSZ_121) ? 7'd121:
+		(kernal_shape == KBUFGRPSZ_16)  ? 7'd16:
+		                                  7'd4;
 	assign kernal_w_h = 
-		(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
-		(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
-		(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
-		(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
-		(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
-		                                 4'd11;
+		(kernal_shape == KBUFGRPSZ_1)   ? 4'd1:
+		(kernal_shape == KBUFGRPSZ_9)   ? 4'd3:
+		(kernal_shape == KBUFGRPSZ_25)  ? 4'd5:
+		(kernal_shape == KBUFGRPSZ_49)  ? 4'd7:
+		(kernal_shape == KBUFGRPSZ_81)  ? 4'd9:
+		(kernal_shape == KBUFGRPSZ_121) ? 4'd11:
+		(kernal_shape == KBUFGRPSZ_16)  ? 4'd4:
+		                                  4'd2;
 	
 	/** AXIS寄存器片 **/
 	wire[103:0] s_kwgtblk_rd_req_reg_axis_data;

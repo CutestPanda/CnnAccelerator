@@ -1207,7 +1207,7 @@ module conv_bn_act_proc #(
 		if(~bn_act_aresetn)
 			bn_act_res_out_round_cnt <= 1;
 		else if(bn_act_aclken & (FP32_KEEP ? act_grp_o_vld_actual[0]:round_o_vld[0]))
-			bn_act_res_out_round_cnt <= # SIM_DELAY (bn_act_res_out_round_cnt << 1) | (bn_act_res_out_round_cnt >> (BN_ACT_PRL_N - 1));
+			bn_act_res_out_round_cnt <= # SIM_DELAY (bn_act_res_out_round_cnt << 1) | (bn_act_res_out_round_cnt >> (BN_ACT_CLK_RATE - 1));
 	end
 	
 	// 保存的BN与激活结果

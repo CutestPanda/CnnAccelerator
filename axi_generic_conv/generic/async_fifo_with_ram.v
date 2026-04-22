@@ -219,7 +219,7 @@ module async_fifo_with_ram #(
                 .mem_width(data_width),
                 .mem_depth(depth),
                 .INIT_FILE("no_init"),
-                .use_output_register("false"),
+                .use_output_register((fwft_mode == "true") ? "false":"true"),
                 .simulation_delay(simulation_delay)
             )ram_u(
                 .clk_a(ram_clk_w),

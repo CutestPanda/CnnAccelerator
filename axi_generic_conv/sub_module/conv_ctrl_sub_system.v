@@ -209,6 +209,8 @@ module conv_ctrl_sub_system #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	localparam KBUFGRPSZ_16 = 3'b110; // 4x4
+	localparam KBUFGRPSZ_4 = 3'b111; // 2x2
 	
 	/** 补充运行时参数 **/
 	wire is_16bit_wgt; // 是否16位权重数据
@@ -219,12 +221,14 @@ module conv_ctrl_sub_system #(
 	assign is_16bit_fmap_data = calfmt != CAL_FMT_INT8;
 	assign kernal_w = 
 		(
-			(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
-			(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
-			(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
-			(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
-			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
-											 4'd11
+			(kernal_shape == KBUFGRPSZ_1)   ? 4'd1:
+			(kernal_shape == KBUFGRPSZ_9)   ? 4'd3:
+			(kernal_shape == KBUFGRPSZ_25)  ? 4'd5:
+			(kernal_shape == KBUFGRPSZ_49)  ? 4'd7:
+			(kernal_shape == KBUFGRPSZ_81)  ? 4'd9:
+			(kernal_shape == KBUFGRPSZ_121) ? 4'd11:
+			(kernal_shape == KBUFGRPSZ_16)  ? 4'd4:
+			                                  4'd2
 	    ) - 1;
 	
 	/** 卷积核权重访问请求生成单元 **/

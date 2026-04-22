@@ -17,6 +17,7 @@
         2026.01.05 1.31 支持中间结果缓存时钟倍率
         2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
         2026.01.11 1.40 增加对tanh激活函数的支持
+        2026.04.07 1.50 增加对2x2和4x4卷积核的支持
 ************************************************************************************************************************/
 
 #include "axi_generic_conv.h"
@@ -38,10 +39,10 @@
 #define REG_REGION_BN_ACT_CFG_OFS 0x0180
 
 // BN参数存储器域的偏移地址
-#define MEM_REGION_BN_PARAMS_OFS 0x10000
+#define MEM_REGION_BN_PARAMS_OFS 0x0000
 
 // Sigmoid函数值查找表存储器域的偏移地址
-#define MEM_REGION_SIGMOID_LUT_OFS 0x18000
+#define MEM_REGION_SIGMOID_LUT_OFS 0x8000
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -51,9 +52,10 @@
 @brief  初始化通用卷积处理单元
 @param  handler 通用卷积处理单元(加速器句柄)
         baseaddr 加速器基地址
+        mem_base BN参数与Sigmoid函数值查找表存储器基地址
 @return 是否成功
 *************************/
-int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
+int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr, uint32_t mem_base){
 	uint32_t* test_ptr = (uint32_t*)baseaddr;
 
 	if((test_ptr[1] & 0x3FFFFFFF) != CONV_ACC_TYPE){
@@ -71,8 +73,8 @@ int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr){
 	handler->reg_region_buffer_cfg = (AxiGnrConvRegRgnBufCfg*)(baseaddr + REG_REGION_BUF_CFG_OFS);
 	handler->reg_region_bn_act_cfg = (AxiGnrConvRegRgnBNActCfg*)(baseaddr + REG_REGION_BN_ACT_CFG_OFS);
 
-	handler->bn_params_mem = (BNParam*)(baseaddr + MEM_REGION_BN_PARAMS_OFS);
-	handler->sigmoid_lut_mem = (uint16_t*)(baseaddr + MEM_REGION_SIGMOID_LUT_OFS);
+	handler->bn_params_mem = (BNParam*)(mem_base + MEM_REGION_BN_PARAMS_OFS);
+	handler->sigmoid_lut_mem = (uint16_t*)(mem_base + MEM_REGION_SIGMOID_LUT_OFS);
 
 	uint32_t version_encoded = handler->reg_region_prop->version;
 	handler->property.version[8] = '\0';
@@ -495,6 +497,8 @@ int axi_generic_conv_cfg(AxiGnrConvHandler* handler, const AxiGnrConvCfg* cfg){
 	case CONV_KRN_7x7: kernal_len = 7;break;
 	case CONV_KRN_9x9: kernal_len = 9;break;
 	case CONV_KRN_11x11: kernal_len = 11;break;
+	case CONV_KRN_4x4: kernal_len = 4;break;
+	case CONV_KRN_2x2: kernal_len = 2;break;
 	}
 
 	uint32_t dilated_kernal_len = kernal_len + (kernal_len - 1) * ((uint32_t)cfg->kernal_cfg.dilation_n);

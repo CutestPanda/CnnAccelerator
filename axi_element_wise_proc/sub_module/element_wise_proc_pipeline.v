@@ -236,10 +236,14 @@ module element_wise_proc_pipeline #(
 	wire in_data_cvt_cell_i_pass; // 直接传递操作数X(标志)
 	wire[32+32+INFO_ALONG_WIDTH-1:0] in_data_cvt_cell_i_info_along; // {操作数A, 操作数B, 随路数据}
 	wire in_data_cvt_cell_i_vld;
+	wire[31:0] in_param_cvt_cell_i_op_x; // 操作数A或操作数B
+	wire in_param_cvt_cell_i_vld;
 	// 转换单元输出
 	wire[31:0] in_data_cvt_cell_o_res; // 计算结果
 	wire[32+32+INFO_ALONG_WIDTH-1:0] in_data_cvt_cell_o_info_along; // {操作数A, 操作数B, 随路数据}
 	wire in_data_cvt_cell_o_vld;
+	wire[31:0] in_param_cvt_cell_o_res; // 计算结果
+	wire in_param_cvt_cell_o_vld;
 	
 	assign in_data_cvt_in_data_fmt = 
 		((in_data_fmt == IN_DATA_FMT_FP16) | (in_data_fmt == IN_DATA_FMT_NONE)) ? 2'b00: // FP16格式
@@ -250,10 +254,12 @@ module element_wise_proc_pipeline #(
 	assign in_data_cvt_cell_i_op_x = proc_i_op_x;
 	assign in_data_cvt_cell_i_pass = 1'b0;
 	assign in_data_cvt_cell_i_info_along[32+32+INFO_ALONG_WIDTH-1:32+INFO_ALONG_WIDTH] = 
+		// 操作数A
 		(is_op_a_const | is_op_a_eq_1) ? 
 			op_a_const_val:
 			proc_i_op_a;
 	assign in_data_cvt_cell_i_info_along[32+INFO_ALONG_WIDTH-1:INFO_ALONG_WIDTH] = 
+		// 操作数B
 		(is_op_b_const | is_op_b_eq_0) ? 
 			op_b_const_val:
 			proc_i_op_b;
@@ -261,13 +267,19 @@ module element_wise_proc_pipeline #(
 		proc_i_info_along;
 	assign in_data_cvt_cell_i_vld = proc_i_vld;
 	
+	assign in_param_cvt_cell_i_op_x = 
+		(~(is_op_a_const | is_op_a_eq_1)) ? 
+			proc_i_op_a:
+			proc_i_op_b;
+	assign in_param_cvt_cell_i_vld = proc_i_vld & (~((is_op_a_const | is_op_a_eq_1) & (is_op_b_const | is_op_b_eq_0)));
+	
 	element_wise_in_data_cvt_cell #(
 		.EN_ROUND(IN_DATA_CVT_EN_ROUND),
 		.FP16_IN_DATA_SUPPORTED(IN_DATA_CVT_FP16_IN_DATA_SUPPORTED),
 		.S33_IN_DATA_SUPPORTED(IN_DATA_CVT_S33_IN_DATA_SUPPORTED),
 		.INFO_ALONG_WIDTH(32+32+INFO_ALONG_WIDTH),
 		.SIM_DELAY(SIM_DELAY)
-	)in_data_cvt_cell_u(
+	)in_data_cvt_cell_u0(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(aclken),
@@ -288,6 +300,33 @@ module element_wise_proc_pipeline #(
 		.cvt_cell_o_vld(in_data_cvt_cell_o_vld)
 	);
 	
+	element_wise_in_data_cvt_cell #(
+		.EN_ROUND(IN_DATA_CVT_EN_ROUND),
+		.FP16_IN_DATA_SUPPORTED(IN_DATA_CVT_FP16_IN_DATA_SUPPORTED),
+		.S33_IN_DATA_SUPPORTED(IN_DATA_CVT_S33_IN_DATA_SUPPORTED),
+		.INFO_ALONG_WIDTH(1),
+		.SIM_DELAY(SIM_DELAY)
+	)in_data_cvt_cell_u1(
+		.aclk(aclk),
+		.aresetn(aresetn),
+		.aclken(aclken),
+		
+		.bypass(in_data_cvt_unit_bypass),
+		
+		.in_data_fmt(in_data_cvt_in_data_fmt),
+		.fixed_point_quat_accrc(in_fixed_point_quat_accrc),
+		.integer_type(in_data_cvt_integer_type),
+		
+		.cvt_cell_i_op_x(in_param_cvt_cell_i_op_x),
+		.cvt_cell_i_pass(1'b0),
+		.cvt_cell_i_info_along(1'bx),
+		.cvt_cell_i_vld(in_param_cvt_cell_i_vld),
+		
+		.cvt_cell_o_res(in_param_cvt_cell_o_res),
+		.cvt_cell_o_info_along(),
+		.cvt_cell_o_vld(in_param_cvt_cell_o_vld)
+	);
+	
 	/**
 	二次幂计算单元
 	
@@ -305,7 +344,18 @@ module element_wise_proc_pipeline #(
 	
 	assign pow2_cell_i_op_x = in_data_cvt_cell_o_res;
 	assign pow2_cell_i_pass = 1'b0;
-	assign pow2_cell_i_info_along = in_data_cvt_cell_o_info_along;
+	assign pow2_cell_i_info_along[32+32+INFO_ALONG_WIDTH-1:32+INFO_ALONG_WIDTH] = 
+		// 操作数A
+		(is_op_a_const | is_op_a_eq_1) ? 
+			in_data_cvt_cell_o_info_along[32+32+INFO_ALONG_WIDTH-1:32+INFO_ALONG_WIDTH]:
+			in_param_cvt_cell_o_res;
+	assign pow2_cell_i_info_along[32+INFO_ALONG_WIDTH-1:INFO_ALONG_WIDTH] = 
+		// 操作数B
+		(is_op_b_const | is_op_b_eq_0) ? 
+			in_data_cvt_cell_o_info_along[32+INFO_ALONG_WIDTH-1:INFO_ALONG_WIDTH]:
+			in_param_cvt_cell_o_res;
+	assign pow2_cell_i_info_along[INFO_ALONG_WIDTH-1:0] = 
+		in_data_cvt_cell_o_info_along[INFO_ALONG_WIDTH-1:0];
 	assign pow2_cell_i_vld = in_data_cvt_cell_o_vld;
 	
 	pow2_cell #(
@@ -359,8 +409,12 @@ module element_wise_proc_pipeline #(
 	wire[INFO_ALONG_WIDTH-1:0] mac_cell_o_info_along; // 随路数据
 	wire mac_cell_o_vld;
 	
-	assign mac_cell_i_op_a = pow2_cell_o_info_along[32+32+INFO_ALONG_WIDTH-1:32+INFO_ALONG_WIDTH];
-	assign mac_cell_i_op_b = pow2_cell_o_info_along[32+INFO_ALONG_WIDTH-1:INFO_ALONG_WIDTH];
+	assign mac_cell_i_op_a = 
+		// 操作数A
+		pow2_cell_o_info_along[32+32+INFO_ALONG_WIDTH-1:32+INFO_ALONG_WIDTH];
+	assign mac_cell_i_op_b = 
+		// 操作数B
+		pow2_cell_o_info_along[32+INFO_ALONG_WIDTH-1:INFO_ALONG_WIDTH];
 	assign mac_cell_i_op_x = pow2_cell_o_res;
 	assign mac_cell_i_is_a_eq_1 = is_op_a_eq_1;
 	assign mac_cell_i_is_b_eq_0 = is_op_b_eq_0;

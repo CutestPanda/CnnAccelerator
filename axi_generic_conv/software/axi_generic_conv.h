@@ -17,6 +17,7 @@
         2026.01.05 1.31 支持中间结果缓存时钟倍率
         2026.01.06 1.32 增加对sigmoid函数值查找表的初始化
         2026.01.11 1.40 增加对tanh激活函数的支持
+        2026.04.07 1.50 增加对2x2和4x4卷积核的支持
 ************************************************************************************************************************/
 
 #include <stdint.h>
@@ -61,7 +62,9 @@ typedef enum{
 	CONV_KRN_5x5 = 2,
 	CONV_KRN_7x7 = 3,
 	CONV_KRN_9x9 = 4,
-	CONV_KRN_11x11 = 5
+	CONV_KRN_11x11 = 5,
+	CONV_KRN_4x4 = 6,
+	CONV_KRN_2x2 = 7
 }AxiGnrConvKernalShape;
 
 // 枚举类型: 特征图缓存表面行长度
@@ -317,7 +320,7 @@ typedef struct{
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr); // 初始化通用卷积处理单元
+int axi_generic_conv_init(AxiGnrConvHandler* handler, uint32_t baseaddr, uint32_t mem_base); // 初始化通用卷积处理单元
 
 int axi_generic_conv_enable(AxiGnrConvHandler* handler); // 使能加速器
 void axi_generic_conv_disable(AxiGnrConvHandler* handler); // 除能加速器

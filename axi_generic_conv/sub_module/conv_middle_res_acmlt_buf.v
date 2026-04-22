@@ -50,7 +50,7 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2026/01/04
+日期: 2026/03/21
 ********************************************************************/
 
 
@@ -721,7 +721,7 @@ module conv_middle_res_acmlt_buf #(
 	assign acmlt_in_last_grp = mid_res_last_grp_s2;
 	assign acmlt_in_last_res = mid_res_last_s2;
 	assign acmlt_in_info_along = mid_res_info_along_s2;
-	assign acmlt_in_valid = {ATOMIC_K{mid_res_valid_s2}} & mid_res_mask_s2;
+	assign acmlt_in_valid = {ATOMIC_K{mid_res_valid_s2}} & (mid_res_mask_s2 | 32'h0000_0001);
 	
 	assign mid_res_line_buf_wen_at_rd = 
 		aclken & acmlt_out_valid & acmlt_out_last_res & acmlt_out_last_grp;

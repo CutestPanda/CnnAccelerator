@@ -548,6 +548,7 @@ module axi_element_wise_proc #(
 				.ce_mul(mul0_ce[pow2_mul_i*3+1]),
 				.ce_out_reg(mul0_ce[pow2_mul_i*3+2]),
 				
+				// 当支持FP32运算数据格式但不支持INT32运算数据格式时, 有符号乘法器的位宽可为25位
 				.op_a(
 					mul0_op_a[
 						pow2_mul_i*MUL0_OP_WIDTH+(CAL_INT32_SUPPORTED ? 32:(CAL_FP32_SUPPORTED ? 25:16))-1:

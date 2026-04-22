@@ -306,11 +306,11 @@ int axi_element_wise_proc_cfg(AxiElmWiseProcHandler* handler, const AxiElmWisePr
 		(((uint32_t)cfg->is_op_a_const) << 8) |
 		(((uint32_t)cfg->is_op_b_const) << 9);
 
-	if(cfg->is_op_a_const){
+	if(cfg->is_op_a_const && (!cfg->is_op_a_eq_1)){
 		handler->reg_region_fu_cfg->op_a_b_cfg1 = *(cfg->op_a_const_val_ptr);
 	}
 
-	if(cfg->is_op_b_const){
+	if(cfg->is_op_b_const && (!cfg->is_op_b_eq_0)){
 		handler->reg_region_fu_cfg->op_a_b_cfg2 = *(cfg->op_b_const_val_ptr);
 	}
 

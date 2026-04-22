@@ -237,7 +237,13 @@ module fmap_sfc_row_access_req_gen #(
 	reg[23:0] row_data_size_of_last_fmap_cake_cgrp; // 特征图切块最后1个通道组的行数据量
 	reg row_data_size_of_last_fmap_cake_cgrp_available; // 特征图切块最后1个通道组的行数据量(参数可用标志)
 	
-	assign cgrp_n_of_fmap_region_that_kernal_set_sel = cgrp_n_of_fmap_region_that_kernal_set_sel_r;
+	assign cgrp_n_of_fmap_region_that_kernal_set_sel = 
+		chn_n_of_fmap_region_that_kernal_set_sel[15:clogb2(ATOMIC_C)] - 
+			(
+				((ATOMIC_C != 1) & (|chn_n_of_fmap_region_that_kernal_set_sel[clogb2(ATOMIC_C-1):0])) ? 
+					0:
+					1
+			);
 	
 	// 计算: 特征图切块最后1个通道组的行数据量 = 特征图切块最后1个通道组的表面深度(u6) * 输入特征图宽度(u16) * 每个数据的字节数(1或2)
 	assign mul0_op_a = 

@@ -31,6 +31,8 @@ ATOMIC_K个卷积乘加单元
 
 带有全局时钟使能
 
+支持独立的计算核心时钟, 可选异步计算核心的优化模式为面积优先("area")或性能优先("performance")
+
 支持计算轮次拓展, 以适应更宽(>ATOMIC_K)的卷积核权重块
 支持跳过空的(未加载权重的)计算轮次
 
@@ -54,12 +56,14 @@ FP16模式时, 尾数偏移为-50
 无
 
 作者: 陈家耀
-日期: 2025/12/30
+日期: 2026/03/29
 ********************************************************************/
 
 
 module conv_mac_array #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
+	parameter EN_IN_ASYNC_FIFO = "true", // 是否启用输入异步fifo(仅在计算核心时钟倍率>1时可用)
+	parameter ASYNC_MAC_ARRAY_OPT_MODE = "area", // 异步计算核心的优化模式("area" | "performance")(仅在计算核心时钟倍率>1时可用)
 	parameter integer MAX_CAL_ROUND = 1, // 最大的计算轮次(1~16)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -77,6 +81,10 @@ module conv_mac_array #(
 	input wire mac_array_aclk,
 	input wire mac_array_aresetn,
 	input wire mac_array_aclken,
+	// 计算结果时钟和复位
+	input wire array_o_aclk,
+	input wire array_o_aresetn,
+	input wire array_o_aclken,
 	
 	// 使能信号
 	input wire en_mac_array, // 使能乘加阵列
@@ -122,8 +130,10 @@ module conv_mac_array #(
 	wire rst_mac_array; // 复位乘加阵列
 	wire async_array_i_vld; // 异步乘加阵列输入有效(标志)
 	wire async_array_i_rdy; // 异步乘加阵列输入就绪(标志)
+	wire global_array_i_rdy; // 全局乘加阵列输入就绪(标志)
 	
 	assign rst_mac_array = ~en_mac_array;
+	assign global_array_i_rdy = (MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy;
 	
 	/** 卷积核权重乒乓缓存 **/
 	reg kernal_buf_wsel; // 写选择
@@ -340,7 +350,7 @@ module conv_mac_array #(
 	
 	assign array_i_ftm_sfc_rdy = 
 		aclken & (~rst_mac_array) & kernal_buf_empty_n & 
-		((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy) & 
+		global_array_i_rdy & 
 		((cal_round_cnt == cal_round) | nxt_kernal_rgn_to_cal_invld);
 	
 	assign nxt_kernal_rgn_to_cal_invld = 
@@ -361,7 +371,7 @@ module conv_mac_array #(
 			aclken & 
 			(
 				rst_mac_array | 
-				(array_i_ftm_sfc_vld & kernal_buf_empty_n & ((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy))
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & global_array_i_rdy)
 			)
 		)
 			cal_round_cnt <= # SIM_DELAY 
@@ -379,7 +389,7 @@ module conv_mac_array #(
 			aclken & 
 			(
 				rst_mac_array | 
-				(array_i_ftm_sfc_vld & kernal_buf_empty_n & ((MAC_ARRAY_CLK_RATE == 1) ? array_o_res_rdy:async_array_i_rdy))
+				(array_i_ftm_sfc_vld & kernal_buf_empty_n & global_array_i_rdy)
 			)
 		)
 			cal_round_onehot <= # SIM_DELAY 
@@ -396,10 +406,18 @@ module conv_mac_array #(
 	wire[ATOMIC_K-1:0] mac_in_valid; // 输入有效指示
 	wire[ATOMIC_K+INFO_ALONG_WIDTH+4+1-1:0] mac_out_info_along_arr[0:ATOMIC_K-1]; // 随路数据(数组)
 	wire[ATOMIC_K-1:0] array_o_res_vld_vec; // 计算结果输出有效(指示向量)
+	wire array_o_res_vld_w;
 	
-	assign {array_o_res_mask, array_o_res_info_along, array_o_cal_round_id, array_o_is_last_cal_round} = mac_out_info_along_arr[0];
-	// 断言: array_o_res_vld_vec只能是{ATOMIC_K{1'b1}}或{ATOMIC_K{1'b0}}
-	assign array_o_res_vld = aclken & array_o_res_vld_vec[0];
+	assign {
+		array_o_res_mask,
+		array_o_res_info_along,
+		array_o_cal_round_id,
+		array_o_is_last_cal_round
+	} = mac_out_info_along_arr[0];
+	assign array_o_res_vld = 
+		(MAC_ARRAY_CLK_RATE == 1) ? 
+			(aclken & array_o_res_vld_vec[0]):
+			array_o_res_vld_w;
 	
 	assign kernal_wgt_sel = 
 		(
@@ -471,6 +489,8 @@ module conv_mac_array #(
 				array_i_ftm_sfc_vld & kernal_buf_empty_n;
 			
 			conv_async_mac_array_core #(
+				.EN_IN_ASYNC_FIFO(EN_IN_ASYNC_FIFO),
+				.ASYNC_MAC_ARRAY_OPT_MODE(ASYNC_MAC_ARRAY_OPT_MODE),
 				.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 				.ATOMIC_K(ATOMIC_K),
 				.ATOMIC_C(ATOMIC_C),
@@ -484,6 +504,9 @@ module conv_mac_array #(
 				.mac_array_aclk(mac_array_aclk),
 				.mac_array_aresetn(mac_array_aresetn),
 				.mac_array_aclken(mac_array_aclken),
+				.array_o_aclk(array_o_aclk),
+				.array_o_aresetn(array_o_aresetn),
+				.array_o_aclken(array_o_aclken),
 				
 				.en_mac_array(en_mac_array),
 				
@@ -499,7 +522,7 @@ module conv_mac_array #(
 				
 				.array_o_res(array_o_res),
 				.array_o_info_along(mac_out_info_along_arr[0]),
-				.array_o_vld(array_o_res_vld_vec[0]),
+				.array_o_vld(array_o_res_vld_w),
 				.array_o_rdy(aclken & array_o_res_rdy),
 				
 				.mul_op_a(mul_op_a),

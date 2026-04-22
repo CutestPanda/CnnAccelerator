@@ -37,7 +37,7 @@ SOFTWARE.
 	先将通道组存储在驻留区, 仅当驻留区满时才开始存储在交换区, 且优先存储在交换区#0
 	要释放一个交换区通道组, 需要给出置换指示信号, 或者在发起权重块读请求时指定需要自动置换交换区通道组
 
-支持的卷积核大小 -> 1x1, 3x3, 5x5, 7x7, 9x9, 11x11
+支持的卷积核大小 -> 1x1, 3x3, 5x5, 7x7, 9x9, 11x11, 4x4
 
 注意：
 暂不支持INT8运算数据格式
@@ -181,6 +181,8 @@ module logic_kernal_buffer #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	localparam KBUFGRPSZ_16 = 3'b110; // 4x4
+	localparam KBUFGRPSZ_4 = 3'b111; // 2x2
 	// 每个权重块的表面个数的类型编码
 	localparam WGTBLK_SFC_N_1 = 3'b000; // 1个表面
 	localparam WGTBLK_SFC_N_2 = 3'b001; // 2个表面
@@ -227,12 +229,14 @@ module logic_kernal_buffer #(
 	assign kbufgrpn_sub1 = 
 		kbufgrpn - 8'd1;
 	assign wtblkn_in_cgrp = 
-		(kbufgrpsz == KBUFGRPSZ_1)  ?   7'd1:
-		(kbufgrpsz == KBUFGRPSZ_9)  ?   7'd9:
-		(kbufgrpsz == KBUFGRPSZ_25) ?  7'd25:
-		(kbufgrpsz == KBUFGRPSZ_49) ?  7'd49:
-		(kbufgrpsz == KBUFGRPSZ_81) ?  7'd81:
-									  7'd121;
+		(kbufgrpsz == KBUFGRPSZ_1)   ? 7'd1:
+		(kbufgrpsz == KBUFGRPSZ_9)   ? 7'd9:
+		(kbufgrpsz == KBUFGRPSZ_25)  ? 7'd25:
+		(kbufgrpsz == KBUFGRPSZ_49)  ? 7'd49:
+		(kbufgrpsz == KBUFGRPSZ_81)  ? 7'd81:
+		(kbufgrpsz == KBUFGRPSZ_121) ? 7'd121:
+		(kbufgrpsz == KBUFGRPSZ_16)  ? 7'd16:
+		                               7'd4;
 	
 	assign sw_rgn0_baseaddr = ((kbufgrpn_sub1 * wtblkn_in_cgrp) | 32'h0000_0000) << kernal_blk_addr_stride_lshn;
 	assign sw_rgn1_baseaddr = ((kbufgrpn * wtblkn_in_cgrp) | 32'h0000_0000) << kernal_blk_addr_stride_lshn;

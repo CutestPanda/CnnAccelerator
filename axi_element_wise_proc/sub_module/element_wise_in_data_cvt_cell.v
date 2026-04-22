@@ -233,6 +233,7 @@ module element_wise_in_data_cvt_cell #(
 	wire signed[32:0] s33_pattern_gen_in_op_x;
 	wire[32:0] s33_pattern_gen_in_op_x_rvs; // 位颠倒的操作数X
 	reg[31:0] s33_pattern_gen_onehot; // 生成的标准化模式独热码
+	reg signed[32:0] s33_pattern_gen_op_x_d1; // 延迟1clk的操作数X
 	// [定点数标准化]
 	wire s33_nml_in_vld;
 	wire s33_nml_in_pass;
@@ -283,15 +284,7 @@ module element_wise_in_data_cvt_cell #(
 	
 	assign s33_nml_in_vld = (in_data_fmt_inner == IN_DATA_FMT_S33) & cvt_cell_i_vld_delayed[1];
 	assign s33_nml_in_pass = cvt_cell_i_pass_delayed[1];
-	assign s33_nml_in_op_x = 
-		{
-			(
-				(integer_type == INTEGER_TYPE_S8) | 
-				(integer_type == INTEGER_TYPE_S16) | 
-				(integer_type == INTEGER_TYPE_S32)
-			) & cvt_cell_i_op_x_delayed[1][31],
-			cvt_cell_i_op_x_delayed[1][31:0]
-		};
+	assign s33_nml_in_op_x = s33_pattern_gen_op_x_d1;
 	assign s33_nml_in_lsh_n = 
 		({5{s33_pattern_gen_onehot[0]}}  & 5'd0)  | 
 		({5{s33_pattern_gen_onehot[1]}}  & 5'd1)  | 
@@ -344,7 +337,7 @@ module element_wise_in_data_cvt_cell #(
 	assign s33_out_res = s33_round_res;
 	assign s33_out_info_along = cvt_cell_i_info_along_delayed[4];
 	
-	// 生成的标准化模式独热码
+	// 生成的标准化模式独热码, 延迟1clk的操作数X
 	always @(posedge aclk)
 	begin
 		if(aclken & s33_pattern_gen_in_vld & (~s33_pattern_gen_in_pass))
@@ -369,6 +362,8 @@ module element_wise_in_data_cvt_cell #(
 			s33_pattern_gen_onehot <= # SIM_DELAY 
 				({32{s33_pattern_gen_in_op_x_rvs[0]}} ^ s33_pattern_gen_in_op_x_rvs[32:1]) & 
 				((~({32{s33_pattern_gen_in_op_x_rvs[0]}} ^ s33_pattern_gen_in_op_x_rvs[32:1])) + 1'b1);
+			
+			s33_pattern_gen_op_x_d1 <= # SIM_DELAY s33_pattern_gen_in_op_x;
 	end
 	
 	// 标准化后的指数(在范围[-63, 31]内)

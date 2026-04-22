@@ -27,22 +27,29 @@ SOFTWARE.
 本模块: (异步)卷积乘加阵列计算核心
 
 描述:
-输入异步fifo -> 卷积乘加阵列 -> 输出异步fifo
+输入异步fifo(可选) -> 卷积乘加阵列 -> 输出异步fifo
 
-输入端作跨时钟域并串转换, 输出端作跨时钟域串并转换, 乘加单元数量为ATOMIC_K/MAC_ARRAY_CLK_RATE
+当异步计算核心的优化模式(ASYNC_MAC_ARRAY_OPT_MODE)为"area"时,
+	输入端作跨时钟域数据传输(可选)和并串转换, 输出端作跨时钟域数据传输和串并转换, 乘加单元数量为ATOMIC_K/MAC_ARRAY_CLK_RATE
+
+当异步计算核心的优化模式(ASYNC_MAC_ARRAY_OPT_MODE)为"performance"时,
+	输入端作跨时钟域数据传输(可选), 输出端作跨时钟域数据传输和串并转换, 乘加单元数量为ATOMIC_K
 
 注意：
-核并行数(ATOMIC_K)必须能被计算核心时钟倍率(MAC_ARRAY_CLK_RATE)整除
+当异步计算核心的优化模式(ASYNC_MAC_ARRAY_OPT_MODE)为"area"时,
+	核并行数(ATOMIC_K)必须能被计算核心时钟倍率(MAC_ARRAY_CLK_RATE)整除
 
 协议:
 无
 
 作者: 陈家耀
-日期: 2025/12/30
+日期: 2026/03/29
 ********************************************************************/
 
 
 module conv_async_mac_array_core #(
+	parameter EN_IN_ASYNC_FIFO = "true", // 是否启用输入异步fifo
+	parameter ASYNC_MAC_ARRAY_OPT_MODE = "area", // 异步计算核心的优化模式("area" | "performance")(仅在计算核心时钟倍率>1时可用)
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -58,6 +65,10 @@ module conv_async_mac_array_core #(
 	input wire mac_array_aclk,
 	input wire mac_array_aresetn,
 	input wire mac_array_aclken,
+	// 计算结果时钟和复位
+	input wire array_o_aclk,
+	input wire array_o_aresetn,
+	input wire array_o_aclken,
 	
 	// 使能信号
 	input wire en_mac_array, // 使能乘加阵列
@@ -97,24 +108,11 @@ module conv_async_mac_array_core #(
     end
     endfunction
 	
-	/** 使能信号和运行时参数 **/
-	reg en_mac_array_d1;
-	reg en_mac_array_d2;
-	reg en_mac_array_d3;
-	reg en_mac_array_d4;
-	wire on_en_mac_array_posedge;
-	
-	assign on_en_mac_array_posedge = en_mac_array_d3 & (~en_mac_array_d4);
-	
-	// 跨时钟域: ... -> en_mac_array_d1
-	always @(posedge mac_array_aclk or negedge mac_array_aresetn)
-	begin
-		if(~mac_array_aresetn)
-			{en_mac_array_d4, en_mac_array_d3, en_mac_array_d2, en_mac_array_d1} <= 4'b0000;
-		else if(mac_array_aclken)
-			{en_mac_array_d4, en_mac_array_d3, en_mac_array_d2, en_mac_array_d1} <= # SIM_DELAY 
-				{en_mac_array_d3, en_mac_array_d2, en_mac_array_d1, en_mac_array};
-	end
+	/** 常量 **/
+	// 乘加单元数量
+	localparam integer MAC_CELL_N = (ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? ATOMIC_K:(ATOMIC_K/MAC_ARRAY_CLK_RATE);
+	// 输出轮次
+	localparam integer OUT_ROUND_N = (ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? 1:MAC_ARRAY_CLK_RATE;
 	
 	/** 输入异步fifo **/
 	// [fifo写端口]
@@ -143,51 +141,75 @@ module conv_async_mac_array_core #(
 	assign in_async_fifo_din_kernal_mask = array_i_kernal_mask;
 	assign in_async_fifo_din_info_along = array_i_info_along;
 	
-	/*
-	跨时钟域:
-		in_async_fifo_u/async_fifo_u/rptr_gray_at_r[*] -> in_async_fifo_u/async_fifo_u/rptr_gray_at_w_p2[*]
-		in_async_fifo_u/async_fifo_u/wptr_gray_at_w[*] -> in_async_fifo_u/async_fifo_u/wptr_gray_at_r_p2[*]
-		... -> in_async_fifo_u/axis_reg_slice_u/axis_reg_slice_core_u/fwd_payload[*]
-	*/
-	async_fifo_with_ram #(
-		.fwft_mode("true"),
-		.ram_type("lutram"),
-		.depth(32),
-		.data_width(ATOMIC_C*16 + ATOMIC_K*ATOMIC_C*16 + 1 + ATOMIC_K + INFO_ALONG_WIDTH),
-		.simulation_delay(SIM_DELAY)
-	)in_async_fifo_u(
-		.clk_wt(aclk),
-		.rst_n_wt(aresetn),
-		.clk_rd(mac_array_aclk),
-		.rst_n_rd(mac_array_aresetn),
-		
-		.fifo_wen(in_async_fifo_wen),
-		.fifo_full(),
-		.fifo_full_n(in_async_fifo_full_n),
-		.fifo_din(
-			{
-				in_async_fifo_din_ftm_sfc_data,
-				in_async_fifo_din_kernal_wgtblk_data,
-				in_async_fifo_din_ftm_sfc_masked,
-				in_async_fifo_din_kernal_mask,
-				in_async_fifo_din_info_along
-			}
-		),
-		.data_cnt_wt(),
-		.fifo_ren(in_async_fifo_ren),
-		.fifo_empty(),
-		.fifo_empty_n(in_async_fifo_empty_n),
-		.fifo_dout(
-			{
+	generate
+		if(EN_IN_ASYNC_FIFO == "true")
+		begin
+			/*
+			跨时钟域:
+				in_async_fifo_u/async_fifo_u/rptr_gray_at_r[*] -> in_async_fifo_u/async_fifo_u/rptr_gray_at_w_p2[*]
+				in_async_fifo_u/async_fifo_u/wptr_gray_at_w[*] -> in_async_fifo_u/async_fifo_u/wptr_gray_at_r_p2[*]
+				... -> in_async_fifo_u/axis_reg_slice_u/axis_reg_slice_core_u/fwd_payload[*]
+			*/
+			async_fifo_with_ram #(
+				.fwft_mode("true"),
+				.ram_type("lutram"),
+				.depth(32),
+				.data_width(ATOMIC_C*16 + ATOMIC_K*ATOMIC_C*16 + 1 + ATOMIC_K + INFO_ALONG_WIDTH),
+				.simulation_delay(SIM_DELAY)
+			)in_async_fifo_u(
+				.clk_wt(aclk),
+				.rst_n_wt(aresetn),
+				.clk_rd(mac_array_aclk),
+				.rst_n_rd(mac_array_aresetn),
+				
+				.fifo_wen(in_async_fifo_wen),
+				.fifo_full(),
+				.fifo_full_n(in_async_fifo_full_n),
+				.fifo_din(
+					{
+						in_async_fifo_din_ftm_sfc_data,
+						in_async_fifo_din_kernal_wgtblk_data,
+						in_async_fifo_din_ftm_sfc_masked,
+						in_async_fifo_din_kernal_mask,
+						in_async_fifo_din_info_along
+					}
+				),
+				.data_cnt_wt(),
+				.fifo_ren(in_async_fifo_ren),
+				.fifo_empty(),
+				.fifo_empty_n(in_async_fifo_empty_n),
+				.fifo_dout(
+					{
+						in_async_fifo_dout_ftm_sfc_data,
+						in_async_fifo_dout_kernal_wgtblk_data,
+						in_async_fifo_dout_ftm_sfc_masked,
+						in_async_fifo_dout_kernal_mask,
+						in_async_fifo_dout_info_along
+					}
+				),
+				.data_cnt_rd()
+			);
+		end
+		else
+		begin
+			assign in_async_fifo_full_n = in_async_fifo_ren;
+			
+			assign {
 				in_async_fifo_dout_ftm_sfc_data,
 				in_async_fifo_dout_kernal_wgtblk_data,
 				in_async_fifo_dout_ftm_sfc_masked,
 				in_async_fifo_dout_kernal_mask,
 				in_async_fifo_dout_info_along
-			}
-		),
-		.data_cnt_rd()
-	);
+			} = {
+				array_i_ftm_sfc_data,
+				array_i_kernal_wgtblk_data,
+				array_i_ftm_sfc_masked,
+				array_i_kernal_mask,
+				array_i_info_along
+			};
+			assign in_async_fifo_empty_n = aclken & array_i_vld;
+		end
+	endgenerate
 	
 	/** 卷积乘加阵列 **/
 	// [轮次控制]
@@ -195,24 +217,25 @@ module conv_async_mac_array_core #(
 	wire to_pass_cal_data; // 允许放行计算数据(标志)
 	// [阵列输入]
 	reg[ATOMIC_C*16-1:0] mac_in_ftm; // 特征图数据
-	reg[(ATOMIC_K/MAC_ARRAY_CLK_RATE)*ATOMIC_C*16-1:0] mac_in_wgt; // 卷积核权重
-	reg[ATOMIC_K/MAC_ARRAY_CLK_RATE-1:0] mac_in_kernal_mask; // 权重表面掩码
+	reg[MAC_CELL_N*ATOMIC_C*16-1:0] mac_in_wgt; // 卷积核权重
+	reg[MAC_CELL_N-1:0] mac_in_kernal_mask; // 权重表面掩码
 	reg mac_in_ftm_masked; // 特征图数据(无效标志)
 	reg[INFO_ALONG_WIDTH-1:0] mac_in_info_along; // 随路数据
 	reg mac_in_valid; // 阵列输入有效指示
 	// [阵列输出]
-	wire[(ATOMIC_K/MAC_ARRAY_CLK_RATE)*48-1:0] mac_out_res; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
-	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along[0:ATOMIC_K/MAC_ARRAY_CLK_RATE-1]; // 随路数据
-	wire[ATOMIC_K/MAC_ARRAY_CLK_RATE-1:0] mac_out_valid; // 输出有效指示
+	wire[MAC_CELL_N*48-1:0] mac_out_res; // 计算结果(数据, {指数部分(8位, 仅当运算数据格式为FP16时有效), 尾数部分或定点数(40位)})
+	wire[INFO_ALONG_WIDTH-1:0] mac_out_info_along[0:MAC_CELL_N-1]; // 随路数据
+	wire[MAC_CELL_N-1:0] mac_out_valid; // 输出有效指示
 	
 	assign in_async_fifo_ren = 
-		mac_array_aclken & en_mac_array_d4 & 
-		to_pass_cal_data & (mac_round_cnt == (MAC_ARRAY_CLK_RATE - 1));
+		mac_array_aclken & en_mac_array & 
+		to_pass_cal_data & 
+		((ASYNC_MAC_ARRAY_OPT_MODE == "performance") | (mac_round_cnt == (MAC_ARRAY_CLK_RATE - 1)));
 	
 	// 轮次计数器
 	always @(posedge mac_array_aclk)
 	begin
-		if(~en_mac_array_d4)
+		if((ASYNC_MAC_ARRAY_OPT_MODE == "performance") | (~en_mac_array))
 			mac_round_cnt <= # SIM_DELAY 0;
 		else if(mac_array_aclken & to_pass_cal_data & in_async_fifo_empty_n)
 			mac_round_cnt <= # SIM_DELAY 
@@ -224,15 +247,22 @@ module conv_async_mac_array_core #(
 	// 特征图数据, 卷积核权重, 权重表面掩码, 特征图数据(无效标志), 随路数据
 	always @(posedge mac_array_aclk)
 	begin
-		if(mac_array_aclken & en_mac_array_d4 & to_pass_cal_data & in_async_fifo_empty_n)
+		if(mac_array_aclken & en_mac_array & to_pass_cal_data & in_async_fifo_empty_n)
 		begin
-			mac_in_ftm <= # SIM_DELAY in_async_fifo_dout_ftm_sfc_data;
+			mac_in_ftm <= # SIM_DELAY 
+				in_async_fifo_dout_ftm_sfc_data;
 			mac_in_wgt <= # SIM_DELAY 
-				in_async_fifo_dout_kernal_wgtblk_data >> (ATOMIC_K*ATOMIC_C*16/MAC_ARRAY_CLK_RATE * mac_round_cnt);
+				(ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? 
+					in_async_fifo_dout_kernal_wgtblk_data:
+					(in_async_fifo_dout_kernal_wgtblk_data >> (ATOMIC_K*ATOMIC_C*16/MAC_ARRAY_CLK_RATE * mac_round_cnt));
 			mac_in_kernal_mask <= # SIM_DELAY 
-				in_async_fifo_dout_kernal_mask >> (ATOMIC_K/MAC_ARRAY_CLK_RATE * mac_round_cnt);
-			mac_in_ftm_masked <= # SIM_DELAY in_async_fifo_dout_ftm_sfc_masked;
-			mac_in_info_along <= # SIM_DELAY in_async_fifo_dout_info_along;
+				(ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? 
+					in_async_fifo_dout_kernal_mask:
+					(in_async_fifo_dout_kernal_mask >> (ATOMIC_K/MAC_ARRAY_CLK_RATE * mac_round_cnt));
+			mac_in_ftm_masked <= # SIM_DELAY 
+				in_async_fifo_dout_ftm_sfc_masked;
+			mac_in_info_along <= # SIM_DELAY 
+				in_async_fifo_dout_info_along;
 		end
 	end
 	
@@ -242,14 +272,14 @@ module conv_async_mac_array_core #(
 		if(~mac_array_aresetn)
 			mac_in_valid <= 1'b0;
 		else if(mac_array_aclken)
-			mac_in_valid <= # SIM_DELAY en_mac_array_d4 & to_pass_cal_data & in_async_fifo_empty_n;
+			mac_in_valid <= # SIM_DELAY en_mac_array & to_pass_cal_data & in_async_fifo_empty_n;
 	end
 	
 	genvar mac_cell_i;
 	generate
 		for(mac_cell_i = 0;mac_cell_i < ATOMIC_K;mac_cell_i = mac_cell_i + 1)
 		begin:mac_cell_blk
-			if(mac_cell_i < ATOMIC_K/MAC_ARRAY_CLK_RATE)
+			if(mac_cell_i < MAC_CELL_N)
 			begin
 				conv_mac_cell #(
 					.ATOMIC_C(ATOMIC_C),
@@ -293,6 +323,8 @@ module conv_async_mac_array_core #(
 	// [输出轮次控制]
 	reg[MAC_ARRAY_CLK_RATE-1:0] mac_o_round_cnt; // 输出轮次计数器
 	reg[ATOMIC_K*48-1:0] mac_res_saved; // 暂存的计算结果
+	reg[INFO_ALONG_WIDTH-1:0] info_along_saved; // 暂存的随路数据
+	reg ofifo_wen_r;
 	// [fifo写端口]
 	wire out_async_fifo_wen;
 	wire out_async_fifo_full_n;
@@ -307,40 +339,81 @@ module conv_async_mac_array_core #(
 	
 	assign array_o_res = out_async_fifo_dout_res;
 	assign array_o_info_along = out_async_fifo_dout_info_along;
-	assign array_o_vld = aclken & out_async_fifo_empty_n;
+	assign array_o_vld = array_o_aclken & out_async_fifo_empty_n;
 	
-	assign out_async_fifo_ren = aclken & array_o_rdy;
+	assign out_async_fifo_ren = array_o_aclken & array_o_rdy;
 	
 	assign to_pass_cal_data = out_async_fifo_data_cnt_wt < (32 - 16);
 	
-	assign out_async_fifo_wen = 
-		mac_array_aclken & en_mac_array_d4 & mac_out_valid[0] & mac_o_round_cnt[MAC_ARRAY_CLK_RATE-1];
-	assign out_async_fifo_din_res = 
-		{mac_out_res, mac_res_saved[ATOMIC_K*48-ATOMIC_K*48/MAC_ARRAY_CLK_RATE-1:0]};
-	assign out_async_fifo_din_info_along = mac_out_info_along[0];
+	generate
+		if(ASYNC_MAC_ARRAY_OPT_MODE == "performance")
+		begin
+			assign out_async_fifo_wen = mac_array_aclken & ofifo_wen_r;
+			
+			assign out_async_fifo_din_res = mac_res_saved;
+			assign out_async_fifo_din_info_along = info_along_saved;
+			
+			always @(posedge mac_array_aclk or negedge mac_array_aresetn)
+			begin
+				if(~mac_array_aresetn)
+					ofifo_wen_r <= 1'b0;
+				else if(mac_array_aclken)
+					ofifo_wen_r <= # SIM_DELAY mac_out_valid[0];
+			end
+		end
+		else
+		begin
+			assign out_async_fifo_wen = 
+				mac_array_aclken & mac_out_valid[0] & 
+				mac_o_round_cnt[MAC_ARRAY_CLK_RATE-1];
+			
+			assign out_async_fifo_din_res = 
+				{mac_out_res, mac_res_saved[ATOMIC_K*48-ATOMIC_K*48/MAC_ARRAY_CLK_RATE-1:0]};
+			assign out_async_fifo_din_info_along = 
+				mac_out_info_along[0][INFO_ALONG_WIDTH-1:0];
+		end
+	endgenerate
 	
 	// 输出轮次计数器
 	always @(posedge mac_array_aclk)
 	begin
-		if(~en_mac_array_d4)
+		if((ASYNC_MAC_ARRAY_OPT_MODE == "performance") | (~en_mac_array))
 			mac_o_round_cnt <= 1;
 		else if(mac_array_aclken & mac_out_valid[0])
-			mac_o_round_cnt <= # SIM_DELAY (mac_o_round_cnt << 1) | (mac_o_round_cnt >> (MAC_ARRAY_CLK_RATE-1));
+			mac_o_round_cnt <= # SIM_DELAY 
+				(mac_o_round_cnt << 1) | (mac_o_round_cnt >> (MAC_ARRAY_CLK_RATE-1));
 	end
 	
 	// 暂存的计算结果
 	genvar mac_res_saved_i;
 	generate
-		for(mac_res_saved_i = 0;mac_res_saved_i < MAC_ARRAY_CLK_RATE;mac_res_saved_i = mac_res_saved_i + 1)
+		for(mac_res_saved_i = 0;mac_res_saved_i < OUT_ROUND_N;mac_res_saved_i = mac_res_saved_i + 1)
 		begin:mac_res_saved_blk
 			always @(posedge mac_array_aclk)
 			begin
-				if(mac_array_aclken & en_mac_array_d4 & mac_out_valid[0] & mac_o_round_cnt[mac_res_saved_i])
-					mac_res_saved[(mac_res_saved_i+1)*(ATOMIC_K*48/MAC_ARRAY_CLK_RATE)-1:mac_res_saved_i*(ATOMIC_K*48/MAC_ARRAY_CLK_RATE)] <= # SIM_DELAY 
-						mac_out_res;
+				if(
+					mac_array_aclken & mac_out_valid[0] & 
+					((ASYNC_MAC_ARRAY_OPT_MODE == "performance") | mac_o_round_cnt[mac_res_saved_i])
+				)
+				begin
+					mac_res_saved[
+						(mac_res_saved_i+1)*(ATOMIC_K*48/OUT_ROUND_N)-1:
+						mac_res_saved_i*(ATOMIC_K*48/OUT_ROUND_N)] <= # SIM_DELAY mac_out_res;
+				end
 			end
 		end
 	endgenerate
+	// 暂存的随路数据
+	always @(posedge mac_array_aclk)
+	begin
+		if(
+			(ASYNC_MAC_ARRAY_OPT_MODE == "performance") & 
+			mac_array_aclken & mac_out_valid[0]
+		)
+		begin
+			info_along_saved <= # SIM_DELAY mac_out_info_along[0][INFO_ALONG_WIDTH-1:0];
+		end
+	end
 	
 	/*
 	跨时钟域:
@@ -357,8 +430,8 @@ module conv_async_mac_array_core #(
 	)out_async_fifo_u(
 		.clk_wt(mac_array_aclk),
 		.rst_n_wt(mac_array_aresetn),
-		.clk_rd(aclk),
-		.rst_n_rd(aresetn),
+		.clk_rd(array_o_aclk),
+		.rst_n_rd(array_o_aresetn),
 		
 		.fifo_wen(out_async_fifo_wen),
 		.fifo_full(),

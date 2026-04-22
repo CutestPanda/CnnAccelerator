@@ -37,11 +37,12 @@ AXIS MASTER/SLAVE
 MEM MASTER
 
 作者: 陈家耀
-日期: 2026/01/04
+日期: 2026/03/29
 ********************************************************************/
 
 
 module async_conv_middle_res_acmlt_buf #(
+	parameter EN_IN_ASYNC_FIFO = "true", // 是否启用输入异步fifo
 	parameter integer BUF_CLK_RATE = 1, // 缓存时钟倍率(1 | 2 | 4 | 8)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer RBUF_BANK_N = 8, // 缓存MEM个数(>=2)
@@ -198,7 +199,9 @@ module async_conv_middle_res_acmlt_buf #(
 	// 并串转换
 	reg[clogb2(BUF_CLK_RATE-1):0] inner_mid_res_sel;
 	
-	assign s_axis_mid_res_ready = aclken & in_async_fifo_full_n;
+	assign s_axis_mid_res_ready = 
+		((EN_IN_ASYNC_FIFO == "true") ? aclken:mid_res_buf_aclken) & 
+		in_async_fifo_full_n;
 	
 	assign in_async_fifo_din_data = s_axis_mid_res_data;
 	assign in_async_fifo_din_keep = s_axis_mid_res_keep;
@@ -209,47 +212,77 @@ module async_conv_middle_res_acmlt_buf #(
 		in_async_fifo_din_is_first_grp,
 		in_async_fifo_din_is_last_grp
 	} = s_axis_mid_res_user;
-	assign in_async_fifo_wen = aclken & s_axis_mid_res_valid;
+	assign in_async_fifo_wen = 
+		((EN_IN_ASYNC_FIFO == "true") ? aclken:mid_res_buf_aclken) & 
+		s_axis_mid_res_valid;
 	
-	async_fifo_with_ram #(
-		.fwft_mode("true"),
-		.ram_type("lutram"),
-		.depth(32),
-		.data_width(ATOMIC_K*48 + ATOMIC_K*6 + 1 + INFO_ALONG_WIDTH + 3),
-		.simulation_delay(SIM_DELAY)
-	)in_async_fifo_u(
-		.clk_wt(aclk),
-		.rst_n_wt(aresetn),
-		.clk_rd(mid_res_buf_aclk),
-		.rst_n_rd(mid_res_buf_aresetn),
-		
-		.fifo_wen(in_async_fifo_wen),
-		.fifo_full(),
-		.fifo_full_n(in_async_fifo_full_n),
-		.fifo_din({
-			in_async_fifo_din_data,
-			in_async_fifo_din_keep,
-			in_async_fifo_din_last,
-			in_async_fifo_din_info_along,
-			in_async_fifo_din_is_last_cal_round,
-			in_async_fifo_din_is_first_grp,
-			in_async_fifo_din_is_last_grp
-		}),
-		.data_cnt_wt(),
-		.fifo_ren(in_async_fifo_ren),
-		.fifo_empty(),
-		.fifo_empty_n(in_async_fifo_empty_n),
-		.fifo_dout({
-			in_async_fifo_dout_data,
-			in_async_fifo_dout_keep,
-			in_async_fifo_dout_last,
-			in_async_fifo_dout_info_along,
-			in_async_fifo_dout_is_last_cal_round,
-			in_async_fifo_dout_is_first_grp,
-			in_async_fifo_dout_is_last_grp
-		}),
-		.data_cnt_rd()
-	);
+	generate
+		if(EN_IN_ASYNC_FIFO == "true")
+		begin
+			async_fifo_with_ram #(
+				.fwft_mode("true"),
+				.ram_type("lutram"),
+				.depth(32),
+				.data_width(ATOMIC_K*48 + ATOMIC_K*6 + 1 + INFO_ALONG_WIDTH + 3),
+				.simulation_delay(SIM_DELAY)
+			)in_async_fifo_u(
+				.clk_wt(aclk),
+				.rst_n_wt(aresetn),
+				.clk_rd(mid_res_buf_aclk),
+				.rst_n_rd(mid_res_buf_aresetn),
+				
+				.fifo_wen(in_async_fifo_wen),
+				.fifo_full(),
+				.fifo_full_n(in_async_fifo_full_n),
+				.fifo_din({
+					in_async_fifo_din_data,
+					in_async_fifo_din_keep,
+					in_async_fifo_din_last,
+					in_async_fifo_din_info_along,
+					in_async_fifo_din_is_last_cal_round,
+					in_async_fifo_din_is_first_grp,
+					in_async_fifo_din_is_last_grp
+				}),
+				.data_cnt_wt(),
+				.fifo_ren(in_async_fifo_ren),
+				.fifo_empty(),
+				.fifo_empty_n(in_async_fifo_empty_n),
+				.fifo_dout({
+					in_async_fifo_dout_data,
+					in_async_fifo_dout_keep,
+					in_async_fifo_dout_last,
+					in_async_fifo_dout_info_along,
+					in_async_fifo_dout_is_last_cal_round,
+					in_async_fifo_dout_is_first_grp,
+					in_async_fifo_dout_is_last_grp
+				}),
+				.data_cnt_rd()
+			);
+		end
+		else
+		begin
+			assign in_async_fifo_full_n = in_async_fifo_ren;
+			
+			assign in_async_fifo_empty_n = in_async_fifo_wen;
+			assign {
+					in_async_fifo_dout_data,
+					in_async_fifo_dout_keep,
+					in_async_fifo_dout_last,
+					in_async_fifo_dout_info_along,
+					in_async_fifo_dout_is_last_cal_round,
+					in_async_fifo_dout_is_first_grp,
+					in_async_fifo_dout_is_last_grp
+				} = {
+					in_async_fifo_din_data,
+					in_async_fifo_din_keep,
+					in_async_fifo_din_last,
+					in_async_fifo_din_info_along,
+					in_async_fifo_din_is_last_cal_round,
+					in_async_fifo_din_is_first_grp,
+					in_async_fifo_din_is_last_grp
+				};
+		end
+	endgenerate
 	
 	/** 中间结果更新与缓存(计算核心) **/
 	// 中间结果输入(AXIS从机)
@@ -436,7 +469,8 @@ module async_conv_middle_res_acmlt_buf #(
 			{m_axis_inner_fnl_res_keep, fnl_res_keep_saved[ATOMIC_K/BUF_CLK_RATE*(BUF_CLK_RATE-1)*4-1:0]};
 	assign {out_async_fifo_din_is_last_sub_row, out_async_fifo_din_sub_row_id} = 
 		m_axis_inner_fnl_res_user;
-	assign out_async_fifo_din_last = m_axis_inner_fnl_res_last & fnl_res_sel[BUF_CLK_RATE-1];
+	assign out_async_fifo_din_last = 
+		m_axis_inner_fnl_res_last & fnl_res_sel[BUF_CLK_RATE-1];
 	
 	assign out_async_fifo_ren = aclken & m_axis_fnl_res_ready;
 	

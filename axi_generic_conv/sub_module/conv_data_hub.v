@@ -282,6 +282,8 @@ module conv_data_hub #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	localparam KBUFGRPSZ_16 = 3'b110; // 4x4
+	localparam KBUFGRPSZ_4 = 3'b111; // 2x2
 	// 特征图表面行读请求各字段的起始索引
 	localparam integer FM_RD_REQ_TO_RST_BUF_FLAG_SID = 97; // 索引: 是否重置缓存
 	localparam integer FM_RD_REQ_ACTUAL_SFC_RID_SID = 85; // 索引: 实际表面行号
@@ -1165,12 +1167,14 @@ module conv_data_hub #(
 	
 	assign kernal_wgtblk_n_foreach_cgrp = 
 		(
-			(kbufgrpsz == KBUFGRPSZ_1)  ? 7'd1:
-			(kbufgrpsz == KBUFGRPSZ_9)  ? 7'd9:
-			(kbufgrpsz == KBUFGRPSZ_25) ? 7'd25:
-			(kbufgrpsz == KBUFGRPSZ_49) ? 7'd49:
-			(kbufgrpsz == KBUFGRPSZ_81) ? 7'd81:
-										  7'd121
+			(kbufgrpsz == KBUFGRPSZ_1)   ? 7'd1:
+			(kbufgrpsz == KBUFGRPSZ_9)   ? 7'd9:
+			(kbufgrpsz == KBUFGRPSZ_25)  ? 7'd25:
+			(kbufgrpsz == KBUFGRPSZ_49)  ? 7'd49:
+			(kbufgrpsz == KBUFGRPSZ_81)  ? 7'd81:
+			(kbufgrpsz == KBUFGRPSZ_121) ? 7'd121:
+			(kbufgrpsz == KBUFGRPSZ_16)  ? 7'd16:
+			                               7'd4
 		) - 7'd1;
 	
 	// 表面计数器

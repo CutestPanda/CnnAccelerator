@@ -54,7 +54,7 @@ BN与激活并行数(BN_ACT_PRL_N)必须<=核并行数(ATOMIC_K)
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/25
+日期: 2026/03/29
 ********************************************************************/
 
 
@@ -63,6 +63,7 @@ module conv_cal_sub_system #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer BN_ACT_CLK_RATE = 1, // BN与激活单元的时钟倍率(>=1)
 	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
+	parameter ASYNC_MAC_ARRAY_OPT_MODE = "area", // 异步计算核心的优化模式("area" | "performance")(仅在计算核心时钟倍率>1时可用)
 	parameter integer ATOMIC_K = 8, // 核并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer ATOMIC_C = 4, // 通道并行数(1 | 2 | 4 | 8 | 16 | 32)
 	parameter integer BN_ACT_PRL_N = 1, // BN与激活并行数(1 | 2 | 4 | 8 | 16 | 32)
@@ -300,6 +301,8 @@ module conv_cal_sub_system #(
 	localparam KBUFGRPSZ_49 = 3'b011; // 7x7
 	localparam KBUFGRPSZ_81 = 3'b100; // 9x9
 	localparam KBUFGRPSZ_121 = 3'b101; // 11x11
+	localparam KBUFGRPSZ_16 = 3'b110; // 4x4
+	localparam KBUFGRPSZ_4 = 3'b111; // 2x2
 	// BN与激活处理的运算数据格式的编码
 	localparam BN_ACT_CAL_FMT_INT16 = 2'b00;
 	localparam BN_ACT_CAL_FMT_INT32 = 2'b01;
@@ -320,12 +323,14 @@ module conv_cal_sub_system #(
 		(mid_res_item_n_foreach_row * MID_RES_BUF_CLK_RATE) | (MID_RES_BUF_CLK_RATE - 1);
 	assign kernal_w = 
 		(
-			(kernal_shape == KBUFGRPSZ_1)  ? 4'd1:
-			(kernal_shape == KBUFGRPSZ_9)  ? 4'd3:
-			(kernal_shape == KBUFGRPSZ_25) ? 4'd5:
-			(kernal_shape == KBUFGRPSZ_49) ? 4'd7:
-			(kernal_shape == KBUFGRPSZ_81) ? 4'd9:
-											 4'd11
+			(kernal_shape == KBUFGRPSZ_1)   ? 4'd1:
+			(kernal_shape == KBUFGRPSZ_9)   ? 4'd3:
+			(kernal_shape == KBUFGRPSZ_25)  ? 4'd5:
+			(kernal_shape == KBUFGRPSZ_49)  ? 4'd7:
+			(kernal_shape == KBUFGRPSZ_81)  ? 4'd9:
+			(kernal_shape == KBUFGRPSZ_121) ? 4'd11:
+			(kernal_shape == KBUFGRPSZ_16)  ? 4'd4:
+											  4'd2
 	    ) - 1;
 	assign bank_n_foreach_ofmap_row = 
 		(mid_res_item_n_foreach_row_async_clk_considered[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
@@ -390,6 +395,11 @@ module conv_cal_sub_system #(
 	);
 	
 	/** 卷积乘加阵列 **/
+	// 位于计算核心时钟域的使能乘加阵列信号
+	reg en_mac_array_d1;
+	reg en_mac_array_d2;
+	reg en_mac_array_d3;
+	reg en_mac_array_d4;
 	// 乘加阵列输入
 	// [特征图]
 	wire[ATOMIC_C*16-1:0] array_i_ftm_sfc; // 特征图表面(数据)
@@ -414,32 +424,154 @@ module conv_cal_sub_system #(
 	
 	assign ftm_sfc_cal_n = ftm_sfc_cal_n_cnt;
 	
-	assign array_i_ftm_sfc = m_adapter_axis_data;
-	assign array_i_ftm_sfc_last = m_adapter_axis_last;
-	assign array_i_ftm_sfc_masked = m_adapter_axis_user;
-	assign array_i_ftm_sfc_vld = m_adapter_axis_valid;
-	assign m_adapter_axis_ready = array_i_ftm_sfc_rdy;
-	
-	assign array_i_kernal_sfc = s_kwgtblk_axis_data;
-	assign array_i_kernal_sfc_last = s_kwgtblk_axis_last;
-	assign array_i_kernal_sfc_vld = s_kwgtblk_axis_valid;
-	assign s_kwgtblk_axis_ready = array_i_kernal_buf_full_n;
-	
 	// 已计算的特征图表面数(计数器)
-	always @(posedge aclk)
+	generate
+		if((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance"))
+		begin
+			// 警告: 未作跨时钟域处理!!!
+			always @(posedge mac_array_aclk)
+			begin
+				if(
+					mac_array_aclken & 
+					((~en_mac_array_d4) | (array_o_res_vld & array_o_res_rdy))
+				)
+					ftm_sfc_cal_n_cnt <= # SIM_DELAY 
+						en_mac_array_d4 ? 
+							(ftm_sfc_cal_n_cnt + 1'b1):
+							32'd0;
+			end
+		end
+		else
+		begin
+			always @(posedge aclk)
+			begin
+				if(
+					aclken & 
+					((~en_mac_array) | (array_o_res_vld & array_o_res_rdy))
+				)
+					ftm_sfc_cal_n_cnt <= # SIM_DELAY 
+						en_mac_array ? 
+							(ftm_sfc_cal_n_cnt + 1'b1):
+							32'd0;
+			end
+		end
+	endgenerate
+	
+	// 位于计算核心时钟域的使能乘加阵列信号
+	// 跨时钟域: ... -> en_mac_array_d1
+	always @(posedge mac_array_aclk or negedge mac_array_aresetn)
 	begin
-		if(
-			aclken & 
-			((~en_mac_array) | (array_o_res_vld & array_o_res_rdy))
-		)
-			ftm_sfc_cal_n_cnt <= # SIM_DELAY 
-				en_mac_array ? 
-					(ftm_sfc_cal_n_cnt + 1'b1):
-					32'd0;
+		if(~mac_array_aresetn)
+			{en_mac_array_d4, en_mac_array_d3, en_mac_array_d2, en_mac_array_d1} <= 4'b0000;
+		else
+			{en_mac_array_d4, en_mac_array_d3, en_mac_array_d2, en_mac_array_d1} <= # SIM_DELAY 
+				{en_mac_array_d3, en_mac_array_d2, en_mac_array_d1, en_mac_array};
 	end
+	
+	generate
+		if(MAC_ARRAY_CLK_RATE == 1)
+		begin
+			assign array_i_ftm_sfc = m_adapter_axis_data;
+			assign array_i_ftm_sfc_last = m_adapter_axis_last;
+			assign array_i_ftm_sfc_masked = m_adapter_axis_user;
+			assign array_i_ftm_sfc_vld = m_adapter_axis_valid;
+			assign m_adapter_axis_ready = array_i_ftm_sfc_rdy;
+			
+			assign array_i_kernal_sfc = s_kwgtblk_axis_data;
+			assign array_i_kernal_sfc_last = s_kwgtblk_axis_last;
+			assign array_i_kernal_sfc_vld = s_kwgtblk_axis_valid;
+			assign s_kwgtblk_axis_ready = array_i_kernal_buf_full_n;
+		end
+		else
+		begin
+			/*
+			跨时钟域:
+				conv_mac_array_in_async_fifo_u0/async_fifo_u/rptr_gray_at_r[*] -> conv_mac_array_in_async_fifo_u0/async_fifo_u/rptr_gray_at_w_p2[*]
+				conv_mac_array_in_async_fifo_u0/async_fifo_u/wptr_gray_at_w[*] -> conv_mac_array_in_async_fifo_u0/async_fifo_u/wptr_gray_at_r_p2[*]
+				... -> conv_mac_array_in_async_fifo_u0/axis_reg_slice_u/axis_reg_slice_core_u/fwd_payload[*]
+			*/
+			async_fifo_with_ram #(
+				.fwft_mode("true"),
+				.ram_type("lutram"),
+				.depth(32),
+				.data_width(ATOMIC_C*16 + 1 + 1),
+				.simulation_delay(SIM_DELAY)
+			)conv_mac_array_in_async_fifo_u0(
+				.clk_wt(aclk),
+				.rst_n_wt(aresetn),
+				.clk_rd(mac_array_aclk),
+				.rst_n_rd(mac_array_aresetn),
+				
+				.fifo_wen(m_adapter_axis_valid),
+				.fifo_full(),
+				.fifo_full_n(m_adapter_axis_ready),
+				.fifo_din(
+					{
+						m_adapter_axis_data,
+						m_adapter_axis_last,
+						m_adapter_axis_user
+					}
+				),
+				.data_cnt_wt(),
+				.fifo_ren(array_i_ftm_sfc_rdy),
+				.fifo_empty(),
+				.fifo_empty_n(array_i_ftm_sfc_vld),
+				.fifo_dout(
+					{
+						array_i_ftm_sfc,
+						array_i_ftm_sfc_last,
+						array_i_ftm_sfc_masked
+					}
+				),
+				.data_cnt_rd()
+			);
+			
+			/*
+			跨时钟域:
+				conv_mac_array_in_async_fifo_u1/async_fifo_u/rptr_gray_at_r[*] -> conv_mac_array_in_async_fifo_u1/async_fifo_u/rptr_gray_at_w_p2[*]
+				conv_mac_array_in_async_fifo_u1/async_fifo_u/wptr_gray_at_w[*] -> conv_mac_array_in_async_fifo_u1/async_fifo_u/wptr_gray_at_r_p2[*]
+				... -> conv_mac_array_in_async_fifo_u1/axis_reg_slice_u/axis_reg_slice_core_u/fwd_payload[*]
+			*/
+			async_fifo_with_ram #(
+				.fwft_mode("true"),
+				.ram_type("lutram"),
+				.depth(32),
+				.data_width(ATOMIC_C*16 + 1),
+				.simulation_delay(SIM_DELAY)
+			)conv_mac_array_in_async_fifo_u1(
+				.clk_wt(aclk),
+				.rst_n_wt(aresetn),
+				.clk_rd(mac_array_aclk),
+				.rst_n_rd(mac_array_aresetn),
+				
+				.fifo_wen(s_kwgtblk_axis_valid),
+				.fifo_full(),
+				.fifo_full_n(s_kwgtblk_axis_ready),
+				.fifo_din(
+					{
+						s_kwgtblk_axis_data,
+						s_kwgtblk_axis_last
+					}
+				),
+				.data_cnt_wt(),
+				.fifo_ren(array_i_kernal_buf_full_n),
+				.fifo_empty(),
+				.fifo_empty_n(array_i_kernal_sfc_vld),
+				.fifo_dout(
+					{
+						array_i_kernal_sfc,
+						array_i_kernal_sfc_last
+					}
+				),
+				.data_cnt_rd()
+			);
+		end
+	endgenerate
 	
 	conv_mac_array #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
+		.EN_IN_ASYNC_FIFO("false"),
+		.ASYNC_MAC_ARRAY_OPT_MODE(ASYNC_MAC_ARRAY_OPT_MODE),
 		.MAX_CAL_ROUND(MAX_CAL_ROUND),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
@@ -449,14 +581,17 @@ module conv_cal_sub_system #(
 		.TO_SKIP_EMPTY_CAL_ROUND("true"),
 		.SIM_DELAY(SIM_DELAY)
 	)conv_mac_array_u(
-		.aclk(aclk),
-		.aresetn(aresetn),
-		.aclken(aclken),
+		.aclk((MAC_ARRAY_CLK_RATE == 1) ? aclk:mac_array_aclk),
+		.aresetn((MAC_ARRAY_CLK_RATE == 1) ? aresetn:mac_array_aresetn),
+		.aclken((MAC_ARRAY_CLK_RATE == 1) ? aclken:mac_array_aclken),
 		.mac_array_aclk(mac_array_aclk),
 		.mac_array_aresetn(mac_array_aresetn),
 		.mac_array_aclken(mac_array_aclken),
+		.array_o_aclk((ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? mac_array_aclk:aclk),
+		.array_o_aresetn((ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? mac_array_aresetn:aresetn),
+		.array_o_aclken((ASYNC_MAC_ARRAY_OPT_MODE == "performance") ? mac_array_aclken:aclken),
 		
-		.en_mac_array(en_mac_array),
+		.en_mac_array((MAC_ARRAY_CLK_RATE == 1) ? en_mac_array:en_mac_array_d4),
 		
 		.calfmt(calfmt),
 		.cal_round(cal_round),
@@ -512,6 +647,7 @@ module conv_cal_sub_system #(
 	assign array_o_res_rdy = mac_array_res_rdy;
 	
 	conv_middle_res_info_packer #(
+		.IS_MID_RES_COMMON_CLK(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? "false":"true"),
 		.ATOMIC_K(ATOMIC_K),
 		.EN_MAC_ARRAY_REG_SLICE("true"),
 		.EN_PKT_OUT_REG_SLICE("true"),
@@ -520,6 +656,9 @@ module conv_cal_sub_system #(
 		.aclk(aclk),
 		.aresetn(aresetn),
 		.aclken(aclken),
+		.mid_res_aclk(mac_array_aclk),
+		.mid_res_aresetn(mac_array_aresetn),
+		.mid_res_aclken(mac_array_aclken),
 		
 		.en_packer(en_packer),
 		
@@ -546,6 +685,8 @@ module conv_cal_sub_system #(
 	);
 	
 	/** 卷积中间结果累加与缓存 **/
+	// 使能信号
+	reg[4:1] en_mac_array_delayed;
 	// 中间结果输入(AXIS从机)
 	/*
 	对于ATOMIC_K个中间结果 -> 
@@ -593,10 +734,28 @@ module conv_cal_sub_system #(
 	assign s_axis_mid_res_buf_keep = m_axis_pkt_out_keep;
 	assign s_axis_mid_res_buf_user = m_axis_pkt_out_user;
 	assign s_axis_mid_res_buf_last = m_axis_pkt_out_last;
-	assign s_axis_mid_res_buf_valid = m_axis_pkt_out_valid;
-	assign m_axis_pkt_out_ready = s_axis_mid_res_buf_ready;
+	assign s_axis_mid_res_buf_valid = 
+		m_axis_pkt_out_valid & 
+		(
+			(~((MID_RES_BUF_CLK_RATE > 1) | ((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")))) | 
+			en_mac_array_delayed[4]
+		);
+	assign m_axis_pkt_out_ready = 
+		s_axis_mid_res_buf_ready & 
+		(
+			(~((MID_RES_BUF_CLK_RATE > 1) | ((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")))) | 
+			en_mac_array_delayed[4]
+		);
 	
 	assign {acmlt_out_last_res, acmlt_out_last_grp, acmlt_out_mask} = acmlt_out_info_along[0];
+	
+	always @(posedge mid_res_buf_aclk or negedge mid_res_buf_aresetn)
+	begin
+		if(~mid_res_buf_aresetn)
+			en_mac_array_delayed <= 4'b0000;
+		else
+			en_mac_array_delayed <= # SIM_DELAY {en_mac_array_delayed[3:1], en_mac_array};
+	end
 	
 	genvar acmlt_i;
 	generate
@@ -668,9 +827,9 @@ module conv_cal_sub_system #(
 					.INFO_ALONG_WIDTH(1),
 					.SIM_DELAY(SIM_DELAY)
 				)conv_middle_res_acmlt_buf_u0(
-					.aclk(aclk),
-					.aresetn(aresetn),
-					.aclken(aclken),
+					.aclk(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? mid_res_buf_aclk:aclk),
+					.aresetn(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? mid_res_buf_aresetn:aresetn),
+					.aclken(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? mid_res_buf_aclken:aclken),
 					
 					.calfmt(calfmt),
 					.row_n_bufferable(mid_res_buf_row_n_bufferable),
@@ -725,6 +884,7 @@ module conv_cal_sub_system #(
 			else
 			begin
 				async_conv_middle_res_acmlt_buf #(
+					.EN_IN_ASYNC_FIFO("true"),
 					.BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
 					.ATOMIC_K(ATOMIC_K),
 					.RBUF_BANK_N(RBUF_BANK_N),
@@ -848,12 +1008,53 @@ module conv_cal_sub_system #(
 	wire m_axis_bn_act_valid;
 	wire m_axis_bn_act_ready;
 	
-	assign s_axis_bn_act_data = m_axis_mid_res_buf_data;
-	assign s_axis_bn_act_keep = m_axis_mid_res_buf_keep;
-	assign s_axis_bn_act_user = m_axis_mid_res_buf_user;
-	assign s_axis_bn_act_last = m_axis_mid_res_buf_last;
-	assign s_axis_bn_act_valid = m_axis_mid_res_buf_valid;
-	assign m_axis_mid_res_buf_ready = s_axis_bn_act_ready;
+	generate
+		if((MID_RES_BUF_CLK_RATE == 1) & (MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance"))
+		begin
+			async_fifo_with_ram #(
+				.fwft_mode("true"),
+				.ram_type("lutram"),
+				.depth(32),
+				.data_width(ATOMIC_K*32 + ATOMIC_K*4 + 5 + 1),
+				.simulation_delay(SIM_DELAY)
+			)mid_res_buf_out_async_fifo_u(
+				.clk_wt(mid_res_buf_aclk),
+				.rst_n_wt(mid_res_buf_aresetn),
+				.clk_rd(aclk),
+				.rst_n_rd(aresetn),
+				
+				.fifo_wen(m_axis_mid_res_buf_valid),
+				.fifo_full(),
+				.fifo_full_n(m_axis_mid_res_buf_ready),
+				.fifo_din({
+					m_axis_mid_res_buf_data,
+					m_axis_mid_res_buf_keep,
+					m_axis_mid_res_buf_user,
+					m_axis_mid_res_buf_last
+				}),
+				.data_cnt_wt(),
+				.fifo_ren(s_axis_bn_act_ready),
+				.fifo_empty(),
+				.fifo_empty_n(s_axis_bn_act_valid),
+				.fifo_dout({
+					s_axis_bn_act_data,
+					s_axis_bn_act_keep,
+					s_axis_bn_act_user,
+					s_axis_bn_act_last
+				}),
+				.data_cnt_rd()
+			);
+		end
+		else
+		begin
+			assign s_axis_bn_act_data = m_axis_mid_res_buf_data;
+			assign s_axis_bn_act_keep = m_axis_mid_res_buf_keep;
+			assign s_axis_bn_act_user = m_axis_mid_res_buf_user;
+			assign s_axis_bn_act_last = m_axis_mid_res_buf_last;
+			assign s_axis_bn_act_valid = m_axis_mid_res_buf_valid;
+			assign m_axis_mid_res_buf_ready = s_axis_bn_act_ready;
+		end
+	endgenerate
 	
 	generate
 		if(USE_EXT_BN_ACT_UNIT == "false")

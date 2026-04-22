@@ -46,13 +46,14 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2026/01/11
+日期: 2026/03/29
 ********************************************************************/
 
 
 module axi_generic_conv_core #(
 	parameter integer MAC_ARRAY_CLK_RATE = 1, // 计算核心时钟倍率(>=1)
 	parameter integer MID_RES_BUF_CLK_RATE = 1, // 中间结果缓存时钟倍率(1 | 2 | 4 | 8)
+	parameter ASYNC_MAC_ARRAY_OPT_MODE = "area", // 异步计算核心的优化模式("area" | "performance")(仅在计算核心时钟倍率>1时可用)
 	parameter integer BN_SUPPORTED = 1, // 是否支持批归一化处理
 	parameter integer LEAKY_RELU_SUPPORTED = 1, // 是否支持Leaky-Relu激活
 	parameter integer SIGMOID_SUPPORTED = 1, // 是否支持Sigmoid激活
@@ -414,7 +415,7 @@ module axi_generic_conv_core #(
 	assign en_bn_act_proc_dup = en_bn_act_proc;
 	
 	reg_if_for_generic_conv #(
-		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+		.MID_RES_BUF_CLK_RATE(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? 1:MID_RES_BUF_CLK_RATE),
 		.BN_SUPPORTED(BN_SUPPORTED ? 1'b1:1'b0),
 		.LEAKY_RELU_SUPPORTED(LEAKY_RELU_SUPPORTED ? 1'b1:1'b0),
 		.SIGMOID_SUPPORTED(SIGMOID_SUPPORTED ? 1'b1:1'b0),
@@ -792,6 +793,15 @@ module axi_generic_conv_core #(
 	wire[ATOMIC_K*ATOMIC_C*16-1:0] mul_array_op_b; // 操作数B
 	wire[ATOMIC_K-1:0] mul_array_ce; // 计算使能
 	wire[ATOMIC_K*ATOMIC_C*32-1:0] mul_array_res; // 计算结果
+	// 中间结果缓存MEM主接口
+	wire mid_res_mem_clk_a;
+	wire[RBUF_BANK_N-1:0] mid_res_mem_wen_a;
+	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_a;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_din_a;
+	wire mid_res_mem_clk_b;
+	wire[RBUF_BANK_N-1:0] mid_res_mem_ren_b;
+	wire[RBUF_BANK_N*16-1:0] mid_res_mem_addr_b;
+	wire[RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)-1:0] mid_res_mem_dout_b;
 	
 	assign s_fm_cake_info_axis_data = m_fm_cake_info_axis_data;
 	assign s_fm_cake_info_axis_valid = m_fm_cake_info_axis_valid;
@@ -810,13 +820,14 @@ module axi_generic_conv_core #(
 	conv_cal_sub_system #(
 		.MAC_ARRAY_CLK_RATE(MAC_ARRAY_CLK_RATE),
 		.BN_ACT_CLK_RATE(1),
-		.MID_RES_BUF_CLK_RATE(MID_RES_BUF_CLK_RATE),
+		.MID_RES_BUF_CLK_RATE(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? 1:MID_RES_BUF_CLK_RATE),
+		.ASYNC_MAC_ARRAY_OPT_MODE(ASYNC_MAC_ARRAY_OPT_MODE),
 		.ATOMIC_K(ATOMIC_K),
 		.ATOMIC_C(ATOMIC_C),
 		.BN_ACT_PRL_N(BN_ACT_PRL_N),
 		.STREAM_DATA_WIDTH(S2MM_STREAM_DATA_WIDTH),
 		.FP32_KEEP(FP32_KEEP ? 1'b1:1'b0),
-		.USE_EXT_MID_RES_BUF("true"),
+		.USE_EXT_MID_RES_BUF(((MAC_ARRAY_CLK_RATE > 1) & (ASYNC_MAC_ARRAY_OPT_MODE == "performance")) ? "false":"true"),
 		.USE_EXT_BN_ACT_UNIT("true"),
 		.USE_EXT_FNL_RES_COLLECTOR("true"),
 		.USE_EXT_ROUND_GRP("true"),
@@ -839,6 +850,9 @@ module axi_generic_conv_core #(
 		.bn_act_aclk(1'b0),
 		.bn_act_aresetn(1'b0),
 		.bn_act_aclken(1'b0),
+		.mid_res_buf_aclk(mac_array_aclk),
+		.mid_res_buf_aresetn(mac_array_aresetn),
+		.mid_res_buf_aclken(mac_array_aclken),
 		
 		.rst_adapter(rst_adapter),
 		.on_incr_phy_row_traffic(on_incr_phy_row_traffic),
@@ -961,14 +975,14 @@ module axi_generic_conv_core #(
 		.mul2_ce(),
 		.mul2_res({(LEAKY_RELU_MUL_RES_WIDTH*BN_ACT_PRL_N){1'bx}}),
 		
-		.mid_res_mem_clk_a(),
-		.mid_res_mem_wen_a(),
-		.mid_res_mem_addr_a(),
-		.mid_res_mem_din_a(),
-		.mid_res_mem_clk_b(),
-		.mid_res_mem_ren_b(),
-		.mid_res_mem_addr_b(),
-		.mid_res_mem_dout_b({(RBUF_BANK_N*(ATOMIC_K*4*8+ATOMIC_K)){1'bx}}),
+		.mid_res_mem_clk_a(mid_res_mem_clk_a),
+		.mid_res_mem_wen_a(mid_res_mem_wen_a),
+		.mid_res_mem_addr_a(mid_res_mem_addr_a),
+		.mid_res_mem_din_a(mid_res_mem_din_a),
+		.mid_res_mem_clk_b(mid_res_mem_clk_b),
+		.mid_res_mem_ren_b(mid_res_mem_ren_b),
+		.mid_res_mem_addr_b(mid_res_mem_addr_b),
+		.mid_res_mem_dout_b(mid_res_mem_dout_b),
 		
 		.bn_mem_clk_b(),
 		.bn_mem_ren_b(),
@@ -1045,6 +1059,31 @@ module axi_generic_conv_core #(
 				.op_b(mul_array_op_b[16*conv_mac_mul_i+15:16*conv_mac_mul_i]),
 				
 				.res(mul_array_res[32*conv_mac_mul_i+31:32*conv_mac_mul_i])
+			);
+		end
+	endgenerate
+	
+	/** SRAM **/
+	genvar mid_res_mem_i;
+	generate
+		for(mid_res_mem_i = 0;mid_res_mem_i < RBUF_BANK_N;mid_res_mem_i = mid_res_mem_i + 1)
+		begin:mem_blk
+			bram_simple_dual_port #(
+				.style("LOW_LATENCY"),
+				.mem_width(ATOMIC_K*4*8+ATOMIC_K),
+				.mem_depth(RBUF_DEPTH),
+				.INIT_FILE("no_init"),
+				.simulation_delay(SIM_DELAY)
+			)mid_res_ram_u(
+				.clk(mid_res_mem_clk_a),
+				
+				.wen_a(mid_res_mem_wen_a[mid_res_mem_i]),
+				.addr_a(mid_res_mem_addr_a[mid_res_mem_i*16+15:mid_res_mem_i*16]),
+				.din_a(mid_res_mem_din_a[(mid_res_mem_i+1)*(ATOMIC_K*4*8+ATOMIC_K)-1:mid_res_mem_i*(ATOMIC_K*4*8+ATOMIC_K)]),
+				
+				.ren_b(mid_res_mem_ren_b[mid_res_mem_i]),
+				.addr_b(mid_res_mem_addr_b[mid_res_mem_i*16+15:mid_res_mem_i*16]),
+				.dout_b(mid_res_mem_dout_b[(mid_res_mem_i+1)*(ATOMIC_K*4*8+ATOMIC_K)-1:mid_res_mem_i*(ATOMIC_K*4*8+ATOMIC_K)])
 			);
 		end
 	endgenerate

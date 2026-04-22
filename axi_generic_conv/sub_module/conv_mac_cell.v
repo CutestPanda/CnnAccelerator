@@ -305,7 +305,7 @@ module conv_mac_cell #(
 	第2级流水线: 尾数相乘(阶段#2), 计算FUNC(阶段#1)
 	第3级流水线: 生成带符号位的MTSO, 计算FUNC(阶段#2)
 	第4级流水线: 生成右移的MTSO
-	第4~(4 + log2(ATOMIC_C))级流水线: 通道累加
+	第5~(5 + log2(ATOMIC_C) - 1)级流水线: 通道累加
 	**/
 	// 外部有符号乘法器
 	wire signed[15:0] mul_op_a_fp16_arr[0:ATOMIC_C-1]; // 操作数A
