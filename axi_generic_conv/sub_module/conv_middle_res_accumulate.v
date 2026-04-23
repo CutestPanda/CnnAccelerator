@@ -42,7 +42,7 @@ SOFTWARE.
 无
 
 作者: 陈家耀
-日期: 2025/12/21
+日期: 2025/04/23
 ********************************************************************/
 
 
@@ -110,7 +110,22 @@ module conv_middle_res_accumulate #(
 	reg signed[79:0] ars_coarse_res; // 粗粒度移位结果
 	reg[2:0] ars_op2_d1; // 延迟1clk的操作数2
 	reg ars_clr_d1; // 延迟1clk的结果置零(标志)
-	reg signed[79:0] ars_res; // 移位结果
+	wire signed[79:0] ars_res_comb; // 移位结果(组号逻辑输出)
+	reg signed[79:0] ars_res; // 移位结果(寄存器输出)
+	
+	assign ars_res_comb = 
+		ars_clr_d1 ? 
+			80'd0:
+			(
+				(ars_op2_d1 == 3'b000) ? ars_coarse_res: // 算术右移0位
+				(ars_op2_d1 == 3'b001) ? {{1{ars_coarse_res[79]}}, ars_coarse_res[79:1]}: // 算术右移1位
+				(ars_op2_d1 == 3'b010) ? {{2{ars_coarse_res[79]}}, ars_coarse_res[79:2]}: // 算术右移2位
+				(ars_op2_d1 == 3'b011) ? {{3{ars_coarse_res[79]}}, ars_coarse_res[79:3]}: // 算术右移3位
+				(ars_op2_d1 == 3'b100) ? {{4{ars_coarse_res[79]}}, ars_coarse_res[79:4]}: // 算术右移4位
+				(ars_op2_d1 == 3'b101) ? {{5{ars_coarse_res[79]}}, ars_coarse_res[79:5]}: // 算术右移5位
+				(ars_op2_d1 == 3'b110) ? {{6{ars_coarse_res[79]}}, ars_coarse_res[79:6]}: // 算术右移6位
+										 {{7{ars_coarse_res[79]}}, ars_coarse_res[79:7]} // 算术右移7位
+			);
 	
 	// 粗粒度移位结果
 	always @(posedge aclk)
@@ -143,19 +158,7 @@ module conv_middle_res_accumulate #(
 	always @(posedge aclk)
 	begin
 		if(ars_ce1)
-			ars_res <= # SIM_DELAY 
-				ars_clr_d1 ? 
-					80'd0:
-					(
-						(ars_op2_d1 == 3'b000) ? ars_coarse_res: // 算术右移0位
-						(ars_op2_d1 == 3'b001) ? {{1{ars_coarse_res[79]}}, ars_coarse_res[79:1]}: // 算术右移1位
-						(ars_op2_d1 == 3'b010) ? {{2{ars_coarse_res[79]}}, ars_coarse_res[79:2]}: // 算术右移2位
-						(ars_op2_d1 == 3'b011) ? {{3{ars_coarse_res[79]}}, ars_coarse_res[79:3]}: // 算术右移3位
-						(ars_op2_d1 == 3'b100) ? {{4{ars_coarse_res[79]}}, ars_coarse_res[79:4]}: // 算术右移4位
-						(ars_op2_d1 == 3'b101) ? {{5{ars_coarse_res[79]}}, ars_coarse_res[79:5]}: // 算术右移5位
-						(ars_op2_d1 == 3'b110) ? {{6{ars_coarse_res[79]}}, ars_coarse_res[79:6]}: // 算术右移6位
-												 {{7{ars_coarse_res[79]}}, ars_coarse_res[79:7]} // 算术右移7位
-					);
+			ars_res <= # SIM_DELAY ars_res_comb;
 	end
 	
 	/** 输入有效指示延迟链 **/
@@ -345,6 +348,7 @@ module conv_middle_res_accumulate #(
 	wire signed[36:0] adder_0_op1_fp16; // 操作数1
 	wire signed[31:0] adder_0_op2_fp16; // 操作数2
 	wire adder_0_ce_fp16; // 计算使能
+	reg signed[37:0] adder_0_out_fp16_d1; // 延迟1clk的计算结果
 	// 累加计算(第0级流水线)
 	wire signed[8:0] acmlt_org_mid_res_sub_in_exp_fp16; // 原中间结果的绝对指数 - 待累加数的绝对指数
 	// 累加计算(第1级流水线)
@@ -419,19 +423,19 @@ module conv_middle_res_accumulate #(
 	assign ars_ce1 = aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d2 & (~acmlt_in_first_item_fp16_d2);
 	
 	assign adder_0_op1_fp16 = 
-		acmlt_is_org_mid_res_exp_lth_in_fp16_d2 ? 
-			acmlt_frac_exp_lg_fp16_d1: // 原中间结果的绝对指数 < 待累加数的绝对指数
-			ars_res[76:40]; // 原中间结果的绝对指数 >= 待累加数的绝对指数
+		acmlt_is_org_mid_res_exp_lth_in_fp16_d1 ? 
+			acmlt_frac_exp_lg_fp16: // 原中间结果的绝对指数 < 待累加数的绝对指数
+			ars_res_comb[76:40]; // 原中间结果的绝对指数 >= 待累加数的绝对指数
 	assign adder_0_op2_fp16 = 
-		acmlt_is_org_mid_res_exp_lth_in_fp16_d2 ? 
-			{{7{ars_res[64]}}, ars_res[64:40]}: // 原中间结果的绝对指数 < 待累加数的绝对指数
-			{{7{acmlt_frac_exp_lg_fp16_d1[24]}}, acmlt_frac_exp_lg_fp16_d1[24:0]}; // 原中间结果的绝对指数 >= 待累加数的绝对指数
-	assign adder_0_ce_fp16 = aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3 & (~acmlt_in_first_item_fp16_d3);
+		acmlt_is_org_mid_res_exp_lth_in_fp16_d1 ? 
+			{{7{ars_res_comb[64]}}, ars_res_comb[64:40]}: // 原中间结果的绝对指数 < 待累加数的绝对指数
+			{{7{acmlt_frac_exp_lg_fp16[24]}}, acmlt_frac_exp_lg_fp16[24:0]}; // 原中间结果的绝对指数 >= 待累加数的绝对指数
+	assign adder_0_ce_fp16 = aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d2 & (~acmlt_in_first_item_fp16_d2);
 	
 	assign acmlt_nml_s0_frac_high38 = 
 		acmlt_in_first_item_fp16_d3 ? 
 			{acmlt_frac_exp_lg_fp16_d1[36], acmlt_frac_exp_lg_fp16_d1}:
-			adder_0_res;
+			adder_0_out;
 	assign acmlt_nml_s0_frac_high33_rvs = {
 		acmlt_nml_s0_frac_high38[5], acmlt_nml_s0_frac_high38[6], acmlt_nml_s0_frac_high38[7], acmlt_nml_s0_frac_high38[8],
 		acmlt_nml_s0_frac_high38[9], acmlt_nml_s0_frac_high38[10], acmlt_nml_s0_frac_high38[11], acmlt_nml_s0_frac_high38[12],
@@ -447,7 +451,7 @@ module conv_middle_res_accumulate #(
 	assign acmlt_frac_sum[60:23] = 
 		acmlt_in_first_item_fp16_d4 ? 
 			{acmlt_frac_exp_lg_fp16_d2[36], acmlt_frac_exp_lg_fp16_d2}:
-			adder_0_out;
+			adder_0_out_fp16_d1;
 	assign acmlt_frac_sum[22:0] = acmlt_frac_shifted_fp16[39:17];
 	
 	assign acmlt_nml_s1_i_frac_arsh_n = 
@@ -614,6 +618,13 @@ module conv_middle_res_accumulate #(
 	begin
 		if(aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3)
 			acmlt_frac_shifted_fp16 <= # SIM_DELAY {40{~acmlt_in_first_item_fp16_d3}} & ars_res[39:0];
+	end
+	
+	// 延迟1clk的计算结果
+	always @(posedge aclk)
+	begin
+		if(aclken & (calfmt == CAL_FMT_FP16) & acmlt_in_valid_d3 & (~acmlt_in_first_item_fp16_d3))
+			adder_0_out_fp16_d1 <= # SIM_DELAY adder_0_out;
 	end
 	
 	// 待标准化尾数最高数值位的位置独热码
