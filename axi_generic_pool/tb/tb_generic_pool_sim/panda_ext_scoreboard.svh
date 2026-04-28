@@ -142,8 +142,16 @@ class FinalResScoreboard extends tue_scoreboard #(
 		ext_fmap_w = this.fmap_cfg.fmap_w + this.cal_cfg.external_padding_left + this.cal_cfg.external_padding_right;
 		ext_fmap_h = this.fmap_cfg.fmap_h + this.cal_cfg.external_padding_top + this.cal_cfg.external_padding_bottom;
 		
-		ofmap_w = ((ext_fmap_w - this.cal_cfg.pool_window_w) / this.cal_cfg.pool_horizontal_stride) + 1;
-		ofmap_h = ((ext_fmap_h - this.cal_cfg.pool_window_h) / this.cal_cfg.pool_vertical_stride) + 1;
+		if(this.cal_cfg.pool_mode != POOL_MODE_UPSP)
+		begin
+			ofmap_w = ((ext_fmap_w - this.cal_cfg.pool_window_w) / this.cal_cfg.pool_horizontal_stride) + 1;
+			ofmap_h = ((ext_fmap_h - this.cal_cfg.pool_window_h) / this.cal_cfg.pool_vertical_stride) + 1;
+		end
+		else
+		begin
+			ofmap_w = uint'(real'(ext_fmap_w) / this.cal_cfg.upsample_horizontal_rate);
+			ofmap_h = uint'(real'(ext_fmap_h) / this.cal_cfg.upsample_vertical_rate);
+		end
 		
 		for(int unsigned cg = 0;cg < cgrpn;cg++)
 		begin
@@ -154,213 +162,190 @@ class FinalResScoreboard extends tue_scoreboard #(
 				((cg == (cgrpn - 1)) && (this.fmap_cfg.fmap_c % this.cal_cfg.atomic_c)) ? 
 					(this.fmap_cfg.fmap_c % this.cal_cfg.atomic_c):
 					this.cal_cfg.atomic_c;
-			pool_window_ext_y = -int'(this.cal_cfg.external_padding_top);
+			pool_window_ext_y = (-int'(this.cal_cfg.external_padding_top)) * 256;
 			
-			for(int unsigned oy = 0;oy < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? ofmap_h:ext_fmap_h);oy++)
+			for(int unsigned oy = 0;oy < ofmap_h;oy++)
 			begin
-				for(int unsigned v_dup_i = 0;v_dup_i < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? 1:this.cal_cfg.upsample_vertical_n);v_dup_i++)
+				int pool_window_ext_x; // 池化窗口起始x坐标
+				
+				pool_window_ext_x = (-int'(this.cal_cfg.external_padding_left)) * 256;
+				
+				for(int unsigned ox = 0;ox < ofmap_w;ox++)
 				begin
-					int pool_window_ext_x; // 池化窗口起始x坐标
+					AbstractData ofmap_sfc[];
 					
-					pool_window_ext_x = -int'(this.cal_cfg.external_padding_left);
+					ofmap_sfc = new[cgrp_depth];
 					
-					for(int unsigned ox = 0;ox < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? ofmap_w:ext_fmap_w);ox++)
+					// 创建1个表面的数据
+					foreach(ofmap_sfc[_i])
 					begin
-						AbstractData ofmap_sfc[];
-						
-						ofmap_sfc = new[cgrp_depth * ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? 1:this.cal_cfg.upsample_horizontal_n)];
-						
-						// 创建1个表面的数据
-						foreach(ofmap_sfc[_i])
-						begin
-							ofmap_sfc[_i] = this.create_abst_data();
-						end
-						
-						for(int unsigned py = 0;py < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_window_h:1);py++)
-						begin
-							for(int unsigned px = 0;px < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_window_w:this.cal_cfg.upsample_horizontal_n);px++)
-							begin
-								int pool_x; // 池化点x坐标
-								int pool_y; // 池化点y坐标
-								
-								pool_x = pool_window_ext_x + ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? int'(px):0);
-								pool_y = pool_window_ext_y + ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? int'(py):0);
-								
-								if(pool_x >= 0 && pool_x < this.fmap_cfg.fmap_w && pool_y >= 0 && pool_y < this.fmap_cfg.fmap_h)
-								begin // 当前池化点不是填充点
-									DataBlk fmap_data_blk; // 特征图数据块
-									FmapSfc fmap_sfc; // 特征图表面
-									int unsigned fmap_build_rid;
-									int unsigned fmap_actual_rid;
-									
-									// 取出特征图表面行
-									fmap_build_rid = cg * this.fmap_cfg.fmap_h + pool_y;
-									fmap_actual_rid = fmap_this.rid_hash[fmap_build_rid];
-									fmap_data_blk = fmap_this.get_sub_data_blk(fmap_actual_rid);
-									
-									if(fmap_data_blk == null)
-									begin
-										`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc_row(cg = %0d, y = %0d, actual_rid = %0d)", cg, pool_y, fmap_actual_rid))
-										
-										break;
-									end
-									
-									// 取出特征图表面
-									fmap_data_blk = fmap_data_blk.get_sub_data_blk(pool_x);
-									
-									if(fmap_data_blk == null)
-									begin
-										`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc(x = %0d)", pool_x))
-										
-										break;
-									end
-									
-									if(!$cast(fmap_sfc, fmap_data_blk))
-									begin
-										`uvm_error(this.get_name(), "cannot cast fmap_data_blk -> fmap_sfc")
-										
-										break;
-									end
-									
-									// 检查特征图表面深度
-									if(fmap_sfc.get_size() != cgrp_depth)
-									begin
-										`uvm_error(this.get_name(), $sformatf("Expected fmap_sfc_depth is %0d, but it's %0d", cgrp_depth, fmap_sfc.get_size()))
-										
-										break;
-									end
-									
-									if(this.cal_cfg.pool_mode == POOL_MODE_MAX)
-									begin
-										if((px == 0) && (py == 0))
-										begin
-											for(int unsigned d = 0;d < cgrp_depth;d++)
-											begin
-												ofmap_sfc[d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[d] = fmap_sfc.data[d]
-											end
-										end
-										else
-										begin
-											for(int unsigned d = 0;d < cgrp_depth;d++)
-											begin
-												if(fmap_sfc.data[d].is_greater_than(ofmap_sfc[d])) // fmap_sfc.data[d] > ofmap_sfc[d]
-													ofmap_sfc[d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[d] = fmap_sfc.data[d]
-											end
-										end
-									end
-									else if(this.cal_cfg.pool_mode == POOL_MODE_AVG)
-									begin
-										for(int unsigned d = 0;d < cgrp_depth;d++)
-										begin
-											ofmap_sfc[d].add_assign(fmap_sfc.data[d]); // ofmap_sfc[d] += fmap_sfc.data[d]
-										end
-									end
-									else if(this.cal_cfg.pool_mode == POOL_MODE_UPSP)
-									begin
-										for(int unsigned d = 0;d < cgrp_depth;d++)
-										begin
-											ofmap_sfc[px * cgrp_depth + d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[px * cgrp_depth + d] = fmap_sfc.data[d]
-										end
-									end
-								end
-								else
-								begin
-									if(this.cal_cfg.pool_mode == POOL_MODE_MAX)
-									begin
-										if((px == 0) && (py == 0))
-										begin
-											for(int unsigned d = 0;d < cgrp_depth;d++)
-											begin
-												ofmap_sfc[d].set_to_zero(); // ofmap_sfc[d] = 0
-											end
-										end
-										else
-										begin
-											for(int unsigned d = 0;d < cgrp_depth;d++)
-											begin
-												if(this.create_abst_data().is_greater_than(ofmap_sfc[d])) // 0 > ofmap_sfc[d]
-													ofmap_sfc[d].set_to_zero(); // ofmap_sfc[d] = 0
-											end
-										end
-									end
-									else if(this.cal_cfg.pool_mode == POOL_MODE_UPSP)
-									begin
-										for(int unsigned d = 0;d < cgrp_depth;d++)
-										begin
-											if(this.cal_cfg.non_zero_const_padding_mode)
-												ofmap_sfc[px * cgrp_depth + d].set_by_int16(this.cal_cfg.const_to_fill); // ofmap_sfc[px * cgrp_depth + d] = 常量
-											else
-												ofmap_sfc[px * cgrp_depth + d].set_to_zero(); // ofmap_sfc[px * cgrp_depth + d] = 0
-										end
-									end
-								end
-							end
-						end
-						
-						// 后乘加处理
-						if(this.cal_cfg.enable_post_mac)
-						begin
-							AbstractData param_a;
-							AbstractData param_b;
-							
-							param_a = create_abst_data();
-							param_b = create_abst_data();
-							
-							if(!this.cal_cfg.post_mac_is_a_eq_1)
-							begin
-								param_a.set_by_int32(this.cal_cfg.post_mac_param_a);
-								
-								foreach(ofmap_sfc[_i])
-								begin
-									ofmap_sfc[_i].mul_assign(param_a);
-								end
-							end
-							
-							if(!this.cal_cfg.post_mac_is_b_eq_0)
-							begin
-								param_b.set_by_int32(this.cal_cfg.post_mac_param_b);
-								
-								foreach(ofmap_sfc[_i])
-								begin
-									ofmap_sfc[_i].add_assign(param_b);
-								end
-							end
-						end
-						
-						// 添加输出表面数据
-						this.exp_res_adpt.put_data(ofmap_sfc);
-						
-						// 添加打印信息
-						if(this.cal_cfg.pool_mode != POOL_MODE_UPSP)
-						begin
-							for(int unsigned _i = 0;_i < cgrp_depth;_i++)
-							begin
-								this.exp_res_adpt.print_context.push_back($sformatf("oy%0d, ox%0d, sfc_i%0d", oy, ox, _i));
-							end
-						end
-						else
-						begin
-							for(int unsigned _i = 0;_i < this.cal_cfg.upsample_horizontal_n;_i++)
-							begin
-								for(int unsigned _j = 0;_j < cgrp_depth;_j++)
-								begin
-									this.exp_res_adpt.print_context.push_back(
-										$sformatf(
-											"oy%0d, ox%0d, sfc_i%0d",
-											oy * this.cal_cfg.upsample_vertical_n + v_dup_i,
-											ox * this.cal_cfg.upsample_horizontal_n + _i,
-											_j
-										)
-									);
-								end
-							end
-						end
-						
-						pool_window_ext_x += ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_horizontal_stride:1);
+						ofmap_sfc[_i] = this.create_abst_data();
 					end
+					
+					for(int unsigned py = 0;py < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_window_h:1);py++)
+					begin
+						for(int unsigned px = 0;px < ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_window_w:1);px++)
+						begin
+							int pool_x; // 池化点x坐标
+							int pool_y; // 池化点y坐标
+							
+							pool_x = (pool_window_ext_x >>> 8) + ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? int'(px):0);
+							pool_y = (pool_window_ext_y >>> 8) + ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? int'(py):0);
+							
+							if(pool_x >= 0 && pool_x < this.fmap_cfg.fmap_w && pool_y >= 0 && pool_y < this.fmap_cfg.fmap_h)
+							begin // 当前池化点不是填充点
+								DataBlk fmap_data_blk; // 特征图数据块
+								FmapSfc fmap_sfc; // 特征图表面
+								int unsigned fmap_build_rid;
+								int unsigned fmap_actual_rid;
+								
+								// 取出特征图表面行
+								fmap_build_rid = cg * this.fmap_cfg.fmap_h + pool_y;
+								fmap_actual_rid = fmap_this.rid_hash[fmap_build_rid];
+								fmap_data_blk = fmap_this.get_sub_data_blk(fmap_actual_rid);
+								
+								if(fmap_data_blk == null)
+								begin
+									`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc_row(cg = %0d, y = %0d, actual_rid = %0d)", cg, pool_y, fmap_actual_rid))
+									
+									break;
+								end
+								
+								// 取出特征图表面
+								fmap_data_blk = fmap_data_blk.get_sub_data_blk(pool_x);
+								
+								if(fmap_data_blk == null)
+								begin
+									`uvm_error(this.get_name(), $sformatf("cannot get fmap_sfc(x = %0d)", pool_x))
+									
+									break;
+								end
+								
+								if(!$cast(fmap_sfc, fmap_data_blk))
+								begin
+									`uvm_error(this.get_name(), "cannot cast fmap_data_blk -> fmap_sfc")
+									
+									break;
+								end
+								
+								// 检查特征图表面深度
+								if(fmap_sfc.get_size() != cgrp_depth)
+								begin
+									`uvm_error(this.get_name(), $sformatf("Expected fmap_sfc_depth is %0d, but it's %0d", cgrp_depth, fmap_sfc.get_size()))
+									
+									break;
+								end
+								
+								if(this.cal_cfg.pool_mode == POOL_MODE_MAX)
+								begin
+									if((px == 0) && (py == 0))
+									begin
+										for(int unsigned d = 0;d < cgrp_depth;d++)
+										begin
+											ofmap_sfc[d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[d] = fmap_sfc.data[d]
+										end
+									end
+									else
+									begin
+										for(int unsigned d = 0;d < cgrp_depth;d++)
+										begin
+											if(fmap_sfc.data[d].is_greater_than(ofmap_sfc[d])) // fmap_sfc.data[d] > ofmap_sfc[d]
+												ofmap_sfc[d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[d] = fmap_sfc.data[d]
+										end
+									end
+								end
+								else if(this.cal_cfg.pool_mode == POOL_MODE_AVG)
+								begin
+									for(int unsigned d = 0;d < cgrp_depth;d++)
+									begin
+										ofmap_sfc[d].add_assign(fmap_sfc.data[d]); // ofmap_sfc[d] += fmap_sfc.data[d]
+									end
+								end
+								else if(this.cal_cfg.pool_mode == POOL_MODE_UPSP)
+								begin
+									for(int unsigned d = 0;d < cgrp_depth;d++)
+									begin
+										ofmap_sfc[px * cgrp_depth + d].to_assign(fmap_sfc.data[d]); // ofmap_sfc[px * cgrp_depth + d] = fmap_sfc.data[d]
+									end
+								end
+							end
+							else
+							begin
+								if(this.cal_cfg.pool_mode == POOL_MODE_MAX)
+								begin
+									if((px == 0) && (py == 0))
+									begin
+										for(int unsigned d = 0;d < cgrp_depth;d++)
+										begin
+											ofmap_sfc[d].set_to_zero(); // ofmap_sfc[d] = 0
+										end
+									end
+									else
+									begin
+										for(int unsigned d = 0;d < cgrp_depth;d++)
+										begin
+											if(this.create_abst_data().is_greater_than(ofmap_sfc[d])) // 0 > ofmap_sfc[d]
+												ofmap_sfc[d].set_to_zero(); // ofmap_sfc[d] = 0
+										end
+									end
+								end
+								else if(this.cal_cfg.pool_mode == POOL_MODE_UPSP)
+								begin
+									for(int unsigned d = 0;d < cgrp_depth;d++)
+									begin
+										if(this.cal_cfg.non_zero_const_padding_mode)
+											ofmap_sfc[px * cgrp_depth + d].set_by_int16(this.cal_cfg.const_to_fill); // ofmap_sfc[px * cgrp_depth + d] = 常量
+										else
+											ofmap_sfc[px * cgrp_depth + d].set_to_zero(); // ofmap_sfc[px * cgrp_depth + d] = 0
+									end
+								end
+							end
+						end
+					end
+					
+					// 后乘加处理
+					if(this.cal_cfg.enable_post_mac)
+					begin
+						AbstractData param_a;
+						AbstractData param_b;
+						
+						param_a = create_abst_data();
+						param_b = create_abst_data();
+						
+						if(!this.cal_cfg.post_mac_is_a_eq_1)
+						begin
+							param_a.set_by_int32(this.cal_cfg.post_mac_param_a);
+							
+							foreach(ofmap_sfc[_i])
+							begin
+								ofmap_sfc[_i].mul_assign(param_a);
+							end
+						end
+						
+						if(!this.cal_cfg.post_mac_is_b_eq_0)
+						begin
+							param_b.set_by_int32(this.cal_cfg.post_mac_param_b);
+							
+							foreach(ofmap_sfc[_i])
+							begin
+								ofmap_sfc[_i].add_assign(param_b);
+							end
+						end
+					end
+					
+					// 添加输出表面数据
+					this.exp_res_adpt.put_data(ofmap_sfc);
+					
+					// 添加打印信息
+					for(int unsigned _i = 0;_i < cgrp_depth;_i++)
+					begin
+						this.exp_res_adpt.print_context.push_back($sformatf("oy%0d, ox%0d, sfc_i%0d", oy, ox, _i));
+					end
+					
+					pool_window_ext_x += ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? (this.cal_cfg.pool_horizontal_stride * 256):this.cal_cfg.get_upsample_horizontal_rate_in_int_format());
 				end
 				
-				pool_window_ext_y += ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? this.cal_cfg.pool_vertical_stride:1);
+				pool_window_ext_y += ((this.cal_cfg.pool_mode != POOL_MODE_UPSP) ? (this.cal_cfg.pool_vertical_stride * 256):this.cal_cfg.get_upsample_vertical_rate_in_int_format());
 			end
 		end
 	endfunction

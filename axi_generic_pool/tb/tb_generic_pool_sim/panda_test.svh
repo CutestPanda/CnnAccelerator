@@ -501,7 +501,7 @@ endclass
 
 特征图 -> w16 h16 c10
 特征图外填充 -> L0 R0 T0 B0
-上采样复制量 -> h2 v2
+h放大2倍, w放大2倍
 **/
 class generic_pool_sim_test_up_sample_0 extends generic_pool_sim_base_test;
 	
@@ -526,8 +526,8 @@ class generic_pool_sim_test_up_sample_0 extends generic_pool_sim_base_test;
 			pool_mode == POOL_MODE_UPSP;
 			calfmt == CAL_FMT_FP16;
 			
-			upsample_horizontal_n == 2;
-			upsample_vertical_n == 2;
+			upsample_horizontal_rate == 0.5;
+			upsample_vertical_rate == 0.5;
 			non_zero_const_padding_mode == 1'b0;
 			
 			external_padding_left == 0;
@@ -565,9 +565,9 @@ endclass
 
 使用配置参数#0
 
-特征图 -> w16 h16 c10
+特征图 -> w16 h16 c3
 特征图外填充 -> L0 R0 T0 B0
-上采样复制量 -> h2 v1
+h放大1.5倍, w放大1.5倍
 **/
 class generic_pool_sim_test_up_sample_1 extends generic_pool_sim_base_test;
 	
@@ -579,7 +579,7 @@ class generic_pool_sim_test_up_sample_1 extends generic_pool_sim_base_test;
 			
 			fmap_w == 16;
 			fmap_h == 16;
-			fmap_c == 10;
+			fmap_c == 3;
 			
 			ofmap_data_type == DATA_4_BYTE;
 		})
@@ -592,8 +592,8 @@ class generic_pool_sim_test_up_sample_1 extends generic_pool_sim_base_test;
 			pool_mode == POOL_MODE_UPSP;
 			calfmt == CAL_FMT_FP16;
 			
-			upsample_horizontal_n == 2;
-			upsample_vertical_n == 1;
+			upsample_horizontal_rate == 0.666666;
+			upsample_vertical_rate == 0.666666;
 			non_zero_const_padding_mode == 1'b0;
 			
 			external_padding_left == 0;
@@ -621,205 +621,6 @@ class generic_pool_sim_test_up_sample_1 extends generic_pool_sim_base_test;
 	
 	`tue_component_default_constructor(generic_pool_sim_test_up_sample_1)
 	`uvm_component_utils(generic_pool_sim_test_up_sample_1)
-	
-endclass
-
-/**
-上采样CASE#2:
-
-常规上采样测试
-
-使用配置参数#0
-
-特征图 -> w16 h16 c10
-特征图外填充 -> L0 R0 T0 B0
-上采样复制量 -> h1 v2
-**/
-class generic_pool_sim_test_up_sample_2 extends generic_pool_sim_base_test;
-	
-	virtual protected function void build_test_cfg();
-		this.fmap_cfg = FmapCfg::type_id::create();
-		if(!fmap_cfg.randomize() with{
-			fmap_mem_baseaddr == 1024;
-			ofmap_baseaddr == 512;
-			
-			fmap_w == 16;
-			fmap_h == 16;
-			fmap_c == 10;
-			
-			ofmap_data_type == DATA_4_BYTE;
-		})
-			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
-		
-		this.cal_cfg = PoolCalCfg::type_id::create();
-		if(!cal_cfg.randomize() with{
-			atomic_c == ATOMIC_C;
-			
-			pool_mode == POOL_MODE_UPSP;
-			calfmt == CAL_FMT_FP16;
-			
-			upsample_horizontal_n == 1;
-			upsample_vertical_n == 2;
-			non_zero_const_padding_mode == 1'b0;
-			
-			external_padding_left == 0;
-			external_padding_right == 0;
-			external_padding_top == 0;
-			external_padding_bottom == 0;
-			
-			enable_post_mac == 1'b0;
-		})
-			`uvm_error(this.get_name(), "cannot randomize cal_cfg!")
-		
-		this.buf_cfg = PoolBufferCfg::type_id::create();
-		if(!buf_cfg.randomize() with{
-			stream_data_width == STREAM_DATA_WIDTH;
-			fnl_res_data_width == FNL_RES_DATA_WIDTH;
-			
-			fmbufbankn == 16;
-			fmbufcoln == COLN_16;
-			fmbufrown == 512;
-			
-			mid_res_buf_row_n_bufferable == 8;
-		})
-			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
-	endfunction
-	
-	`tue_component_default_constructor(generic_pool_sim_test_up_sample_2)
-	`uvm_component_utils(generic_pool_sim_test_up_sample_2)
-	
-endclass
-
-/**
-填充CASE#0:
-
-零填充测试
-
-使用配置参数#0
-
-特征图 -> w16 h16 c10
-特征图外填充 -> L1 R1 T1 B1
-上采样复制量 -> h1 v1
-**/
-class generic_pool_sim_test_padding_0 extends generic_pool_sim_base_test;
-	
-	virtual protected function void build_test_cfg();
-		this.fmap_cfg = FmapCfg::type_id::create();
-		if(!fmap_cfg.randomize() with{
-			fmap_mem_baseaddr == 1024;
-			ofmap_baseaddr == 512;
-			
-			fmap_w == 16;
-			fmap_h == 16;
-			fmap_c == 10;
-			
-			ofmap_data_type == DATA_4_BYTE;
-		})
-			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
-		
-		this.cal_cfg = PoolCalCfg::type_id::create();
-		if(!cal_cfg.randomize() with{
-			atomic_c == ATOMIC_C;
-			
-			pool_mode == POOL_MODE_UPSP;
-			calfmt == CAL_FMT_FP16;
-			
-			upsample_horizontal_n == 1;
-			upsample_vertical_n == 1;
-			non_zero_const_padding_mode == 1'b0;
-			
-			external_padding_left == 1;
-			external_padding_right == 1;
-			external_padding_top == 1;
-			external_padding_bottom == 1;
-			
-			enable_post_mac == 1'b0;
-		})
-			`uvm_error(this.get_name(), "cannot randomize cal_cfg!")
-		
-		this.buf_cfg = PoolBufferCfg::type_id::create();
-		if(!buf_cfg.randomize() with{
-			stream_data_width == STREAM_DATA_WIDTH;
-			fnl_res_data_width == FNL_RES_DATA_WIDTH;
-			
-			fmbufbankn == 16;
-			fmbufcoln == COLN_16;
-			fmbufrown == 512;
-			
-			mid_res_buf_row_n_bufferable == 8;
-		})
-			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
-	endfunction
-	
-	`tue_component_default_constructor(generic_pool_sim_test_padding_0)
-	`uvm_component_utils(generic_pool_sim_test_padding_0)
-	
-endclass
-
-/**
-填充CASE#1:
-
-非零填充测试
-
-使用配置参数#0
-
-特征图 -> w16 h16 c10
-特征图外填充 -> L1 R1 T1 B1
-上采样复制量 -> h1 v1
-**/
-class generic_pool_sim_test_padding_1 extends generic_pool_sim_base_test;
-	
-	virtual protected function void build_test_cfg();
-		this.fmap_cfg = FmapCfg::type_id::create();
-		if(!fmap_cfg.randomize() with{
-			fmap_mem_baseaddr == 1024;
-			ofmap_baseaddr == 512;
-			
-			fmap_w == 16;
-			fmap_h == 16;
-			fmap_c == 10;
-			
-			ofmap_data_type == DATA_4_BYTE;
-		})
-			`uvm_error(this.get_name(), "cannot randomize fmap_cfg!")
-		
-		this.cal_cfg = PoolCalCfg::type_id::create();
-		if(!cal_cfg.randomize() with{
-			atomic_c == ATOMIC_C;
-			
-			pool_mode == POOL_MODE_UPSP;
-			calfmt == CAL_FMT_FP16;
-			
-			upsample_horizontal_n == 1;
-			upsample_vertical_n == 1;
-			non_zero_const_padding_mode == 1'b1;
-			const_to_fill == 16'h3c00;
-			
-			external_padding_left == 1;
-			external_padding_right == 1;
-			external_padding_top == 1;
-			external_padding_bottom == 1;
-			
-			enable_post_mac == 1'b0;
-		})
-			`uvm_error(this.get_name(), "cannot randomize cal_cfg!")
-		
-		this.buf_cfg = PoolBufferCfg::type_id::create();
-		if(!buf_cfg.randomize() with{
-			stream_data_width == STREAM_DATA_WIDTH;
-			fnl_res_data_width == FNL_RES_DATA_WIDTH;
-			
-			fmbufbankn == 16;
-			fmbufcoln == COLN_16;
-			fmbufrown == 512;
-			
-			mid_res_buf_row_n_bufferable == 8;
-		})
-			`uvm_error(this.get_name(), "cannot randomize buf_cfg!")
-	endfunction
-	
-	`tue_component_default_constructor(generic_pool_sim_test_padding_1)
-	`uvm_component_utils(generic_pool_sim_test_padding_1)
 	
 endclass
 

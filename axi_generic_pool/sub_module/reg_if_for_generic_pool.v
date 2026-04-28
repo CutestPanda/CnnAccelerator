@@ -88,10 +88,10 @@ SOFTWARE.
 	|          |         |15~8: 池化水平步长 - 1         |      RW      | 仅当支持池化时该字段存在         |
 	|          |         |23~16: 池化垂直步长 - 1        |      RW      | 仅当支持池化时该字段存在         |
 	--------------------------------------------------------------------------------------------------------
-	| cal_cfg1 | 0x84/33 |7~0: 池化窗口宽度或            |      RW      | 含义根据处理模式而定             |
-	|          |         |     上采样水平复制量 - 1      |              |                                  |
-	|          |         |15~8: 池化窗口高度或           |      RW      | 含义根据处理模式而定             |
-	|          |         |      上采样垂直复制量 - 1     |              |                                  |
+	| cal_cfg1 | 0x84/33 |7~0: "池化窗口宽度 - 1"或      |      RW      | 含义根据处理模式而定             |
+	|          |         |     上采样水平缩放系数        |              |                                  |
+	|          |         |15~8: "池化窗口高度 - 1"或     |      RW      | 含义根据处理模式而定             |
+	|          |         |      上采样垂直缩放系数       |              |                                  |
 	--------------------------------------------------------------------------------------------------------
 	| cal_cfg2 | 0x88/34 |0: 是否处于非0常量填充模式     |      RW      | 仅当支持非0常量填充模式时可写1   |
 	|          |         |31~16: 待填充的常量            |      RW      | 仅当支持非0常量填充模式时        |
@@ -146,7 +146,7 @@ AXI-Lite SLAVE
 BLK CTRL
 
 作者: 陈家耀
-日期: 2025/12/26
+日期: 2026/04/24
 ********************************************************************/
 
 
@@ -249,8 +249,8 @@ module reg_if_for_generic_pool #(
 	output wire[31:0] post_mac_param_a, // 参数A
 	output wire[31:0] post_mac_param_b, // 参数B
 	// [上采样参数]
-	output wire[7:0] upsample_horizontal_n, // 上采样水平复制量 - 1
-	output wire[7:0] upsample_vertical_n, // 上采样垂直复制量 - 1
+	output wire[7:0] upsample_horizontal_rate, // 上采样水平缩放系数
+	output wire[7:0] upsample_vertical_rate, // 上采样垂直缩放系数
 	// [非0常量填充]
 	output wire non_zero_const_padding_mode, // 是否处于非0常量填充模式
 	output wire[15:0] const_to_fill, // 待填充的常量
@@ -653,10 +653,10 @@ module reg_if_for_generic_pool #(
 	|          |         |15~8: 池化水平步长 - 1         |      RW      | 仅当支持池化时该字段存在         |
 	|          |         |23~16: 池化垂直步长 - 1        |      RW      | 仅当支持池化时该字段存在         |
 	--------------------------------------------------------------------------------------------------------
-	| cal_cfg1 | 0x84/33 |7~0: 池化窗口宽度或            |      RW      | 含义根据处理模式而定             |
-	|          |         |     上采样水平复制量 - 1      |              |                                  |
-	|          |         |15~8: 池化窗口高度或           |      RW      | 含义根据处理模式而定             |
-	|          |         |      上采样垂直复制量 - 1     |              |                                  |
+	| cal_cfg1 | 0x84/33 |7~0: "池化窗口宽度 - 1"或      |      RW      | 含义根据处理模式而定             |
+	|          |         |     上采样水平缩放系数        |              |                                  |
+	|          |         |15~8: "池化窗口高度 - 1"或     |      RW      | 含义根据处理模式而定             |
+	|          |         |      上采样垂直缩放系数       |              |                                  |
 	--------------------------------------------------------------------------------------------------------
 	| cal_cfg2 | 0x88/34 |0: 是否处于非0常量填充模式     |      RW      | 仅当支持非0常量填充模式时可写1   |
 	|          |         |31~16: 待填充的常量            |      RW      | 仅当支持非0常量填充模式时        |
@@ -676,8 +676,8 @@ module reg_if_for_generic_pool #(
 	reg[3:0] calfmt_r; // 运算数据格式
 	reg[7:0] pool_horizontal_stride_r; // 池化水平步长 - 1
 	reg[7:0] pool_vertical_stride_r; // 池化垂直步长 - 1
-	reg[7:0] pool_window_w_or_upsample_horizontal_n_r; // 池化窗口宽度或上采样水平复制量 - 1
-	reg[7:0] pool_window_h_or_upsample_vertical_n_r; // 池化窗口高度或上采样垂直复制量 - 1
+	reg[7:0] pool_window_w_or_upsample_horizontal_rate_r; // "池化窗口宽度 - 1"或上采样水平缩放系数
+	reg[7:0] pool_window_h_or_upsample_vertical_rate_r; // "池化窗口高度 - 1"或上采样垂直缩放系数
 	reg is_non_zero_const_padding_mode_r; // 是否处于非0常量填充模式
 	reg[15:0] const_to_fill_r; // 待填充的常量
 	reg post_mac_is_a_eq_1_r; // 后乘加处理的参数A的实际值是否为1
@@ -706,11 +706,11 @@ module reg_if_for_generic_pool #(
 			3'bxxx;
 	assign pool_window_w = 
 		(MAX_POOL_SUPPORTED | AVG_POOL_SUPPORTED) ? 
-			pool_window_w_or_upsample_horizontal_n_r:
+			pool_window_w_or_upsample_horizontal_rate_r:
 			8'dx;
 	assign pool_window_h = 
 		(MAX_POOL_SUPPORTED | AVG_POOL_SUPPORTED) ? 
-			pool_window_h_or_upsample_vertical_n_r:
+			pool_window_h_or_upsample_vertical_rate_r:
 			8'dx;
 	assign post_mac_fixed_point_quat_accrc = 
 		(POST_MAC_SUPPORTED & (INT8_SUPPORTED | INT16_SUPPORTED)) ? 
@@ -732,13 +732,13 @@ module reg_if_for_generic_pool #(
 		POST_MAC_SUPPORTED ? 
 			post_mac_param_b_r:
 			32'hxxxxxxxx;
-	assign upsample_horizontal_n = 
+	assign upsample_horizontal_rate = 
 		UP_SAMPLE_SUPPORTED ? 
-			pool_window_w_or_upsample_horizontal_n_r:
+			pool_window_w_or_upsample_horizontal_rate_r:
 			8'dx;
-	assign upsample_vertical_n = 
+	assign upsample_vertical_rate = 
 		UP_SAMPLE_SUPPORTED ? 
-			pool_window_h_or_upsample_vertical_n_r:
+			pool_window_h_or_upsample_vertical_rate_r:
 			8'dx;
 	assign non_zero_const_padding_mode = 
 		NON_ZERO_CONST_PADDING_SUPPORTED ? 
@@ -795,18 +795,18 @@ module reg_if_for_generic_pool #(
 			pool_vertical_stride_r <= # SIM_DELAY regs_din[23:16];
 	end
 	
-	// 池化窗口宽度或上采样水平复制量 - 1
+	// "池化窗口宽度 - 1"或上采样水平缩放系数
 	always @(posedge aclk)
 	begin
 		if(regs_en & regs_wen & (regs_addr == 33))
-			pool_window_w_or_upsample_horizontal_n_r <= # SIM_DELAY regs_din[7:0];
+			pool_window_w_or_upsample_horizontal_rate_r <= # SIM_DELAY regs_din[7:0];
 	end
 	
-	// 池化窗口高度或上采样垂直复制量 - 1
+	// "池化窗口高度 - 1"或上采样垂直缩放系数
 	always @(posedge aclk)
 	begin
 		if(regs_en & regs_wen & (regs_addr == 33))
-			pool_window_h_or_upsample_vertical_n_r <= # SIM_DELAY regs_din[15:8];
+			pool_window_h_or_upsample_vertical_rate_r <= # SIM_DELAY regs_din[15:8];
 	end
 	
 	// 是否处于非0常量填充模式
@@ -1095,7 +1095,7 @@ module reg_if_for_generic_pool #(
 				32: regs_dout <= # SIM_DELAY 
 					{8'd0, pool_vertical_stride_r[7:0], pool_horizontal_stride_r[7:0], calfmt_r[3:0], proc_mode_r[3:0]};
 				33: regs_dout <= # SIM_DELAY 
-					{8'd0, 8'd0, pool_window_h_or_upsample_vertical_n_r[7:0], pool_window_w_or_upsample_horizontal_n_r[7:0]};
+					{8'd0, 8'd0, pool_window_h_or_upsample_vertical_rate_r[7:0], pool_window_w_or_upsample_horizontal_rate_r[7:0]};
 				34: regs_dout <= # SIM_DELAY {const_to_fill_r[15:0], 8'd0, 7'd0, is_non_zero_const_padding_mode_r};
 				35: regs_dout <= # SIM_DELAY 
 					{8'd0, 8'd0, 3'd0, post_mac_fixed_point_quat_accrc_r[4:0], 6'd0, post_mac_is_b_eq_0_r, post_mac_is_a_eq_1_r};

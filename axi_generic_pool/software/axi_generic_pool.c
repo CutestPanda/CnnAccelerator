@@ -10,6 +10,7 @@
         2025.12.22 1.10 为最大池化增加非0常量填充模式
         2025.12.26 1.11 修改ctrl0寄存器
         2026.01.05 1.12 支持中间结果缓存时钟倍率
+        2026.04.28 1.20 将上采样从简单复制修改为最近邻采集
 ************************************************************************************************************************/
 
 #include "axi_generic_pool.h"
@@ -485,8 +486,8 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 	ifmap_size = ((uint32_t)fmap_cfg->ifmap_w) * ((uint32_t)fmap_cfg->ifmap_h);
 	ext_fmap_w = fmap_cfg->ifmap_w + (uint16_t)fmap_cfg->external_padding_left + (uint16_t)fmap_cfg->external_padding_right;
 	ext_fmap_h = fmap_cfg->ifmap_h + (uint16_t)fmap_cfg->external_padding_top + (uint16_t)fmap_cfg->external_padding_bottom;
-	ofmap_w = ext_fmap_w * cal_cfg->upsample_horizontal_n;
-	ofmap_h = ext_fmap_h * cal_cfg->upsample_vertical_n;
+	ofmap_w = (uint16_t)ceilf((float)ext_fmap_w * (256.0f / (float)cal_cfg->upsample_horizontal_rate));
+	ofmap_h = (uint16_t)ceilf((float)ext_fmap_h * (256.0f / (float)cal_cfg->upsample_vertical_rate));
 
 	if(fmap_cfg->external_padding_left > 7 || fmap_cfg->external_padding_top > 7){
 		return -1;
@@ -549,8 +550,8 @@ int axi_generic_pool_cfg_in_up_sample_mode(
 		(((uint32_t)PROC_MODE_UPSP) << 0) |
 		(((uint32_t)cal_cfg->cal_fmt) << 4);
 	handler->reg_region_cal_cfg->cal_cfg1 =
-		(((uint32_t)(cal_cfg->upsample_horizontal_n - 1)) << 0) |
-		(((uint32_t)(cal_cfg->upsample_vertical_n - 1)) << 8);
+		(((uint32_t)cal_cfg->upsample_horizontal_rate) << 0) |
+		(((uint32_t)cal_cfg->upsample_vertical_rate) << 8);
 	handler->reg_region_cal_cfg->cal_cfg2 =
 		(((uint32_t)cal_cfg->non_zero_const_padding_mode) << 0) |
 		(((uint32_t)cal_cfg->const_to_fill) << 16);

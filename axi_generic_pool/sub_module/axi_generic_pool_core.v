@@ -45,7 +45,7 @@ AXI-Lite SLAVE
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2026/01/11
+日期: 2026/04/28
 ********************************************************************/
 
 
@@ -294,8 +294,8 @@ module axi_generic_pool_core #(
 	wire[31:0] post_mac_param_a; // 参数A
 	wire[31:0] post_mac_param_b; // 参数B
 	// [上采样参数]
-	wire[7:0] upsample_horizontal_n; // 上采样水平复制量 - 1
-	wire[7:0] upsample_vertical_n; // 上采样垂直复制量 - 1
+	wire[7:0] upsample_horizontal_rate; // 上采样水平缩放系数
+	wire[7:0] upsample_vertical_rate; // 上采样垂直缩放系数
 	// [非0常量填充]
 	wire non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	wire[15:0] const_to_fill; // 待填充的常量
@@ -411,8 +411,8 @@ module axi_generic_pool_core #(
 		.post_mac_is_b_eq_0(post_mac_is_b_eq_0),
 		.post_mac_param_a(post_mac_param_a),
 		.post_mac_param_b(post_mac_param_b),
-		.upsample_horizontal_n(upsample_horizontal_n),
-		.upsample_vertical_n(upsample_vertical_n),
+		.upsample_horizontal_rate(upsample_horizontal_rate),
+		.upsample_vertical_rate(upsample_vertical_rate),
 		.non_zero_const_padding_mode(non_zero_const_padding_mode),
 		.const_to_fill(const_to_fill),
 		.ifmap_baseaddr(ifmap_baseaddr),
@@ -443,18 +443,9 @@ module axi_generic_pool_core #(
 	
 	assign ofmap_w_async_clk_considered = (ofmap_w * MID_RES_BUF_CLK_RATE) | (MID_RES_BUF_CLK_RATE - 1);
 	
-	// 提示: 上采样水平复制量(upsample_horizontal_n)恒为1时, 始终为"输出特征图宽度 - 1"(ofmap_w)即可
-	assign ofmap_w_for_adapter = 
-		(pool_mode == POOL_MODE_UPSP) ? 
-			ext_ifmap_w:
-			ofmap_w;
-	// 提示: 上采样垂直复制量(upsample_vertical_n)恒为1时, 始终为"输出特征图高度 - 1"(ofmap_h)即可
-	assign ofmap_h_for_sfc_row_access = 
-		(pool_mode == POOL_MODE_UPSP) ? 
-			ext_ifmap_h:
-			ofmap_h;
-	assign bank_n_foreach_ofmap_row = 
-		(ofmap_w_async_clk_considered[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
+	assign ofmap_w_for_adapter = ofmap_w;
+	assign ofmap_h_for_sfc_row_access = ofmap_h;
+	assign bank_n_foreach_ofmap_row = (ofmap_w_async_clk_considered[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	assign post_mac_calfmt = 
 		(calfmt == CAL_FMT_INT8)  ? POST_MAC_CAL_FMT_INT16:
 		(calfmt == CAL_FMT_INT16) ? POST_MAC_CAL_FMT_INT32:
@@ -555,6 +546,7 @@ module axi_generic_pool_core #(
 		.pool_mode(pool_mode),
 		.pool_vertical_stride(pool_vertical_stride),
 		.pool_window_h(pool_window_h),
+		.upsample_vertical_rate(upsample_vertical_rate),
 		.fmap_baseaddr(ifmap_baseaddr),
 		.is_16bit_data(is_16bit_data),
 		.ifmap_w(ifmap_w),
@@ -638,8 +630,7 @@ module axi_generic_pool_core #(
 		.ifmap_w(ifmap_w),
 		.external_padding_left(external_padding_left),
 		.ofmap_w(ofmap_w_for_adapter),
-		.upsample_horizontal_n(upsample_horizontal_n),
-		.upsample_vertical_n(upsample_vertical_n),
+		.upsample_horizontal_rate(upsample_horizontal_rate),
 		.non_zero_const_padding_mode(non_zero_const_padding_mode),
 		.const_to_fill(const_to_fill),
 		

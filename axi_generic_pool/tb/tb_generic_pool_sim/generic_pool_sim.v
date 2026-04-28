@@ -75,8 +75,8 @@ module generic_pool_sim #(
 	input wire[31:0] post_mac_param_a, // 参数A
 	input wire[31:0] post_mac_param_b, // 参数B
 	// [上采样参数]
-	input wire[7:0] upsample_horizontal_n, // 上采样水平复制量 - 1
-	input wire[7:0] upsample_vertical_n, // 上采样垂直复制量 - 1
+	input wire[7:0] upsample_horizontal_rate, // 上采样水平缩放系数
+	input wire[7:0] upsample_vertical_rate, // 上采样垂直缩放系数
 	input wire non_zero_const_padding_mode, // 是否处于非0常量填充模式
 	input wire[15:0] const_to_fill, // 待填充的常量
 	// [特征图参数]
@@ -186,16 +186,8 @@ module generic_pool_sim #(
 	wire[3:0] bank_n_foreach_ofmap_row; // 每个输出特征图行所占用的中间结果缓存MEM个数
 	wire[1:0] post_mac_calfmt; // 后乘加处理的数据格式
 	
-	// 提示: 上采样水平复制量(upsample_horizontal_n)恒为1时, 始终为"输出特征图宽度 - 1"(ofmap_w)即可
-	assign ofmap_w_for_adapter = 
-		(pool_mode == POOL_MODE_UPSP) ? 
-			ext_ifmap_w:
-			ofmap_w;
-	// 提示: 上采样垂直复制量(upsample_vertical_n)恒为1时, 始终为"输出特征图高度 - 1"(ofmap_h)即可
-	assign ofmap_h_for_sfc_row_access = 
-		(pool_mode == POOL_MODE_UPSP) ? 
-			ext_ifmap_h:
-			ofmap_h;
+	assign ofmap_w_for_adapter = ofmap_w;
+	assign ofmap_h_for_sfc_row_access = ofmap_h;
 	assign bank_n_foreach_ofmap_row = 
 		(ofmap_w[15:clogb2(RBUF_DEPTH)] | 4'd0) + 1'b1;
 	assign post_mac_calfmt = 
@@ -302,6 +294,7 @@ module generic_pool_sim #(
 		.pool_mode(pool_mode),
 		.pool_vertical_stride(pool_vertical_stride),
 		.pool_window_h(pool_window_h),
+		.upsample_vertical_rate(upsample_vertical_rate),
 		.fmap_baseaddr(ifmap_baseaddr),
 		.is_16bit_data(is_16bit_data),
 		.ifmap_w(ifmap_w),
@@ -675,8 +668,7 @@ module generic_pool_sim #(
 		.ifmap_w(ifmap_w),
 		.external_padding_left(external_padding_left),
 		.ofmap_w(ofmap_w_for_adapter),
-		.upsample_horizontal_n(upsample_horizontal_n),
-		.upsample_vertical_n(upsample_vertical_n),
+		.upsample_horizontal_rate(upsample_horizontal_rate),
 		.non_zero_const_padding_mode(non_zero_const_padding_mode),
 		.const_to_fill(const_to_fill),
 		
@@ -922,7 +914,7 @@ module generic_pool_sim #(
 		
 		.calfmt(post_mac_calfmt),
 		.use_bn_unit(1'b1),
-		.use_act_unit(1'b0),
+		.act_func_type(3'b111),
 		.bn_fixed_point_quat_accrc(post_mac_fixed_point_quat_accrc),
 		.bn_is_a_eq_1(post_mac_is_a_eq_1),
 		.bn_is_b_eq_0(post_mac_is_b_eq_0),

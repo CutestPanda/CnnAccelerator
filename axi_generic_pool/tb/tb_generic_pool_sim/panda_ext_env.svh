@@ -186,8 +186,8 @@ class GenericPoolSimTestEnv extends panda_env #(
 		
 		if(this.cal_cfg.pool_mode == POOL_MODE_UPSP)
 		begin
-			ofmap_w = ext_fmap_w * this.cal_cfg.upsample_horizontal_n;
-			ofmap_h = ext_fmap_h * this.cal_cfg.upsample_vertical_n;
+			ofmap_w = uint'(real'(ext_fmap_w) / this.cal_cfg.upsample_horizontal_rate);
+			ofmap_h = uint'(real'(ext_fmap_h) / this.cal_cfg.upsample_vertical_rate);
 		end
 		else
 		begin
@@ -229,10 +229,10 @@ class GenericPoolSimTestEnv extends panda_env #(
 				this.cal_cfg.post_mac_param_b:
 				32'dx;
 		
-		this.cfg_vif.master_cb.upsample_horizontal_n <= 
-			(this.cal_cfg.pool_mode == POOL_MODE_UPSP) ? (this.cal_cfg.upsample_horizontal_n-1):8'dx;
-		this.cfg_vif.master_cb.upsample_vertical_n <= 
-			(this.cal_cfg.pool_mode == POOL_MODE_UPSP) ? (this.cal_cfg.upsample_vertical_n-1):8'dx;
+		this.cfg_vif.master_cb.upsample_horizontal_rate <= 
+			(this.cal_cfg.pool_mode == POOL_MODE_UPSP) ? this.cal_cfg.get_upsample_horizontal_rate_in_ufixed_format():8'dx;
+		this.cfg_vif.master_cb.upsample_vertical_rate <= 
+			(this.cal_cfg.pool_mode == POOL_MODE_UPSP) ? this.cal_cfg.get_upsample_vertical_rate_in_ufixed_format():8'dx;
 		this.cfg_vif.master_cb.non_zero_const_padding_mode <= 
 			(this.cal_cfg.pool_mode == POOL_MODE_UPSP) ? this.cal_cfg.non_zero_const_padding_mode:1'bx;
 		this.cfg_vif.master_cb.const_to_fill <= 

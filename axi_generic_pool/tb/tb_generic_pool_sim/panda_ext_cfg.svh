@@ -197,8 +197,8 @@ class PoolCalCfg extends tue_configuration;
 	rand int unsigned pool_window_w; // 池化窗口宽度
 	rand int unsigned pool_window_h; // 池化窗口高度
 	
-	rand int unsigned upsample_horizontal_n; // 上采样水平复制量
-	rand int unsigned upsample_vertical_n; // 上采样垂直复制量
+	rand real upsample_horizontal_rate; // 上采样水平缩放系数
+	rand real upsample_vertical_rate; // 上采样垂直缩放系数
 	rand bit non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	rand bit[15:0] const_to_fill; // 待填充的常量
 	
@@ -216,7 +216,7 @@ class PoolCalCfg extends tue_configuration;
 	
 	constraint c_default_cst{
 		solve pool_mode before pool_horizontal_stride, pool_vertical_stride, pool_window_w, pool_window_h;
-		solve pool_mode before upsample_horizontal_n, upsample_vertical_n, non_zero_const_padding_mode, const_to_fill;
+		solve pool_mode before upsample_horizontal_rate, upsample_vertical_rate, non_zero_const_padding_mode, const_to_fill;
 		
 		atomic_c inside {1, 2, 4, 8, 16, 32};
 		
@@ -232,8 +232,8 @@ class PoolCalCfg extends tue_configuration;
 		}
 		
 		if(pool_mode == POOL_MODE_UPSP){
-			upsample_horizontal_n inside {[1:256]};
-			upsample_vertical_n inside {[1:256]};
+			(upsample_horizontal_rate >= 0.0625) && (upsample_horizontal_rate <= 1.0);
+			(upsample_vertical_rate >= 0.0625) && (upsample_vertical_rate <= 1.0);
 		}
 		
 		external_padding_left <= 7;
@@ -247,6 +247,30 @@ class PoolCalCfg extends tue_configuration;
 			}
 		}
 	}
+	
+	function bit[7:0] get_upsample_horizontal_rate_in_ufixed_format();
+		automatic int unsigned r = $ceil(this.upsample_horizontal_rate * 256.0);
+		
+		return r[7:0];
+	endfunction
+	
+	function bit[7:0] get_upsample_vertical_rate_in_ufixed_format();
+		automatic int unsigned r = $ceil(this.upsample_vertical_rate * 256.0);
+		
+		return r[7:0];
+	endfunction
+	
+	function int get_upsample_horizontal_rate_in_int_format();
+		automatic int r = $ceil(this.upsample_horizontal_rate * 256.0);
+		
+		return r;
+	endfunction
+	
+	function int get_upsample_vertical_rate_in_int_format();
+		automatic int r = $ceil(this.upsample_vertical_rate * 256.0);
+		
+		return r;
+	endfunction
 	
 	virtual function void do_print(uvm_printer printer);
 		super.do_print(printer);
@@ -263,7 +287,7 @@ class PoolCalCfg extends tue_configuration;
 		end
 		else
 		begin
-			printer.print_string("upsample_dup_n", $sformatf("h%0d, v%0d", this.upsample_horizontal_n, this.upsample_vertical_n));
+			printer.print_string("upsample_rate", $sformatf("h%0f, v%0f", this.upsample_horizontal_rate, this.upsample_vertical_rate));
 			printer.print_int("non_zero_const_padding_mode", this.non_zero_const_padding_mode, 1, UVM_BIN);
 			
 			if(this.non_zero_const_padding_mode)
@@ -305,8 +329,8 @@ class PoolCalCfg extends tue_configuration;
 		`uvm_field_int(pool_window_w, UVM_DEFAULT | UVM_NOPRINT)
 		`uvm_field_int(pool_window_h, UVM_DEFAULT | UVM_NOPRINT)
 		
-		`uvm_field_int(upsample_horizontal_n, UVM_DEFAULT | UVM_NOPRINT)
-		`uvm_field_int(upsample_vertical_n, UVM_DEFAULT | UVM_NOPRINT)
+		`uvm_field_real(upsample_horizontal_rate, UVM_DEFAULT | UVM_NOPRINT)
+		`uvm_field_real(upsample_vertical_rate, UVM_DEFAULT | UVM_NOPRINT)
 		`uvm_field_int(non_zero_const_padding_mode, UVM_DEFAULT | UVM_NOPRINT)
 		`uvm_field_int(const_to_fill, UVM_DEFAULT | UVM_NOPRINT)
 		

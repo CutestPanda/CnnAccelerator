@@ -25,8 +25,8 @@ interface generic_pool_sim_cfg_if(
 	logic[31:0] post_mac_param_a; // 参数A
 	logic[31:0] post_mac_param_b; // 参数B
 	// [上采样参数]
-	logic[7:0] upsample_horizontal_n; // 上采样水平复制量 - 1
-	logic[7:0] upsample_vertical_n; // 上采样垂直复制量 - 1
+	logic[7:0] upsample_horizontal_rate; // 上采样水平缩放系数
+	logic[7:0] upsample_vertical_rate; // 上采样垂直缩放系数
 	logic non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	logic[15:0] const_to_fill; // 待填充的常量
 	// [特征图参数]
@@ -65,8 +65,8 @@ interface generic_pool_sim_cfg_if(
 		output post_mac_is_b_eq_0;
 		output post_mac_param_a;
 		output post_mac_param_b;
-		output upsample_horizontal_n;
-		output upsample_vertical_n;
+		output upsample_horizontal_rate;
+		output upsample_vertical_rate;
 		output non_zero_const_padding_mode;
 		output const_to_fill;
 		output ifmap_baseaddr;

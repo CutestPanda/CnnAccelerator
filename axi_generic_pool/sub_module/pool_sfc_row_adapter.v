@@ -32,7 +32,10 @@ SOFTWARE.
 
 表面行组处理过程 -> 
 	最大/平均池化模式时, 池化窗口y方向{表面行[池化窗口x方向(输出点)]}
-	上采样模式时, 垂直复制{表面行[输出点(水平复制)]}
+	上采样模式时, 表面行[水平方向上采样(输出点)]
+
+上采样水平缩放系数 = 源图片宽度 / 目标图片宽度, 定点数, 量化精度 = 8
+上采样源图片x坐标 = floor(上采样目标图片x坐标 * 上采样水平缩放系数)
 
 注意：
 平均池化模式时, 不输出填充行的填充数据, 忽略填充行的信息
@@ -42,7 +45,7 @@ SOFTWARE.
 AXIS MASTER/SLAVE
 
 作者: 陈家耀
-日期: 2025/12/24
+日期: 2026/04/24
 ********************************************************************/
 
 
@@ -68,8 +71,7 @@ module pool_sfc_row_adapter #(
 	input wire[2:0] external_padding_left, // 左部外填充数
 	input wire[15:0] ofmap_w, // 输出特征图宽度 - 1
 	// [上采样参数]
-	input wire[7:0] upsample_horizontal_n, // 上采样水平复制量 - 1
-	input wire[7:0] upsample_vertical_n, // 上采样垂直复制量 - 1
+	input wire[7:0] upsample_horizontal_rate, // 上采样水平缩放系数
 	// [非0常量填充]
 	input wire non_zero_const_padding_mode, // 是否处于非0常量填充模式
 	input wire[15:0] const_to_fill, // 待填充的常量
@@ -137,6 +139,11 @@ module pool_sfc_row_adapter #(
 	localparam integer SFC_ROW_INFO_FIFO_DATA_IS_FIRST_SOLID_ROW_IN_POOL_RGN_SID = 3;
 	localparam integer SFC_ROW_INFO_FIFO_DATA_IS_LAST_SOLID_ROW_IN_POOL_RGN_SID = 4;
 	localparam integer SFC_ROW_INFO_FIFO_DATA_SFC_ROW_DEPTH_SID = 5;
+	
+	/** 运行时参数 **/
+	wire[3:0] pool_horizontal_stride_actual; // 池化水平步长
+	
+	assign pool_horizontal_stride_actual = pool_horizontal_stride + 1'b1;
 	
 	/** 池化表面行信息fifo **/
 	// [写端口]
@@ -275,17 +282,17 @@ module pool_sfc_row_adapter #(
 	wire on_incr_random_rd_tr_credit; // 增加1个表面行随机读事务积分(指示)
 	wire on_consume_random_rd_tr_credit; // 消耗1个表面行随机读事务积分(指示)
 	// [计数器组]
-	reg signed[15:0] pre_buf_logic_x; // 逻辑x坐标(计数器)
+	reg signed[23:0] pre_buf_logic_x; // 逻辑x坐标(计数器)
 	reg[15:0] pre_buf_out_x; // 输出x坐标(计数器)
-	reg[7:0] post_buf_pool_window_x_or_ups_vtc_rpc_n; // 池化窗口x坐标或上采样垂直复制次数(计数器)
+	reg[7:0] pre_buf_pool_window_x; // 池化窗口x坐标(计数器)
 	// [下一计数值]
-	wire[7:0] post_buf_pool_window_x_nxt; // 下一池化窗口x坐标(计数值)
+	wire[7:0] pre_buf_pool_window_x_nxt; // 下一池化窗口x坐标(计数值)
 	// [标志组]
 	wire pre_buf_is_at_out_row_end; // 处于输出行尾(标志)
 	wire pre_buf_is_at_pool_window_last_col; // 处于池化窗口的最后1列(标志)
-	wire pre_buf_is_last_ups_vtc_rpc; // 上采样最后1次垂直复制(标志)
 	wire pre_buf_is_last_round_for_random_rd; // 最后1轮随机读(标志)
 	wire pre_buf_is_padding_pt; // 是否填充点(标志)
+	wire pre_buf_is_nxt_pt_entring_padding_rgn; // 下1个输出点进入右部填充域(标志)
 	// [控制信号]
 	wire pre_buf_on_mov_to_nxt_pt; // 移动到下1个输出点(指示)
 	
@@ -293,15 +300,8 @@ module pool_sfc_row_adapter #(
 		aclken & en_adapter & has_random_rd_tr_credit & (~pre_buf_is_padding_pt);
 	assign fm_random_rd_cmd_fifo_din = {
 		pre_buf_is_last_round_for_random_rd & 
-		(
-			pre_buf_is_at_out_row_end | 
-			// 下1个输出点进入右部填充域
-			(
-				(~pre_buf_logic_x[15]) & 
-				((pre_buf_logic_x[14:0] + (((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_horizontal_stride) | 15'd0) + 1'b1) > ifmap_w[14:0])
-			)
-		), // 标志本次读请求待读取的最后1个表面(1bit)
-		{1'b0, pre_buf_logic_x[14:0]} // 表面号(16bit)
+		(pre_buf_is_at_out_row_end | pre_buf_is_nxt_pt_entring_padding_rgn), // 标志本次读请求待读取的最后1个表面(1bit)
+		{1'b0, pre_buf_logic_x[22:8]} // 表面号(16bit)
 	};
 	
 	assign on_incr_random_rd_tr_credit = 
@@ -310,18 +310,29 @@ module pool_sfc_row_adapter #(
 	assign on_consume_random_rd_tr_credit = 
 		pre_buf_on_mov_to_nxt_pt & pre_buf_is_last_round_for_random_rd & pre_buf_is_at_out_row_end;
 	
-	assign post_buf_pool_window_x_nxt = 
+	assign pre_buf_pool_window_x_nxt = 
 		((~en_adapter) | (pool_mode == POOL_MODE_UPSP) | pre_buf_is_at_pool_window_last_col) ? 
 			8'd0:
-			(post_buf_pool_window_x_or_ups_vtc_rpc_n + 1'b1);
+			(pre_buf_pool_window_x + 1'b1);
 	
 	assign pre_buf_is_at_out_row_end = pre_buf_out_x == ofmap_w;
-	assign pre_buf_is_at_pool_window_last_col = post_buf_pool_window_x_or_ups_vtc_rpc_n == pool_window_w;
-	assign pre_buf_is_last_ups_vtc_rpc = post_buf_pool_window_x_or_ups_vtc_rpc_n == upsample_vertical_n;
+	assign pre_buf_is_at_pool_window_last_col = pre_buf_pool_window_x == pool_window_w;
 	assign pre_buf_is_last_round_for_random_rd = 
 		(((pool_mode == POOL_MODE_MAX) | (pool_mode == POOL_MODE_AVG)) & pre_buf_is_at_pool_window_last_col) | 
-		((pool_mode == POOL_MODE_UPSP) & pre_buf_is_last_ups_vtc_rpc);
-	assign pre_buf_is_padding_pt = pre_buf_logic_x[15] | (pre_buf_logic_x[14:0] > ifmap_w[14:0]);
+		(pool_mode == POOL_MODE_UPSP);
+	assign pre_buf_is_padding_pt = pre_buf_logic_x[23] | (pre_buf_logic_x[22:8] > ifmap_w[14:0]);
+	assign pre_buf_is_nxt_pt_entring_padding_rgn = 
+		(~pre_buf_logic_x[23]) & 
+		(
+			(
+				pre_buf_logic_x[22:0] + 
+				(
+					(pool_mode == POOL_MODE_UPSP) ? 
+						{4'd0, upsample_horizontal_rate}:
+						{pool_horizontal_stride_actual, 8'd0}
+				)
+			) > {ifmap_w[14:0], 8'hff}
+		);
 	
 	assign pre_buf_on_mov_to_nxt_pt = 
 		aclken & en_adapter & has_random_rd_tr_credit & 
@@ -363,19 +374,32 @@ module pool_sfc_row_adapter #(
 			pre_buf_logic_x <= # SIM_DELAY 
 				/*
 				((~en_adapter) | pre_buf_is_at_out_row_end) ? 
-					((~(external_padding_left | 16'd0)) + (post_buf_pool_window_x_nxt | 16'd0) + 1'b1): // -左部外填充数 + 下一池化窗口x坐标
-					(pre_buf_logic_x + (((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_horizontal_stride) | 16'd0) + 1'b1) // += 池化水平步长, ++
+					// -左部外填充数 + 下一池化窗口x坐标
+					{(~(external_padding_left | 16'd0)) + (pre_buf_pool_window_x_nxt | 16'd0) + 1'b1, 8'd0}:
+					// += 上采样水平缩放系数, += 池化水平步长
+					(
+						pre_buf_logic_x + 
+						(
+							(pool_mode == POOL_MODE_UPSP) ? 
+								{16'd0, upsample_horizontal_rate}:
+								{12'd0, pool_horizontal_stride_actual, 8'd0}
+						)
+					)
 				*/
 				(
 					((~en_adapter) | pre_buf_is_at_out_row_end) ? 
-						(~(external_padding_left | 16'd0)):
+						{(~(external_padding_left | 16'd0)), 8'd0}:
 						pre_buf_logic_x
 				) + 
 				(
 					((~en_adapter) | pre_buf_is_at_out_row_end) ? 
-						(post_buf_pool_window_x_nxt | 16'd0):
-						(((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_horizontal_stride) | 16'd0)
-				) + 1'b1;
+						{(pre_buf_pool_window_x_nxt | 16'd0) + 1'b1, 8'd0}:
+						(
+							(pool_mode == POOL_MODE_UPSP) ? 
+								{16'd0, upsample_horizontal_rate}:
+								{12'd0, pool_horizontal_stride_actual, 8'd0}
+						)
+				);
 			
 			pre_buf_out_x <= # SIM_DELAY 
 				((~en_adapter) | pre_buf_is_at_out_row_end) ? 
@@ -384,33 +408,36 @@ module pool_sfc_row_adapter #(
 		end
 	end
 	
-	// 池化窗口x坐标或上采样垂直复制次数(计数器)
+	// 池化窗口x坐标(计数器)
 	always @(posedge aclk)
 	begin
 		if(
 			aclken & 
-			((~en_adapter) | (pre_buf_on_mov_to_nxt_pt & pre_buf_is_at_out_row_end))
+			(
+				(~en_adapter) | 
+				(
+					((pool_mode == POOL_MODE_MAX) | (pool_mode == POOL_MODE_AVG)) & 
+					pre_buf_on_mov_to_nxt_pt & pre_buf_is_at_out_row_end
+				)
+			)
 		)
-			post_buf_pool_window_x_or_ups_vtc_rpc_n <= # SIM_DELAY 
+			pre_buf_pool_window_x <= # SIM_DELAY 
 				((~en_adapter) | pre_buf_is_last_round_for_random_rd) ? 
 					8'd0:
-					(post_buf_pool_window_x_or_ups_vtc_rpc_n + 1'b1);
+					(pre_buf_pool_window_x + 1'b1);
 	end
 	
 	/** 生成转换后的特征图表面行 **/
 	// [计数器组]
-	reg signed[15:0] post_buf_logic_x; // 逻辑x坐标(计数器)
+	reg signed[23:0] post_buf_logic_x; // 逻辑x坐标(计数器)
 	reg[15:0] post_buf_out_x; // 输出x坐标(计数器)
-	reg[7:0] post_buf_pool_window_x_or_ups_hrzt_rpc_n; // 池化窗口x坐标或上采样水平复制次数(计数器)
-	reg[7:0] post_buf_ups_vtc_rpc_n; // 上采样垂直复制次数(计数器)
+	reg[7:0] post_buf_pool_window_x; // 池化窗口x坐标(计数器)
 	// [下一计数值]
-	wire[7:0] post_buf_pool_window_x_or_ups_hrzt_rpc_n_nxt; // 下一池化窗口x坐标或上采样水平复制次数(计数值)
+	wire[7:0] post_buf_pool_window_x_nxt; // 下一池化窗口x坐标(计数值)
 	// [标志组]
 	wire post_buf_is_at_out_row_end; // 处于输出行尾(标志)
 	wire post_buf_is_at_pool_window_first_col; // 处于池化窗口的第1列(标志)
 	wire post_buf_is_at_pool_window_last_col; // 处于池化窗口的最后1列(标志)
-	wire post_buf_is_last_ups_hrzt_rpc; // 上采样最后1次水平复制(标志)
-	wire post_buf_is_last_ups_vtc_rpc; // 上采样最后1次垂直复制(标志)
 	wire post_buf_is_padding_pt; // 是否填充点(标志)
 	// [控制信号]
 	wire post_buf_on_mov_to_nxt_pt; // 移动到下1个输出点(指示)
@@ -418,14 +445,13 @@ module pool_sfc_row_adapter #(
 	assign s_adapter_fm_axis_ready = 
 		aclken & en_adapter & 
 		sfc_row_info_fifo_empty_n & 
-		(~sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID]) & (~post_buf_is_padding_pt) & // 不属于填充点
-		((pool_mode != POOL_MODE_UPSP) | post_buf_is_last_ups_hrzt_rpc) & // 上采样模式下需要作水平复制
+		(~(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt)) & // 不属于填充点
 		m_adapter_fm_axis_ready;
 	
 	assign m_adapter_fm_axis_data = 
 		(
-			non_zero_const_padding_mode & 
-			(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt)
+			non_zero_const_padding_mode & // 处于非0常量填充模式
+			(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt) // 属于填充点
 		) ? 
 			{ATOMIC_C{const_to_fill}}: // 填充非0常量
 			s_adapter_fm_axis_data;
@@ -445,31 +471,37 @@ module pool_sfc_row_adapter #(
 	assign m_adapter_fm_axis_user[0] = 
 		(
 			(pool_mode == POOL_MODE_AVG) & 
-			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_LAST_SOLID_ROW_IN_POOL_RGN_SID] & post_buf_is_at_pool_window_last_col
+			// 处于池化窗口的最后1个非填充行, 且处于池化窗口的最后1列
+			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_LAST_SOLID_ROW_IN_POOL_RGN_SID] & 
+			post_buf_is_at_pool_window_last_col
 		) | 
 		(
 			(pool_mode == POOL_MODE_MAX) & 
-			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_LAST_ROW_IN_POOL_RGN_SID] & post_buf_is_at_pool_window_last_col
+			// 处于池化窗口的最后1行, 且处于池化窗口的最后1列
+			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_LAST_ROW_IN_POOL_RGN_SID] & 
+			post_buf_is_at_pool_window_last_col
 		) | 
 		(pool_mode == POOL_MODE_UPSP);
 	// 初始化池化结果(标志)
 	assign m_adapter_fm_axis_user[1] = 
 		(
 			(pool_mode == POOL_MODE_AVG) & 
-			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_FIRST_SOLID_ROW_IN_POOL_RGN_SID] & post_buf_is_at_pool_window_first_col
+			// 处于池化窗口的第1个非填充行, 且处于池化窗口的第1列
+			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_FIRST_SOLID_ROW_IN_POOL_RGN_SID] & 
+			post_buf_is_at_pool_window_first_col
 		) | 
 		(
 			(pool_mode == POOL_MODE_MAX) & 
-			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_FIRST_ROW_IN_POOL_RGN_SID] & post_buf_is_at_pool_window_first_col
+			// 处于池化窗口的第1行, 且处于池化窗口的第1列
+			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_FIRST_ROW_IN_POOL_RGN_SID] & 
+			post_buf_is_at_pool_window_first_col
 		) | 
 		(pool_mode == POOL_MODE_UPSP);
 	// 本表面全0(标志)
 	assign m_adapter_fm_axis_user[2] = 
-		(~non_zero_const_padding_mode) & // 处于非0常量填充模式
+		(~non_zero_const_padding_mode) & // 不处于非0常量填充模式
 		(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt); // 属于填充点
-	assign m_adapter_fm_axis_last = 
-		((pool_mode != POOL_MODE_UPSP) | post_buf_is_last_ups_hrzt_rpc) & // 上采样模式下需要作水平复制
-		post_buf_is_at_out_row_end;
+	assign m_adapter_fm_axis_last = post_buf_is_at_out_row_end;
 	assign m_adapter_fm_axis_valid = 
 		aclken & en_adapter & 
 		sfc_row_info_fifo_empty_n & 
@@ -486,7 +518,10 @@ module pool_sfc_row_adapter #(
 			)
 		)) & 
 		// 对于非填充点, 需要从前置特征图缓存中得到数据
-		(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt | s_adapter_fm_axis_valid);
+		(
+			(sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID] | post_buf_is_padding_pt) | 
+			s_adapter_fm_axis_valid
+		);
 	
 	assign sfc_row_info_fifo_ren = 
 		aclken & en_adapter & 
@@ -503,32 +538,31 @@ module pool_sfc_row_adapter #(
 			) | 
 			(
 				post_buf_on_mov_to_nxt_pt & 
-				((pool_mode != POOL_MODE_UPSP) | post_buf_is_last_ups_hrzt_rpc) & // 上采样模式下需要作水平复制
 				post_buf_is_at_out_row_end & 
 				(
-					(((pool_mode == POOL_MODE_AVG) | (pool_mode == POOL_MODE_MAX)) & post_buf_is_at_pool_window_last_col) | 
-					((pool_mode == POOL_MODE_UPSP) & post_buf_is_last_ups_vtc_rpc)
+					(
+						((pool_mode == POOL_MODE_AVG) | (pool_mode == POOL_MODE_MAX)) & 
+						post_buf_is_at_pool_window_last_col
+					) | // 池化模式时, 处于池化窗口的最后1列才取走池化表面行信息
+					(pool_mode == POOL_MODE_UPSP)
 				)
 			)
 		);
 	
-	assign post_buf_pool_window_x_or_ups_hrzt_rpc_n_nxt = 
-		(
-			((pool_mode == POOL_MODE_UPSP) & post_buf_is_last_ups_hrzt_rpc) | 
-			(((pool_mode == POOL_MODE_AVG) | (pool_mode == POOL_MODE_MAX)) & post_buf_is_at_pool_window_last_col)
-		) ? 
+	assign post_buf_pool_window_x_nxt = 
+		((~en_adapter) | (pool_mode == POOL_MODE_UPSP) | post_buf_is_at_pool_window_last_col) ? 
 			8'd0:
-			(post_buf_pool_window_x_or_ups_hrzt_rpc_n + 1'b1);
+			(post_buf_pool_window_x + 1'b1);
 	
 	assign post_buf_is_at_out_row_end = post_buf_out_x == ofmap_w;
-	assign post_buf_is_at_pool_window_first_col = post_buf_pool_window_x_or_ups_hrzt_rpc_n == 8'd0;
+	assign post_buf_is_at_pool_window_first_col = post_buf_pool_window_x == 8'd0;
 	assign post_buf_is_at_pool_window_last_col = 
-		// 最大池化模式时, 无论池化窗口宽度是多少, 填充行只都只输出1轮
-		((pool_mode == POOL_MODE_MAX) & sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID]) | 
-		(post_buf_pool_window_x_or_ups_hrzt_rpc_n == pool_window_w);
-	assign post_buf_is_last_ups_hrzt_rpc = post_buf_pool_window_x_or_ups_hrzt_rpc_n == upsample_horizontal_n;
-	assign post_buf_is_last_ups_vtc_rpc = post_buf_ups_vtc_rpc_n == upsample_vertical_n;
-	assign post_buf_is_padding_pt = post_buf_logic_x[15] | (post_buf_logic_x[14:0] > ifmap_w[14:0]);
+		(
+			(pool_mode == POOL_MODE_MAX) & 
+			sfc_row_info_fifo_dout[SFC_ROW_INFO_FIFO_DATA_IS_PADDING_ROW_SID]
+		) | // 最大池化模式时, 无论池化窗口宽度是多少, 填充行只都只输出1轮
+		(post_buf_pool_window_x == pool_window_w);
+	assign post_buf_is_padding_pt = post_buf_logic_x[23] | (post_buf_logic_x[22:8] > ifmap_w[14:0]);
 	
 	assign post_buf_on_mov_to_nxt_pt = m_adapter_fm_axis_valid & m_adapter_fm_axis_ready;
 	
@@ -537,36 +571,38 @@ module pool_sfc_row_adapter #(
 	begin
 		if(
 			aclken & 
-			(
-				(~en_adapter) | 
-				(post_buf_on_mov_to_nxt_pt & ((pool_mode != POOL_MODE_UPSP) | post_buf_is_last_ups_hrzt_rpc))
-			)
+			((~en_adapter) | post_buf_on_mov_to_nxt_pt)
 		)
 		begin
 			post_buf_logic_x <= # SIM_DELAY 
 				/*
-				en_adapter ? 
+				((~en_adapter) | post_buf_is_at_out_row_end) ? 
+					// -左部外填充数 + 下一池化窗口x坐标
+					{(~(external_padding_left | 16'd0)) + (post_buf_pool_window_x_nxt | 16'd0) + 1'b1, 8'd0}:
+					// += 上采样水平缩放系数, += 池化水平步长
 					(
-						post_buf_is_at_out_row_end ? 
-							((~(external_padding_left | 16'd0)) + (post_buf_pool_window_x_or_ups_hrzt_rpc_n_nxt | 16'd0) + 1'b1): // -左部外填充数 + 下一池化窗口x坐标
-							(post_buf_logic_x + (((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_horizontal_stride) | 16'd0) + 1'b1) // += 池化水平步长, ++
-					):
-					((~(external_padding_left | 16'd0)) + 1'b1) // -左部外填充数
+						post_buf_logic_x + 
+						(
+							(pool_mode == POOL_MODE_UPSP) ? 
+								{16'd0, upsample_horizontal_rate}:
+								{12'd0, pool_horizontal_stride_actual, 8'd0}
+						)
+					)
 				*/
 				(
 					((~en_adapter) | post_buf_is_at_out_row_end) ? 
-						(~(external_padding_left | 16'd0)):
+						{~(external_padding_left | 16'd0), 8'd0}:
 						post_buf_logic_x
 				) + 
 				(
-					en_adapter ? 
+					((~en_adapter) | post_buf_is_at_out_row_end) ? 
+						{(post_buf_pool_window_x_nxt | 16'd0) + 1'b1, 8'd0}:
 						(
-							post_buf_is_at_out_row_end ? 
-								(post_buf_pool_window_x_or_ups_hrzt_rpc_n_nxt | 16'd0):
-								(((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_horizontal_stride) | 16'd0)
-						):
-						16'd0
-				) + 1'b1;
+							(pool_mode == POOL_MODE_UPSP) ? 
+								{16'd0, upsample_horizontal_rate}:
+								{12'd0, pool_horizontal_stride_actual, 8'd0}
+						)
+				);
 			
 			post_buf_out_x <= # SIM_DELAY 
 				((~en_adapter) | post_buf_is_at_out_row_end) ? 
@@ -575,36 +611,20 @@ module pool_sfc_row_adapter #(
 		end
 	end
 	
-	// 池化窗口x坐标或上采样水平复制次数(计数器)
+	// 池化窗口x坐标(计数器)
 	always @(posedge aclk)
 	begin
 		if(
 			aclken & 
 			(
 				(~en_adapter) | 
-				(post_buf_on_mov_to_nxt_pt & ((pool_mode == POOL_MODE_UPSP) | post_buf_is_at_out_row_end))
+				(post_buf_on_mov_to_nxt_pt & post_buf_is_at_out_row_end)
 			)
 		)
-			post_buf_pool_window_x_or_ups_hrzt_rpc_n <= # SIM_DELAY 
+			post_buf_pool_window_x <= # SIM_DELAY 
 				en_adapter ? 
-					post_buf_pool_window_x_or_ups_hrzt_rpc_n_nxt:
+					post_buf_pool_window_x_nxt:
 					8'd0;
-	end
-	
-	// 上采样垂直复制次数(计数器)
-	always @(posedge aclk)
-	begin
-		if(
-			aclken & 
-			(
-				(~en_adapter) | 
-				((pool_mode == POOL_MODE_UPSP) & post_buf_on_mov_to_nxt_pt & post_buf_is_last_ups_hrzt_rpc & post_buf_is_at_out_row_end)
-			)
-		)
-			post_buf_ups_vtc_rpc_n <= # SIM_DELAY 
-				((~en_adapter) | post_buf_is_last_ups_vtc_rpc) ? 
-					8'd0:
-					(post_buf_ups_vtc_rpc_n + 1'b1);
 	end
 	
 endmodule

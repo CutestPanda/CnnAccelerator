@@ -104,8 +104,8 @@ module tb_generic_pool_sim();
 	wire[31:0] post_mac_param_a; // 参数A
 	wire[31:0] post_mac_param_b; // 参数B
 	// [上采样参数]
-	wire[7:0] upsample_horizontal_n; // 上采样水平复制量 - 1
-	wire[7:0] upsample_vertical_n; // 上采样垂直复制量 - 1
+	wire[7:0] upsample_horizontal_rate; // 上采样水平缩放系数
+	wire[7:0] upsample_vertical_rate; // 上采样垂直缩放系数
 	wire non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	wire[15:0] const_to_fill; // 待填充的常量
 	// [特征图参数]
@@ -175,8 +175,8 @@ module tb_generic_pool_sim();
 	assign post_mac_is_b_eq_0 = cfg_if.post_mac_is_b_eq_0;
 	assign post_mac_param_a = cfg_if.post_mac_param_a;
 	assign post_mac_param_b = cfg_if.post_mac_param_b;
-	assign upsample_horizontal_n = cfg_if.upsample_horizontal_n;
-	assign upsample_vertical_n = cfg_if.upsample_vertical_n;
+	assign upsample_horizontal_rate = cfg_if.upsample_horizontal_rate;
+	assign upsample_vertical_rate = cfg_if.upsample_vertical_rate;
 	assign non_zero_const_padding_mode = cfg_if.non_zero_const_padding_mode;
 	assign const_to_fill = cfg_if.const_to_fill;
 	assign ifmap_baseaddr = cfg_if.ifmap_baseaddr;
@@ -267,8 +267,8 @@ module tb_generic_pool_sim();
 		.post_mac_is_b_eq_0(post_mac_is_b_eq_0),
 		.post_mac_param_a(post_mac_param_a),
 		.post_mac_param_b(post_mac_param_b),
-		.upsample_horizontal_n(upsample_horizontal_n),
-		.upsample_vertical_n(upsample_vertical_n),
+		.upsample_horizontal_rate(upsample_horizontal_rate),
+		.upsample_vertical_rate(upsample_vertical_rate),
 		.non_zero_const_padding_mode(non_zero_const_padding_mode),
 		.const_to_fill(const_to_fill),
 		.ifmap_baseaddr(ifmap_baseaddr),

@@ -36,6 +36,9 @@ SOFTWARE.
 注意：
 输入特征图大小 = 输入特征图宽度 * 输入特征图高度
 
+上采样垂直缩放系数 = 源图片高度 / 目标图片高度, 定点数, 量化精度 = 8
+上采样源图片y坐标 = floor(上采样目标图片y坐标 * 上采样垂直缩放系数)
+
 "特征图表面行读请求"仅对非填充行产生, 而"池化表面行信息"对每1行都产生
 
 "特征图表面行读请求"里的"起始表面编号"和"待读取的表面个数 - 1"是不可用的
@@ -46,7 +49,7 @@ AXIS MASTER
 REQ/GRANT
 
 作者: 陈家耀
-日期: 2025/12/11
+日期: 2026/04/24
 ********************************************************************/
 
 
@@ -64,6 +67,7 @@ module pool_sfc_row_buffer_access_ctrl #(
 	input wire[1:0] pool_mode, // 池化模式
 	input wire[2:0] pool_vertical_stride, // 池化垂直步长 - 1
 	input wire[7:0] pool_window_h, // 池化窗口高度 - 1
+	input wire[7:0] upsample_vertical_rate, // 上采样垂直缩放系数
 	// [特征图参数]
 	input wire[31:0] fmap_baseaddr, // 特征图数据基地址
 	input wire is_16bit_data, // 是否16位特征图数据
@@ -219,7 +223,6 @@ module pool_sfc_row_buffer_access_ctrl #(
 			end
 			
 			actual_ifmap_w <= # SIM_DELAY ifmap_w + 1'b1;
-			
 			actual_ifmap_size <= # SIM_DELAY ifmap_size + 1'b1;
 		end
 	end
@@ -276,7 +279,7 @@ module pool_sfc_row_buffer_access_ctrl #(
 	// [计数器组]
 	reg signed[15:0] pool_rgn_base_rid; // 池化域起始行号(计数器)
 	reg[7:0] pool_rgn_ofs_rid; // 池化域偏移行号(计数器)
-	reg signed[15:0] pool_rid; // 待池化行号(计数器)
+	reg signed[23:0] pool_rid; // 待池化行号(计数器)(Q = 8)
 	reg[15:0] ofmap_rid; // 输出特征图行号(计数器)
 	reg[15:0] chn_n_swept; // 扫过的通道数(计数器)
 	// [计数器组的下一值]
@@ -300,7 +303,7 @@ module pool_sfc_row_buffer_access_ctrl #(
 	wire on_mov_to_nxt_row; // 移动到下1行(指示)
 	reg on_cal_pool_rgn_baseaddr; // 计算池化域基地址(指示)
 	
-	assign mul1_op_a = {{2{pool_rid[15]}}, pool_rid[15:0]};
+	assign mul1_op_a = {2'b00, 1'b0, pool_rid[22:8]};
 	assign mul1_op_b = {1'b0, cur_row_bytes_n[23:0]};
 	assign mul1_tid = MUL1_TID_CONST;
 	assign mul1_req = 
@@ -324,7 +327,7 @@ module pool_sfc_row_buffer_access_ctrl #(
 		(
 			(blk_idle | is_arrive_last_out_row) ? 
 				(~(external_padding_top | 16'd0)):
-				(((pool_mode == POOL_MODE_UPSP) ? 3'd0:pool_vertical_stride) | 16'd0)
+				(pool_vertical_stride | 16'd0)
 		) + 1'b1;
 	assign chn_n_swept_nxt = 
 		chn_n_swept + ATOMIC_C;
@@ -338,16 +341,37 @@ module pool_sfc_row_buffer_access_ctrl #(
 			row_bytes_n_of_last_slice:
 			(((actual_ifmap_w * ATOMIC_C) | 24'd0) << (is_16bit_data ? 1:0));
 	
-	assign is_first_solid_row_in_pool_rgn = (pool_rid == 16'd0) | ((~is_pool_row_in_padding_rgn) & is_arrive_first_row_in_pool_rgn);
-	assign is_last_solid_row_in_pool_rgn = (pool_rid == ifmap_h) | ((~is_pool_row_in_padding_rgn) & is_arrive_last_row_in_pool_rgn);
-	assign is_arrive_last_row_in_pool_rgn = (pool_mode == POOL_MODE_UPSP) | (pool_rgn_ofs_rid == pool_window_h);
-	assign is_arrive_last_out_row = ofmap_rid == ofmap_h;
-	assign is_arrive_last_slice = chn_n_swept_nxt > fmap_chn_n;
+	assign is_first_solid_row_in_pool_rgn = 
+		// 说明: 上采样模式下, "是否池化域内的第1个非填充表面行"标志不可用
+		(pool_rid[23:8] == 16'd0) | ((~is_pool_row_in_padding_rgn) & is_arrive_first_row_in_pool_rgn);
+	assign is_last_solid_row_in_pool_rgn = 
+		// 说明: 上采样模式下, "是否池化域内的最后1个非填充表面行"标志不可用
+		(pool_rid[23:8] == ifmap_h) | ((~is_pool_row_in_padding_rgn) & is_arrive_last_row_in_pool_rgn);
+	assign is_arrive_last_row_in_pool_rgn = 
+		(pool_mode == POOL_MODE_UPSP) | (pool_rgn_ofs_rid == pool_window_h);
+	assign is_arrive_last_out_row = 
+		ofmap_rid == ofmap_h;
+	assign is_arrive_last_slice = 
+		chn_n_swept_nxt > fmap_chn_n;
 	assign is_pool_row_in_padding_rgn = 
-		pool_rid[15] | // 待池化行号 < 0
-		(pool_rid[14:0] > ifmap_h[14:0]); // 待池化行号 >= 输入特征图高度
+		pool_rid[23] | // 待池化行号 < 0
+		(pool_rid[22:8] > ifmap_h[14:0]); // 待池化行号 >= 输入特征图高度
 	
-	// 池化域起始行号(计数器), 输出特征图行号(计数器)
+	// 池化域起始行号(计数器)
+	always @(posedge aclk)
+	begin
+		if(
+			aclken & 
+			((pool_mode == POOL_MODE_MAX) | (pool_mode == POOL_MODE_AVG)) & 
+			(blk_idle | (on_mov_to_nxt_row & is_arrive_last_row_in_pool_rgn))
+		)
+		begin
+			pool_rgn_base_rid <= # SIM_DELAY 
+				pool_rgn_base_rid_nxt;
+		end
+	end
+	
+	// 输出特征图行号(计数器)
 	always @(posedge aclk)
 	begin
 		if(
@@ -355,9 +379,6 @@ module pool_sfc_row_buffer_access_ctrl #(
 			(blk_idle | (on_mov_to_nxt_row & is_arrive_last_row_in_pool_rgn))
 		)
 		begin
-			pool_rgn_base_rid <= # SIM_DELAY 
-				pool_rgn_base_rid_nxt;
-			
 			ofmap_rid <= # SIM_DELAY 
 				(blk_idle | is_arrive_last_out_row) ? 
 					16'd0:
@@ -380,8 +401,12 @@ module pool_sfc_row_buffer_access_ctrl #(
 			
 			pool_rid <= # SIM_DELAY 
 				(blk_idle | is_arrive_last_row_in_pool_rgn) ? 
-					pool_rgn_base_rid_nxt:
-					(pool_rid + 1'b1);
+					(
+						((pool_mode == POOL_MODE_UPSP) & (~(blk_idle | is_arrive_last_out_row))) ? 
+							(pool_rid + {16'd0, upsample_vertical_rate}):
+							{pool_rgn_base_rid_nxt, 8'd0}
+					):
+					(pool_rid + {16'd1, 8'd0});
 		end
 	end
 	
@@ -511,7 +536,7 @@ module pool_sfc_row_buffer_access_ctrl #(
 	assign m_fm_rd_req_axis_data = {
 		6'bxxxxxx, // 保留(6bit)
 		pool_row_rd_req_gen_sts[POOL_ROW_RD_REQ_GEN_STS_ONEHOT_RST_BUF], // 是否重置缓存(1bit)
-		pool_rid[11:0], // 实际表面行号(12bit)
+		pool_rid[19:8], // 实际表面行号(12bit)
 		12'hxxx, // 起始表面编号(12bit)
 		12'hxxx, // 待读取的表面个数 - 1(12bit)
 		pool_row_addr, // 表面行基地址(32bit)

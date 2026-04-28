@@ -10,11 +10,13 @@
         2025.12.22 1.10 为最大池化增加非0常量填充模式
         2025.12.26 1.11 修改ctrl0寄存器
         2026.01.05 1.12 支持中间结果缓存时钟倍率
+        2026.04.28 1.20 将上采样从简单复制修改为最近邻采集
 ************************************************************************************************************************/
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -200,8 +202,8 @@ typedef struct{
 typedef struct{
 	AxiGnrPoolCalFmt cal_fmt; // 运算数据格式
 
-	uint8_t upsample_horizontal_n; // 上采样水平复制量
-	uint8_t upsample_vertical_n; // 上采样垂直复制量
+	uint8_t upsample_horizontal_rate; // 上采样水平缩放系数
+	uint8_t upsample_vertical_rate; // 上采样垂直缩放系数
 
 	uint8_t non_zero_const_padding_mode; // 是否处于非0常量填充模式
 	uint16_t const_to_fill; // 待填充的常量
